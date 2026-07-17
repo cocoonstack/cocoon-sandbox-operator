@@ -1,0 +1,143 @@
+---
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: cocoon-sandbox-system
+
+---
+
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: cocoon-sandbox-operator
+  namespace: cocoon-sandbox-system
+  labels:
+    app: cocoon-sandbox-operator
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cocoon-sandbox-operator
+subjects:
+- kind: ServiceAccount
+  name: cocoon-sandbox-operator
+  namespace: cocoon-sandbox-system
+roleRef:
+  kind: ClusterRole
+  name: cocoon-sandbox-operator
+  apiGroup: rbac.authorization.k8s.io
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cocoon-sandbox-operator
+  namespace: cocoon-sandbox-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resourceNames:
+  - cocoon-sandbox-webhook-certs
+  resources:
+  - secrets
+  verbs:
+  - get
+  - patch
+  - update
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cocoon-sandbox-operator
+  namespace: cocoon-sandbox-system
+subjects:
+- kind: ServiceAccount
+  name: cocoon-sandbox-operator
+  namespace: cocoon-sandbox-system
+roleRef:
+  kind: Role
+  name: cocoon-sandbox-operator
+  apiGroup: rbac.authorization.k8s.io
+
+---
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: cocoon-sandbox-operator
+  namespace: cocoon-sandbox-system
+  labels:
+    app: cocoon-sandbox-operator
+spec:
+  selector:
+    app: cocoon-sandbox-operator
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: metrics
+    protocol: TCP
+
+---
+
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: cocoon-sandbox-operator
+  namespace: cocoon-sandbox-system
+  labels:
+    app: cocoon-sandbox-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cocoon-sandbox-operator
+  template:
+    metadata:
+      labels:
+        app: cocoon-sandbox-operator
+    spec:
+      serviceAccountName: cocoon-sandbox-operator
+      containers:
+      - name: cocoon-sandbox-operator
+        image: ko://github.com/cocoonstack/cocoon-sandbox-operator/cmd/cocoon-sandbox-operator # placeholder value, replaced by deployment scripts
+        args:
+        - --leader-elect=true
+        - --extensions=true
+        - --default-runtime=standard
+        ports:
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        - name: healthz
+          containerPort: 8081
+          protocol: TCP
+        - name: webhook
+          containerPort: 9443
+          protocol: TCP
+
+---
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: cocoon-sandbox-webhook-service
+  namespace: cocoon-sandbox-system
+spec:
+  selector:
+    app: cocoon-sandbox-operator
+  ports:
+  - name: webhook
+    port: 443
+    targetPort: 9443
+    protocol: TCP

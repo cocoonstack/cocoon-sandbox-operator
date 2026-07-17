@@ -1,0 +1,45 @@
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: cocoon-sandbox-operator
+  namespace: cocoon-sandbox-system
+  labels:
+    app: cocoon-sandbox-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cocoon-sandbox-operator
+  template:
+    metadata:
+      labels:
+        app: cocoon-sandbox-operator
+    spec:
+      serviceAccountName: cocoon-sandbox-operator
+      containers:
+      - name: cocoon-sandbox-operator
+        image: ko://github.com/cocoonstack/cocoon-sandbox-operator/cmd/cocoon-sandbox-operator # placeholder value, replaced by deployment scripts
+        args:
+        - "--leader-elect=true"
+        - "--extensions=true"
+        - "--default-runtime=standard"
+        ports:
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        - name: healthz
+          containerPort: 8081
+          protocol: TCP
+        - name: webhook
+          containerPort: 9443
+          protocol: TCP
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/sandbox-config
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: cocoon-sandbox-config
+          optional: true

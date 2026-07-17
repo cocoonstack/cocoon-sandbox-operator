@@ -1,0 +1,16 @@
+apiVersion: agents.x-k8s.io/v1beta1
+kind: Sandbox
+metadata:
+  name: standard-kubelet-example
+spec:
+  podTemplate:
+    metadata:
+      annotations:
+        sandbox.cocoonstack.io/runtime: standard
+    spec:
+      runtimeClassName: kata
+      containers:
+        - name: agent
+          image: ghcr.io/cocoonstack/sandbox/agent:latest
+  service: true
+  shutdownPolicy: Delete

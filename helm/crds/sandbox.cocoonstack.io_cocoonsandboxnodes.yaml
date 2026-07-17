@@ -1,0 +1,146 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: cocoonsandboxnodes.sandbox.cocoonstack.io
+spec:
+  group: sandbox.cocoonstack.io
+  names:
+    kind: CocoonSandboxNode
+    listKind: CocoonSandboxNodeList
+    plural: cocoonsandboxnodes
+    singular: cocoonsandboxnode
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.address
+      name: Address
+      type: string
+    - jsonPath: .status.claimed
+      name: Claimed
+      type: integer
+    name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              address:
+                type: string
+              apiTokenSecretRef:
+                properties:
+                  key:
+                    type: string
+                  name:
+                    default: ""
+                    type: string
+                  optional:
+                    type: boolean
+                required:
+                - key
+                type: object
+                x-kubernetes-map-type: atomic
+              nodeName:
+                type: string
+            required:
+            - address
+            - nodeName
+            type: object
+          status:
+            properties:
+              address:
+                type: string
+              claimed:
+                format: int32
+                type: integer
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              hibernated:
+                format: int32
+                type: integer
+              peers:
+                items:
+                  type: string
+                type: array
+              pools:
+                items:
+                  properties:
+                    golden:
+                      type: boolean
+                    net:
+                      enum:
+                      - none
+                      - egress
+                      type: string
+                    refilling:
+                      format: int32
+                      type: integer
+                    size:
+                      enum:
+                      - small
+                      - medium
+                      - large
+                      type: string
+                    target:
+                      format: int32
+                      type: integer
+                    template:
+                      type: string
+                    warm:
+                      format: int32
+                      type: integer
+                  required:
+                  - template
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
