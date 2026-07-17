@@ -183,6 +183,222 @@ Summary (full methodology in [PERFORMANCE.md](PERFORMANCE.md), measured on a liv
   claims in **0.2–0.7 ms** (its own published benchmarks) for use cases that can
   adopt its non-Kubernetes data plane.
 
+## Scaling design: decentralized sandbox scheduling on Kubernetes semantics
+
+Modal's ["1M concurrent sandboxes"](https://modal.com/blog/scaling-to-1-million-concurrent-sandboxes-in-seconds)
+post argues Kubernetes cannot reach that scale: scheduling is `O(n×p)` and
+serialized, every Pod causes multiple etcd writes, etcd is not shardable within a
+keyspace, and kubelet heartbeats impose an `O(nodes)` write floor. Their answer is
+to **leave Kubernetes entirely** — a fleet of stateless schedulers over in-memory
+worker state published to a Redis stream, direct scheduler→worker RPC, and *no
+datastore on the sandbox-creation critical path*.
+
+Their diagnosis is correct. Their conclusion is not the only option. What Modal
+actually removed is a **centralized transaction path**, not API semantics — and
+Kubernetes already separates those two things in its own design: kubelet **static
+Pods** (the node acts first, the apiserver records after), the **coordination.k8s.io
+Lease** (a dedicated tiny object for heartbeats instead of full Node writes), and
+the **metrics.k8s.io aggregation layer** (a virtual resource served by
+scatter-gathering live node state, with *zero* etcd storage). Our thesis:
+
+> **Keep Kubernetes as the record-of-intent and policy plane; push the
+> transaction plane down to the node — behind CRDs, RBAC, and watch, so
+> `kubectl get sandboxes` never stops working.**
+
+We stage this as four layers. **L0 is shipped.** L1 is implemented in this repo.
+L2/L3 have full designs, Go interface skeletons, and migration paths here;
+their complete implementations are follow-up work.
+
+```mermaid
+flowchart LR
+    subgraph L0["L0 — API hygiene (shipped)"]
+        L0a["cache-fed reads<br/>diff-before-write<br/>LIST off etcd"]
+    end
+    subgraph L1["L1 — ownership transfer (this repo)"]
+        L1a["claim = single PATCH<br/>O(nodes) pool status<br/>per-pool sharded operator"]
+    end
+    subgraph L2["L2 — node-local claim gateway"]
+        L2a["DaemonSet → sandboxd<br/>sub-ms delivery<br/>async Bound record"]
+    end
+    subgraph L3["L3 — aggregated apiserver"]
+        L3a["scatter-gather node inventory<br/>etcd stores intent only<br/>O(sandboxes)→O(pools+nodes)"]
+    end
+    L0 --> L1 --> L2 --> L3
+```
+
+### L0 — API hygiene (shipped)
+
+The prerequisite, delivered in the `vk-cocoon` provider (2026-07-17): every
+periodic read is served from a node-scoped informer cache, every write is
+diffed first, and no control-loop `LIST` hits etcd (list at `ResourceVersion=0`,
+or a field-selected node-local lister). This is the qualifier — without it any
+scale test wedges the apiserver first. Measured on an idle virtual-kubelet node
+afterward: **0.2 req/s, zero LIST** (lease renew + node-status patch only). The
+root cause it fixed: Kubernetes APF prices `LIST` seats by the **total object
+count** of the resource, so at 2500 pods even a tiny per-node list goes
+max-width and saturates a dedicated priority level — client QPS caps cannot fix
+a seat-seconds problem, only removing the lists can.
+
+### L1 — claim is ownership transfer, not scheduling (implemented)
+
+A warm claim is not a create. The Pod is already scheduled, bound, image-pulled,
+and booted; a `SandboxClaim` only needs to **transfer ownership** of one
+pre-warmed `Sandbox` — the exact semantics Kubernetes already ships for
+`PersistentVolumeClaim → PersistentVolume` binding (`Phase: Bound`). Nothing on
+the claim path needs the scheduler, kubelet bind, or image pull.
+
+**Mechanisms**
+
+1. **Claim fast-path — one select, one PATCH.** Pick one `warm ∧ unclaimed`
+   Sandbox via a label index and adopt it with a single optimistic PATCH guarded
+   by its `resourceVersion`. On conflict (two claims raced the same Sandbox), the
+   loser simply tries the next candidate — no requeue, no exponential backoff, no
+   adoption-cache-lag requeue. This collapses the claim to Modal's "two network
+   hops and one cheap CPU op," expressed entirely in Kubernetes objects.
+2. **Pool status is `O(nodes)`, not `O(sandboxes)`.** `readyReplicas` is
+   maintained incrementally from informer add/update/delete events and
+   metadata-only reads, so replenishment reconciliation never re-lists the full
+   pool's Sandbox specs. A 2500-sandbox pool costs a counter update per event,
+   not a 2500-object list per reconcile.
+3. **Per-pool sharded operator.** Each `SandboxWarmPool` is an independent
+   workqueue shard; operator replicas take a per-shard `coordination.k8s.io`
+   Lease and scale horizontally. This is the Kubernetes-native spelling of
+   Modal's "fleet of scheduling servers" — no shared scheduler serialization.
+
+**Kubernetes-semantics mapping**
+
+| Modal mechanism | L1 in pure Kubernetes |
+|---|---|
+| stateless scheduler fleet | per-pool sharded operator + Lease |
+| worker accepts/rejects placement | optimistic PATCH with `resourceVersion` precondition |
+| no datastore on create path | claim = ownership PATCH of a pre-warmed object (like PVC→PV `Bound`) |
+| async result write | Sandbox status/conditions written after the fast-path returns |
+
+**Failure modes**
+
+| Scenario | Behavior | Breaks k8s semantics? |
+|---|---|---|
+| Two claims race one warm Sandbox | `resourceVersion` PATCH conflict; loser adopts the next candidate | No — standard optimistic concurrency |
+| Warm pool exhausted | Claim stays `Pending` until replenish (unchanged) | No |
+| Operator shard dies mid-claim | Lease expiry → another replica resumes; claim is idempotent | No |
+| Stale informer picks an already-claimed Sandbox | PATCH precondition fails → next candidate | No |
+
+**Acceptance:** claim p50 stays near-constant from a 100-pool to a 2000+-pool
+(today it degrades 33 ms → 516 ms); the pod-exclusivity invariant (one Sandbox,
+at most one claim) holds under concurrent claims.
+
+### L2 — node-local claim gateway (designed; `ClaimGateway` skeleton)
+
+L1 still round-trips the apiserver. L2 takes the claim off the central path
+entirely for the runtimes that have a node-local warm pool (`sandboxd`), while
+keeping the `SandboxClaim` object as the durable record.
+
+**Mechanism.** A `ClaimGateway` DaemonSet on each virtual-kubelet node fronts
+`sandboxd`. A claim request reaches the node gateway directly; `sandboxd` hands
+over an already-running microVM in **0.2–0.7 ms** and returns connection info
+immediately. The `SandboxClaim` is marked `Bound` **asynchronously** — the record
+follows the action, exactly as kubelet static Pods record to the apiserver after
+the container is already running.
+
+**Authorization stays central (correctly).** The gateway runs a
+`SubjectAccessReview` + `ResourceQuota` check before delivery. Policy is the part
+of Kubernetes that *should* stay centralized; only the ownership-transfer
+transaction moves to the node.
+
+```go
+// ClaimGateway is the node-local fast path for warm-pool claims.
+// A claim is served by the node that already holds a warm microVM; the
+// SandboxClaim object is reconciled to Bound asynchronously afterward.
+type ClaimGateway interface {
+    // Claim transfers ownership of a node-local warm sandbox to the caller,
+    // returning connection info. It performs the SubjectAccessReview +
+    // quota check inline; it does NOT block on writing the SandboxClaim.
+    Claim(ctx context.Context, req ClaimRequest) (Assignment, error)
+    // Release returns a sandbox to the node-local pool (or tears it down).
+    Release(ctx context.Context, assignment Assignment) error
+}
+```
+
+**Failure modes**
+
+| Scenario | Behavior | Breaks k8s semantics? |
+|---|---|---|
+| Gateway crashes after delivery, before recording `Bound` | Orphan binding → audit-only orphan GC + adopt reconciles the record (the VM is never destroyed on pod-level state — see the delete-authorization contract) | No — eventual consistency |
+| Node has no warm VM | Falls back to the L1 Kubernetes path (create a new Sandbox) | No |
+| Quota exceeded | Gateway rejects inline before delivery | No |
+
+**Acceptance:** claim p50 sub-millisecond on the sandboxd tier; orphan-binding
+rate converges to 0 via GC; `kubectl get sandboxclaims` still shows every claim.
+
+### L3 — aggregated apiserver: etcd stores intent, not sandboxes (designed; `SandboxStore` skeleton)
+
+A million `Sandbox` objects in etcd is a dead end (churn alone blows the ~8 GB
+keyspace). The Kubernetes-native fix is the aggregation layer: serve
+`sandboxes.agents.x-k8s.io` from an **aggregated apiserver** (an `APIService`)
+that **scatter-gathers** live node inventory on read. etcd stores only *intent* —
+one `SandboxWarmPool` spec expressing a million desired replicas, plus one
+`inventory` object per node (`O(nodes)`). Object count drops from
+`O(sandboxes)` to `O(pools + nodes)`.
+
+Each virtual-kubelet node already knows its own VMs (L0 made that cache the
+source of truth), so the aggregated server assembles a `SandboxList` by fanning
+out to node inventories — the exact pattern `metrics.k8s.io` uses to serve
+`PodMetrics` with zero etcd storage. `kubectl get sandboxes`, RBAC, field
+selectors, and `watch` (implemented as a merge of per-node inventory streams)
+all keep working; users never see that storage decentralized.
+
+```go
+// SandboxStore backs the aggregated apiserver for sandboxes.agents.x-k8s.io.
+// It holds NO per-sandbox etcd objects: List/Get/Watch scatter-gather live
+// node inventories, and Create/Delete translate to intent (warm-pool desired
+// replicas) plus a node-local RPC.
+type SandboxStore interface {
+    List(ctx context.Context, opts ListOptions) (*SandboxList, error)   // fan-out to node inventories
+    Get(ctx context.Context, ns, name string) (*Sandbox, error)         // route to owning node
+    Watch(ctx context.Context, opts ListOptions) (watch.Interface, error) // merge per-node streams
+}
+
+// NodeInventory is the one O(nodes) etcd object per node: the durable
+// summary of that node's live sandboxes, server-side-applied on a slow
+// cadence. The per-sandbox truth lives in the node, not etcd.
+type NodeInventory struct {
+    metav1.TypeMeta   `json:",inline"`
+    metav1.ObjectMeta `json:"metadata,omitempty"`
+    Node    string           `json:"node"`
+    Entries []InventoryEntry `json:"entries"` // {name, phase, claimRef, addr}
+}
+```
+
+**Failure modes**
+
+| Scenario | Behavior | Breaks k8s semantics? |
+|---|---|---|
+| Node partitioned from aggregated server | Its sandboxes briefly absent from `List` (eventual consistency, same as an informer lag) | No |
+| A node `inventory` object lost | Rebuilt from the node's own live state on next publish | No |
+| Aggregated server restart | Stateless; rebuilds from node fan-out | No |
+| Client needs strong read-after-write | Route `Get` to the owning node (authoritative), not the summary | No |
+
+**Acceptance:** 1M sandbox *intent* costs `O(nodes)` etcd objects; `kubectl get
+sandboxes` returns the fanned-out list; per-sandbox `Get` is authoritative.
+
+### How this differs from Modal
+
+Modal buys throughput by leaving Kubernetes: a proprietary SDK and a proprietary
+control plane. Every layer here keeps `kubectl` / CRDs / RBAC / the ecosystem
+intact. The one-line framing:
+
+> **Modal proved 1M needs a decentralized transaction plane. We show the
+> decentralized transaction plane can hide behind Kubernetes semantics.**
+
+| | Modal | cocoon-sandbox-operator |
+|---|---|---|
+| Scheduling | stateless fleet, in-memory worker state | per-pool sharded operator + Lease (L1) |
+| Create critical path | direct scheduler→worker RPC, no datastore | ownership PATCH (L1) → node-local gateway (L2) |
+| State of record | Redis stream (async) | Kubernetes objects; node inventory in etcd is `O(nodes)` (L3) |
+| Sandbox storage | proprietary | aggregated apiserver, etcd stores intent only (L3) |
+| Client interface | proprietary SDK | any Kubernetes client — unchanged |
+| Scale ceiling | no practical limit | decoupled from etcd object count at L3 |
+
 ## Development
 
 Go 1.26+.

@@ -1,0 +1,59 @@
+// Copyright 2026 The CocoonStack Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package scale
+
+import "context"
+
+// ClaimRequest is a node-local warm-pool claim. It names the SandboxClaim being
+// served and the warm pool to draw from; the gateway authorizes the caller
+// (SubjectAccessReview + ResourceQuota) inline before delivery.
+type ClaimRequest struct {
+	Namespace string
+	ClaimName string
+	WarmPool  string
+	// Selector optionally narrows which warm sandboxes are eligible (template
+	// blueprint hash, node affinity, etc.).
+	Selector map[string]string
+}
+
+// Assignment is the result of a successful claim: the warm sandbox whose
+// ownership was transferred, the node serving it, and its connection address.
+// The SandboxClaim is marked Bound asynchronously after this returns.
+type Assignment struct {
+	SandboxName string
+	Node        string
+	Address     string
+}
+
+// ClaimGateway is the L2 node-local fast path for warm-pool claims. A claim is
+// served by the node that already holds a warm microVM (via sandboxd), which
+// hands over an already-running guest in sub-millisecond time and returns
+// connection info immediately; the SandboxClaim object is reconciled to Bound
+// asynchronously afterward.
+//
+// Authorization stays central and inline (SubjectAccessReview + ResourceQuota):
+// policy is the part of Kubernetes that should remain centralized; only the
+// ownership-transfer transaction moves to the node. If the node has no warm VM,
+// the caller falls back to the L1 Kubernetes path (create a new Sandbox).
+type ClaimGateway interface {
+	// Claim transfers ownership of a node-local warm sandbox to the caller and
+	// returns connection info. It performs the authorization check inline; it
+	// does NOT block on writing the SandboxClaim status.
+	Claim(ctx context.Context, req ClaimRequest) (Assignment, error)
+	// Release returns a sandbox to the node-local pool, or tears it down when
+	// the pool is over target. Never destroys a VM on pod-level state alone —
+	// see the vk-cocoon delete-authorization contract.
+	Release(ctx context.Context, assignment Assignment) error
+}
