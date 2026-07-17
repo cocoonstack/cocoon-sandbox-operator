@@ -1,0 +1,337 @@
+// Copyright 2026 The CocoonStack Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package scale
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/go-logr/logr/testr"
+	"github.com/stretchr/testify/require"
+	authzv1 "k8s.io/api/authorization/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/sandboxd"
+)
+
+// --- test doubles ------------------------------------------------------------
+
+// fakeSandboxd is an httptest-backed sandboxd. It serves POST /v1/claim (200 with
+// a fresh id, unless forceStatus overrides) and POST /v1/sandboxes/{id}/release
+// (204), counting both so tests can assert the VM-destroy path.
+type fakeSandboxd struct {
+	srv         *httptest.Server
+	claims      atomic.Int64
+	releases    atomic.Int64
+	nextID      atomic.Int64
+	forceStatus atomic.Int64 // when non-zero, claim returns this status (e.g. 429)
+}
+
+func newFakeSandboxd(t *testing.T) *fakeSandboxd {
+	t.Helper()
+	f := &fakeSandboxd{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/claim", func(w http.ResponseWriter, _ *http.Request) {
+		f.claims.Add(1)
+		if s := f.forceStatus.Load(); s != 0 {
+			w.WriteHeader(int(s))
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "node at max_claims"})
+			return
+		}
+		id := fmt.Sprintf("sb_%d", f.nextID.Add(1))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sandboxd.ClaimResult{
+			ID: id, Token: "tok_" + id, Deadline: "2026-07-06T00:05:00Z", OwnerAddr: "10.0.0.5:7777",
+		})
+	})
+	mux.HandleFunc("/v1/sandboxes/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/release") {
+			f.releases.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	f.srv = httptest.NewServer(mux)
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+func (f *fakeSandboxd) client() *sandboxd.Client { return sandboxd.New(f.srv.URL, "root-token") }
+
+type allowAuthorizer struct{}
+
+func (allowAuthorizer) Authorize(context.Context, ClaimRequest) error { return nil }
+
+type noopRecorder struct{}
+
+func (noopRecorder) RecordBound(context.Context, string, string, Assignment) error { return nil }
+
+// failingRecorder always fails — modeling the async Bound record lost to a gateway
+// crash, which leaves an orphan binding for the OrphanReconciler to heal.
+type failingRecorder struct{}
+
+func (failingRecorder) RecordBound(context.Context, string, string, Assignment) error {
+	return fmt.Errorf("simulated record failure (gateway crashed before recording Bound)")
+}
+
+// sliceInventory is a NodeInventorySource backed by a fixed slice (as if read from
+// sandboxd's own inventory after a crash).
+type sliceInventory []Delivery
+
+func (s sliceInventory) LiveDeliveries(context.Context) ([]Delivery, error) {
+	return []Delivery(s), nil
+}
+
+type fakeSAR struct {
+	allow bool
+	deny  bool
+	err   error
+}
+
+func (f fakeSAR) Create(_ context.Context, sar *authzv1.SubjectAccessReview, _ metav1.CreateOptions) (*authzv1.SubjectAccessReview, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := sar.DeepCopy()
+	out.Status = authzv1.SubjectAccessReviewStatus{Allowed: f.allow, Denied: f.deny, Reason: "test"}
+	return out, nil
+}
+
+func newScaleScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := runtime.NewScheme()
+	require.NoError(t, sandboxv1beta1.AddToScheme(s))
+	require.NoError(t, extv1beta1.AddToScheme(s))
+	return s
+}
+
+func newClaimClient(t *testing.T, names ...string) client.Client {
+	t.Helper()
+	b := fake.NewClientBuilder().WithScheme(newScaleScheme(t)).WithStatusSubresource(&extv1beta1.SandboxClaim{})
+	for _, n := range names {
+		b = b.WithObjects(&extv1beta1.SandboxClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: n, Namespace: "default"},
+			Spec:       extv1beta1.SandboxClaimSpec{WarmPoolRef: extv1beta1.SandboxWarmPoolRef{Name: "base:24.04"}},
+		})
+	}
+	return b.Build()
+}
+
+func getClaim(t *testing.T, c client.Client, name string) *extv1beta1.SandboxClaim {
+	t.Helper()
+	cur := &extv1beta1.SandboxClaim{}
+	require.NoError(t, c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: name}, cur))
+	return cur
+}
+
+// --- tests -------------------------------------------------------------------
+
+// TestClaimGatewayHappyPath: a warm sandbox is delivered and the Assignment is
+// returned immediately; the SandboxClaim is recorded Bound asynchronously (the
+// node acts first, the apiserver records after). No VM is destroyed on the claim
+// path.
+func TestClaimGatewayHappyPath(t *testing.T) {
+	fs := newFakeSandboxd(t)
+	fc := newClaimClient(t, "c1")
+
+	gw := NewGateway(GatewayConfig{
+		Node:        "node-a",
+		Client:      fs.client(),
+		Authorizer:  allowAuthorizer{},
+		Recorder:    NewClaimRecorder(fc),
+		TTLSeconds:  300,
+		BaseContext: context.Background(),
+		Logger:      testr.New(t),
+	})
+
+	a, err := gw.Claim(context.Background(), ClaimRequest{Namespace: "default", ClaimName: "c1", WarmPool: "base:24.04"})
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(a.SandboxName, "sb_"), "got %q", a.SandboxName)
+	require.Equal(t, "node-a", a.Node)
+	require.Equal(t, "10.0.0.5:7777", a.Address)
+
+	// The record follows the action: wait for the async job, then assert Bound.
+	gw.Wait()
+	cur := getClaim(t, fc, "c1")
+	require.Equal(t, a.SandboxName, cur.Status.SandboxStatus.Name, "async RecordBound should have set status.sandbox.name")
+	require.Contains(t, []string{"10.0.0.5:7777"}, cur.Status.SandboxStatus.PodIPs[0])
+	require.NotNil(t, findCond(cur, BoundConditionType))
+
+	require.Equal(t, int64(1), fs.claims.Load(), "exactly one sandbox delivered")
+	require.Equal(t, int64(0), fs.releases.Load(), "claim path must never destroy a VM")
+}
+
+// TestClaimGatewayOrphanBindingConverges: the async Bound record is lost (gateway
+// crash), leaving an orphan binding. The OrphanReconciler adopts it — records the
+// missing Bound and converges the orphan count to 0 — and crucially destroys NO
+// VM (the sandboxd release endpoint is never hit).
+func TestClaimGatewayOrphanBindingConverges(t *testing.T) {
+	fs := newFakeSandboxd(t)
+	fc := newClaimClient(t, "c-orphan")
+
+	// Gateway whose async record always fails → the delivery is never recorded.
+	gw := NewGateway(GatewayConfig{
+		Node: "node-a", Client: fs.client(), Authorizer: allowAuthorizer{},
+		Recorder: failingRecorder{}, BaseContext: context.Background(), Logger: testr.New(t),
+	})
+	a, err := gw.Claim(context.Background(), ClaimRequest{Namespace: "default", ClaimName: "c-orphan", WarmPool: "base:24.04"})
+	require.NoError(t, err)
+	gw.Wait()
+
+	// Orphan confirmed: delivered, but the claim carries no Bound record.
+	require.Empty(t, getClaim(t, fc, "c-orphan").Status.SandboxStatus.Name)
+
+	inv := sliceInventory{{SandboxName: a.SandboxName, Node: a.Node, Address: a.Address, ClaimNS: "default", ClaimName: "c-orphan"}}
+	orc := NewOrphanReconciler("node-a", inv, fc, NewClaimRecorder(fc), testr.New(t))
+
+	n, err := orc.Reconcile(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "the single orphan binding should be reconciled")
+	require.Equal(t, a.SandboxName, getClaim(t, fc, "c-orphan").Status.SandboxStatus.Name, "orphan binding converged to Bound")
+
+	// Idempotent: a second pass finds no orphans.
+	n, err = orc.Reconcile(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0, n, "orphan count must converge to 0")
+
+	require.Equal(t, int64(0), fs.releases.Load(), "orphan GC must NEVER destroy a VM")
+}
+
+// TestClaimGatewayFallbackOnNoCapacity: when sandboxd reports no warm capacity
+// (429), Claim returns an error for which IsFallback is true, so the caller drops
+// to the L1 Kubernetes path.
+func TestClaimGatewayFallbackOnNoCapacity(t *testing.T) {
+	fs := newFakeSandboxd(t)
+	fs.forceStatus.Store(http.StatusTooManyRequests)
+	fc := newClaimClient(t, "c2")
+
+	gw := NewGateway(GatewayConfig{
+		Node: "node-a", Client: fs.client(), Authorizer: allowAuthorizer{},
+		Recorder: NewClaimRecorder(fc), BaseContext: context.Background(), Logger: testr.New(t),
+	})
+
+	a, err := gw.Claim(context.Background(), ClaimRequest{Namespace: "default", ClaimName: "c2", WarmPool: "base:24.04"})
+	require.Error(t, err)
+	require.True(t, IsFallback(err), "429 must map to a fallback signal, got %v", err)
+	require.ErrorIs(t, err, ErrNoNodeCapacity)
+	require.Equal(t, Assignment{}, a)
+	require.Equal(t, int64(0), fs.releases.Load())
+}
+
+// TestClaimGatewayReleaseOwnerTeardownOnly: Release destroys the VM ONLY for a
+// sandbox the gateway actually delivered (owner-authorized teardown holds the
+// sandbox's own token, which the gateway keeps). An Assignment the gateway never
+// handed out — e.g. one synthesized from stale pod state — is refused with NO
+// sandboxd call, so pod-level state can never drive a destroy. This encodes the
+// G-0131 delete-authorization contract.
+func TestClaimGatewayReleaseOwnerTeardownOnly(t *testing.T) {
+	fs := newFakeSandboxd(t)
+
+	gw := NewGateway(GatewayConfig{
+		Node: "node-a", Client: fs.client(), Authorizer: allowAuthorizer{},
+		Recorder: noopRecorder{}, BaseContext: context.Background(), Logger: testr.New(t),
+	})
+
+	a, err := gw.Claim(context.Background(), ClaimRequest{Namespace: "default", ClaimName: "c-rel", WarmPool: "base:24.04"})
+	require.NoError(t, err)
+	gw.Wait()
+
+	// Owner-authorized teardown of a delivered sandbox destroys exactly that VM.
+	require.NoError(t, gw.Release(context.Background(), a))
+	require.Equal(t, int64(1), fs.releases.Load(), "owner teardown must destroy the delivered VM")
+
+	// An Assignment the gateway never delivered (pod-derived / stale) must NOT
+	// reach sandboxd — no code path from pod state to a VM destroy.
+	err = gw.Release(context.Background(), Assignment{SandboxName: "sb_never_delivered", Node: "node-a"})
+	require.Error(t, err)
+	require.Equal(t, int64(1), fs.releases.Load(), "an undelivered Assignment must not trigger any destroy")
+
+	// A second release of the same sandbox is likewise refused (already handed back).
+	err = gw.Release(context.Background(), a)
+	require.Error(t, err)
+	require.Equal(t, int64(1), fs.releases.Load())
+}
+
+// TestClaimGatewayAuthorizationRejectsInline exercises the default ReviewAuthorizer:
+// a denied SubjectAccessReview (or exceeded quota) rejects the claim inline BEFORE
+// any delivery, and the rejection is a hard error, not a fallback.
+func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
+	t.Run("deny", func(t *testing.T) {
+		fs := newFakeSandboxd(t)
+		gw := NewGateway(GatewayConfig{
+			Node: "node-a", Client: fs.client(),
+			Authorizer: &ReviewAuthorizer{Reviewer: fakeSAR{allow: false}},
+			Recorder:   noopRecorder{}, BaseContext: context.Background(), Logger: testr.New(t),
+		})
+		req := ClaimRequest{Namespace: "default", ClaimName: "c3", WarmPool: "base:24.04",
+			Selector: map[string]string{RequestUserSelectorKey: "alice"}}
+		a, err := gw.Claim(context.Background(), req)
+		require.Error(t, err)
+		require.False(t, IsFallback(err), "an authz denial is a hard reject, not a fallback")
+		require.Equal(t, Assignment{}, a)
+		require.Equal(t, int64(0), fs.claims.Load(), "reject must happen before any delivery")
+	})
+
+	t.Run("missing-identity-fails-closed", func(t *testing.T) {
+		fs := newFakeSandboxd(t)
+		gw := NewGateway(GatewayConfig{
+			Node: "node-a", Client: fs.client(),
+			Authorizer: &ReviewAuthorizer{Reviewer: fakeSAR{allow: true}},
+			Recorder:   noopRecorder{}, BaseContext: context.Background(), Logger: testr.New(t),
+		})
+		_, err := gw.Claim(context.Background(), ClaimRequest{Namespace: "default", ClaimName: "c4", WarmPool: "base:24.04"})
+		require.Error(t, err, "no caller identity must fail closed")
+		require.Equal(t, int64(0), fs.claims.Load())
+	})
+
+	t.Run("allow-delivers", func(t *testing.T) {
+		fs := newFakeSandboxd(t)
+		fc := newClaimClient(t, "c5")
+		gw := NewGateway(GatewayConfig{
+			Node: "node-a", Client: fs.client(),
+			Authorizer: &ReviewAuthorizer{Reviewer: fakeSAR{allow: true}},
+			Recorder:   NewClaimRecorder(fc), BaseContext: context.Background(), Logger: testr.New(t),
+		})
+		req := ClaimRequest{Namespace: "default", ClaimName: "c5", WarmPool: "base:24.04",
+			Selector: map[string]string{RequestUserSelectorKey: "alice"}}
+		a, err := gw.Claim(context.Background(), req)
+		require.NoError(t, err)
+		require.NotEmpty(t, a.SandboxName)
+		require.Equal(t, int64(1), fs.claims.Load())
+		gw.Wait()
+	})
+}
+
+func findCond(c *extv1beta1.SandboxClaim, t string) *metav1.Condition {
+	for i := range c.Status.Conditions {
+		if c.Status.Conditions[i].Type == t {
+			return &c.Status.Conditions[i]
+		}
+	}
+	return nil
+}

@@ -1,0 +1,54 @@
+# L3 aggregated apiserver registration for sandboxes.agents.x-k8s.io.
+#
+# This is the metrics.k8s.io-style APIService: it hands the whole
+# agents.x-k8s.io/v1beta1 group-version to the aggregated sandbox-apiserver,
+# which serves `sandboxes` by scatter-gathering per-node NodeInventory rather
+# than reading per-sandbox objects from etcd. That group-version contains only
+# the `sandboxes` resource (the SandboxClaim/SandboxTemplate/SandboxWarmPool CRDs
+# live in the separate `extensions.agents.x-k8s.io` group and are untouched).
+#
+# Ordering caveat: an APIService takes precedence over a CRD for the same
+# group-version, so once this is applied the aggregated server owns
+# agents.x-k8s.io/v1beta1 `sandboxes`. The Sandbox CRD for this group-version
+# should therefore NOT also be installed (aggregation replaces it), exactly as
+# metrics.k8s.io replaces any CRD for its group.
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.agents.x-k8s.io
+  labels:
+    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/component: aggregated-apiserver
+spec:
+  group: agents.x-k8s.io
+  version: v1beta1
+  service:
+    name: cocoon-sandbox-apiserver
+    namespace: cocoon-sandbox-system
+    port: 443
+  # Production injects a caBundle (cert-manager / the apiserver serving CA) so
+  # the kube-apiserver validates the aggregated server's TLS. insecureSkipTLSVerify
+  # is set here only as the self-signed-cert bootstrap default (as metrics-server
+  # ships); replace it with `caBundle:` in a real deployment.
+  insecureSkipTLSVerify: true
+  groupPriorityMinimum: 1000
+  versionPriority: 15
+---
+# Backing Service the APIService resolves to. Selects the aggregated apiserver
+# Deployment pods, which serve HTTPS on 6443 (see cmd/sandbox-apiserver).
+apiVersion: v1
+kind: Service
+metadata:
+  name: cocoon-sandbox-apiserver
+  namespace: cocoon-sandbox-system
+  labels:
+    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/component: aggregated-apiserver
+spec:
+  selector:
+    app.kubernetes.io/name: cocoon-sandbox-apiserver
+  ports:
+    - name: https
+      port: 443
+      targetPort: 6443
+      protocol: TCP

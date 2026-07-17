@@ -1,0 +1,479 @@
+// Copyright 2026 The CocoonStack Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package scale
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/go-logr/logr"
+	authzv1 "k8s.io/api/authorization/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/sandboxd"
+)
+
+// ErrNoNodeCapacity is the sentinel Claim returns when the node has no warm VM to
+// hand over (sandboxd answered 429/draining, or redirected to a peer). The caller
+// falls back to the L1 Kubernetes path (create a new Sandbox). Test it with
+// IsFallback rather than comparing directly, so future wrapped causes still match.
+var ErrNoNodeCapacity = errors.New("scale: node has no warm capacity; fall back to L1 claim path")
+
+// IsFallback reports whether err means the L2 node-local fast path declined and
+// the caller should fall back to the L1 Kubernetes claim path.
+func IsFallback(err error) bool { return errors.Is(err, ErrNoNodeCapacity) }
+
+// SandboxdClient is the subset of the sandboxd HTTP client the gateway needs,
+// kept as an interface so tests inject a fake without a live node. *sandboxd.Client
+// satisfies it.
+type SandboxdClient interface {
+	Claim(ctx context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error)
+	Release(ctx context.Context, id, token string) error
+}
+
+// Authorizer runs the inline policy check (SubjectAccessReview + ResourceQuota)
+// before a claim is delivered. Policy is the part of Kubernetes that stays
+// centralized; only the ownership-transfer transaction moves to the node. A
+// non-nil error rejects the claim inline before any delivery and is NOT a
+// fallback signal (IsFallback stays false), matching the "quota exceeded →
+// reject inline" failure mode in the README.
+type Authorizer interface {
+	Authorize(ctx context.Context, req ClaimRequest) error
+}
+
+// ClaimRecorder durably records the "Bound" outcome of a delivered claim onto the
+// SandboxClaim object. It is invoked asynchronously after Claim returns (kubelet
+// static-Pod semantics: the node acts first, the apiserver records after) and
+// again by the OrphanReconciler when an async record was lost.
+type ClaimRecorder interface {
+	RecordBound(ctx context.Context, claimNS, claimName string, a Assignment) error
+}
+
+// GatewayConfig constructs a nodeClaimGateway.
+type GatewayConfig struct {
+	// Node is the name of the node this gateway fronts (stamped into Assignments).
+	Node string
+	// Client delivers and releases sandboxes on this node.
+	Client SandboxdClient
+	// Authorizer runs the inline SubjectAccessReview + quota check.
+	Authorizer Authorizer
+	// Recorder durably records Bound asynchronously after delivery.
+	Recorder ClaimRecorder
+
+	// DefaultTemplate/DefaultNet/DefaultSize/TTLSeconds fill a ClaimSpec when the
+	// request Selector does not override them. An empty DefaultTemplate falls back
+	// to the WarmPool name as the template axis.
+	DefaultTemplate string
+	DefaultNet      string
+	DefaultSize     string
+	TTLSeconds      int
+
+	// RecordTimeout bounds each async Bound-record attempt. Defaults to 10s.
+	RecordTimeout time.Duration
+	// BaseContext is the gateway's lifetime context; async record jobs derive from
+	// it rather than the (already-returned) request context. Defaults to
+	// context.Background().
+	BaseContext context.Context
+	// Logger records async-record failures (which the OrphanReconciler later
+	// heals). The zero logr.Logger discards.
+	Logger logr.Logger
+}
+
+// Selector keys a ClaimRequest may carry to override the ClaimSpec axes.
+const (
+	SelectorTemplateKey = "sandbox.cocoonstack.io/template"
+	SelectorNetKey      = "sandbox.cocoonstack.io/net"
+	SelectorSizeKey     = "sandbox.cocoonstack.io/size"
+)
+
+// delivered is the ownership credential the gateway holds for a sandbox it handed
+// over: the sandboxd id and the sandbox's own token, both required to Release it.
+// Holding this is what makes the gateway (not pod-level state) the only party able
+// to destroy the VM.
+type delivered struct {
+	id    string
+	token string
+}
+
+// nodeClaimGateway is the concrete L2 ClaimGateway: it authorizes inline, delivers
+// a warm sandbox from the node's sandboxd, returns the Assignment immediately, and
+// records Bound asynchronously.
+type nodeClaimGateway struct {
+	node          string
+	client        SandboxdClient
+	authz         Authorizer
+	recorder      ClaimRecorder
+	tmpl          string
+	net           string
+	size          string
+	ttl           int
+	recordTimeout time.Duration
+	baseCtx       context.Context
+	log           logr.Logger
+
+	mu       sync.Mutex
+	holdings map[string]delivered // Assignment.SandboxName -> ownership credential
+	wg       sync.WaitGroup       // tracks in-flight async Bound-record jobs
+}
+
+// compile-time assertion that the concrete gateway satisfies the L2 contract.
+var _ ClaimGateway = (*nodeClaimGateway)(nil)
+
+// NewGateway builds a node-local ClaimGateway from cfg. It returns the concrete
+// type so callers can Wait on async record drain during graceful shutdown; the
+// value satisfies ClaimGateway.
+func NewGateway(cfg GatewayConfig) *nodeClaimGateway {
+	g := &nodeClaimGateway{
+		node:          cfg.Node,
+		client:        cfg.Client,
+		authz:         cfg.Authorizer,
+		recorder:      cfg.Recorder,
+		tmpl:          cfg.DefaultTemplate,
+		net:           cfg.DefaultNet,
+		size:          cfg.DefaultSize,
+		ttl:           cfg.TTLSeconds,
+		recordTimeout: cfg.RecordTimeout,
+		baseCtx:       cfg.BaseContext,
+		log:           cfg.Logger,
+		holdings:      make(map[string]delivered),
+	}
+	if g.recordTimeout <= 0 {
+		g.recordTimeout = 10 * time.Second
+	}
+	if g.baseCtx == nil {
+		g.baseCtx = context.Background()
+	}
+	return g
+}
+
+// Claim authorizes the request inline, delivers a warm sandbox from the node's
+// sandboxd, and returns the Assignment immediately. Recording the SandboxClaim as
+// Bound is enqueued as an async job — the return does NOT block on the k8s write.
+// When the node has no warm capacity the result is ErrNoNodeCapacity (IsFallback).
+func (g *nodeClaimGateway) Claim(ctx context.Context, req ClaimRequest) (Assignment, error) {
+	// (1) Central policy check, inline, before any delivery. A denial (including
+	// quota exceeded) is a hard reject, never a fallback.
+	if g.authz != nil {
+		if err := g.authz.Authorize(ctx, req); err != nil {
+			return Assignment{}, fmt.Errorf("scale: claim %s/%s not authorized: %w", req.Namespace, req.ClaimName, err)
+		}
+	}
+
+	// (2) Node-local ownership transfer: sandboxd hands over an already-running VM.
+	res, err := g.client.Claim(ctx, g.specFor(req))
+	if err != nil {
+		if errors.Is(err, sandboxd.ErrNodeAtCapacity) {
+			return Assignment{}, ErrNoNodeCapacity
+		}
+		return Assignment{}, fmt.Errorf("scale: sandboxd claim for %s/%s: %w", req.Namespace, req.ClaimName, err)
+	}
+
+	// (3) Build the Assignment and remember the ownership credential so a later
+	// owner-authorized Release can destroy exactly this VM.
+	a := Assignment{SandboxName: res.ID, Node: g.node, Address: res.OwnerAddr}
+	g.mu.Lock()
+	g.holdings[a.SandboxName] = delivered{id: res.ID, token: res.Token}
+	g.mu.Unlock()
+
+	// (4) Record Bound asynchronously. The record follows the action; a lost
+	// record leaves an orphan binding that the OrphanReconciler heals (it never
+	// destroys the VM). Return to the caller now.
+	g.enqueueRecord(req.Namespace, req.ClaimName, a)
+	return a, nil
+}
+
+// Release destroys the node-local microVM backing the Assignment.
+//
+// DELETE-AUTHORIZATION CONTRACT (G-0131 hard constraint). Release is invoked ONLY
+// on owner-authorized teardown — when the SandboxClaim CR itself is being released
+// or deleted by its owner. It is NEVER wired to Pod deletion or any pod-level
+// state: a Pod disappearing must not destroy the VM. There is deliberately no code
+// path in this package from Pod state to Release. As a structural guard the
+// gateway only releases sandboxes it actually delivered (it holds the sandbox's
+// own token, the Release credential); an Assignment the gateway never handed out
+// — e.g. one synthesized from stale pod state — is refused without any sandboxd
+// call, so no such state can drive a destroy.
+func (g *nodeClaimGateway) Release(ctx context.Context, a Assignment) error {
+	g.mu.Lock()
+	d, ok := g.holdings[a.SandboxName]
+	delete(g.holdings, a.SandboxName) // no-op when absent
+	g.mu.Unlock()
+	if !ok {
+		// Unknown to this gateway: nothing was delivered here to release. Do NOT
+		// fabricate an id/token, and do NOT destroy anything.
+		return fmt.Errorf("scale: release of sandbox %q not delivered by node %q; refusing to destroy", a.SandboxName, g.node)
+	}
+	if err := g.client.Release(ctx, d.id, d.token); err != nil {
+		// Restore the holding so a retry of the owner teardown can find it.
+		g.mu.Lock()
+		g.holdings[a.SandboxName] = d
+		g.mu.Unlock()
+		return fmt.Errorf("scale: sandboxd release of %q: %w", a.SandboxName, err)
+	}
+	return nil
+}
+
+// Wait blocks until all in-flight async Bound-record jobs finish. Used by tests
+// and graceful shutdown; the synchronous Claim path never calls it.
+func (g *nodeClaimGateway) Wait() { g.wg.Wait() }
+
+func (g *nodeClaimGateway) enqueueRecord(ns, name string, a Assignment) {
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		// Detach from the request context (which may be cancelled once Claim
+		// returns) but stay bounded by the gateway lifetime context and a timeout.
+		rctx, cancel := context.WithTimeout(g.baseCtx, g.recordTimeout)
+		defer cancel()
+		if err := g.recorder.RecordBound(rctx, ns, name, a); err != nil {
+			g.log.Error(err, "async RecordBound failed; orphan binding left for OrphanReconciler",
+				"namespace", ns, "claim", name, "sandbox", a.SandboxName)
+		}
+	}()
+}
+
+// specFor derives a sandboxd ClaimSpec from the request, letting the Selector
+// override each axis and falling back to gateway defaults (and, for the template,
+// finally to the WarmPool name).
+func (g *nodeClaimGateway) specFor(req ClaimRequest) sandboxd.ClaimSpec {
+	tmpl := firstNonEmpty(req.Selector[SelectorTemplateKey], g.tmpl, req.WarmPool)
+	return sandboxd.ClaimSpec{
+		Template:   tmpl,
+		Net:        firstNonEmpty(req.Selector[SelectorNetKey], g.net),
+		Size:       firstNonEmpty(req.Selector[SelectorSizeKey], g.size),
+		TTLSeconds: g.ttl,
+	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// --- Default ClaimRecorder ---------------------------------------------------
+
+// clientClaimRecorder records Bound by patching the SandboxClaim status:
+// status.sandbox.name is set to the delivered sandbox (the same "Bound" marker the
+// L1 path uses) and a Bound condition is added. It is idempotent and safe for the
+// async and orphan-reconcile paths to both call.
+type clientClaimRecorder struct {
+	c client.Client
+}
+
+// NewClaimRecorder returns the default ClaimRecorder backed by a Kubernetes client
+// (a cache-fed client in production, the fake client in tests).
+func NewClaimRecorder(c client.Client) ClaimRecorder { return &clientClaimRecorder{c: c} }
+
+// BoundConditionType marks a SandboxClaim whose warm sandbox has been delivered.
+const BoundConditionType = "Bound"
+
+func (r *clientClaimRecorder) RecordBound(ctx context.Context, claimNS, claimName string, a Assignment) error {
+	cur := &extv1beta1.SandboxClaim{}
+	if err := r.c.Get(ctx, types.NamespacedName{Namespace: claimNS, Name: claimName}, cur); err != nil {
+		return fmt.Errorf("get claim %s/%s: %w", claimNS, claimName, err)
+	}
+	if cur.Status.SandboxStatus.Name == a.SandboxName {
+		return nil // already recorded — idempotent
+	}
+	orig := cur.DeepCopy()
+	cur.Status.SandboxStatus.Name = a.SandboxName
+	if a.Address != "" {
+		cur.Status.SandboxStatus.PodIPs = []string{a.Address}
+	}
+	apimeta.SetStatusCondition(&cur.Status.Conditions, metav1.Condition{
+		Type:    BoundConditionType,
+		Status:  metav1.ConditionTrue,
+		Reason:  "NodeLocalClaim",
+		Message: fmt.Sprintf("sandbox %s delivered by node-local claim gateway", a.SandboxName),
+	})
+	return r.c.Status().Patch(ctx, cur, client.MergeFrom(orig))
+}
+
+// --- Orphan GC ---------------------------------------------------------------
+
+// Delivery is one live sandbox a node currently holds, with the claim it was
+// delivered to. This is the node's own live state (the L0 node-scoped cache /
+// sandboxd inventory), not a cluster-wide LIST.
+type Delivery struct {
+	SandboxName string
+	Node        string
+	Address     string
+	ClaimNS     string
+	ClaimName   string
+}
+
+// NodeInventorySource enumerates the deliveries a node currently holds. A crashed
+// gateway loses its in-memory holdings, but the node/sandboxd still hold the VMs,
+// so this source (backed by sandboxd's own inventory) survives a gateway restart —
+// which is exactly what lets the OrphanReconciler heal a lost Bound record.
+type NodeInventorySource interface {
+	LiveDeliveries(ctx context.Context) ([]Delivery, error)
+}
+
+// OrphanReconciler heals orphan bindings: deliveries that happened but whose
+// asynchronous Bound record was lost (the gateway crashed after delivery, before
+// recording). It is audit-and-adopt only — it records the missing Bound and NEVER
+// destroys a VM. Per the delete-authorization contract, a live VM is only ever
+// torn down by owner-authorized Release, never as a side effect of GC.
+type OrphanReconciler struct {
+	node     string
+	inv      NodeInventorySource
+	reader   client.Client
+	recorder ClaimRecorder
+	log      logr.Logger
+}
+
+// NewOrphanReconciler builds an OrphanReconciler. reader reads SandboxClaim Bound
+// state with point Gets (no cluster-wide LIST); recorder adopts orphan bindings.
+func NewOrphanReconciler(node string, inv NodeInventorySource, reader client.Client, recorder ClaimRecorder, logger logr.Logger) *OrphanReconciler {
+	return &OrphanReconciler{node: node, inv: inv, reader: reader, recorder: recorder, log: logger}
+}
+
+// Reconcile scans the node's live deliveries, finds those whose owning
+// SandboxClaim has no Bound record, and adopts them (records Bound). It returns the
+// number of orphan bindings reconciled. It never releases or destroys a sandbox.
+func (o *OrphanReconciler) Reconcile(ctx context.Context) (int, error) {
+	deliveries, err := o.inv.LiveDeliveries(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("scale: list node %q deliveries: %w", o.node, err)
+	}
+	reconciled := 0
+	for _, d := range deliveries {
+		cur := &extv1beta1.SandboxClaim{}
+		// Point Get by name — the typed client resolves the resource via the
+		// scheme's REST mapper (correct es/ies pluralization), never a naive
+		// kind+"s" that could 404-misread a live claim as deleted.
+		getErr := o.reader.Get(ctx, types.NamespacedName{Namespace: d.ClaimNS, Name: d.ClaimName}, cur)
+		if getErr != nil {
+			if k8serrors.IsNotFound(getErr) {
+				// The owning SandboxClaim is genuinely gone. We NEVER destroy the
+				// VM here (audit-and-adopt only); owner-authorized teardown owns
+				// that. Guard against an ambiguous 404 (a mis-mapped GVR would omit
+				// Details.Name) so we never act on a false "deleted" signal.
+				if n := notFoundName(getErr); n != "" && n != d.ClaimName {
+					return reconciled, fmt.Errorf("scale: ambiguous 404 for claim %s/%s (details name %q); refusing to treat as deleted", d.ClaimNS, d.ClaimName, n)
+				}
+				o.log.V(1).Info("delivery has no SandboxClaim object; leaving VM intact (no destroy)",
+					"namespace", d.ClaimNS, "claim", d.ClaimName, "sandbox", d.SandboxName)
+				continue
+			}
+			return reconciled, fmt.Errorf("scale: get claim %s/%s: %w", d.ClaimNS, d.ClaimName, getErr)
+		}
+		if cur.Status.SandboxStatus.Name != "" {
+			continue // already Bound — not an orphan
+		}
+		// Orphan binding: delivered but never recorded. Adopt it (converge).
+		a := Assignment{SandboxName: d.SandboxName, Node: d.Node, Address: d.Address}
+		if err := o.recorder.RecordBound(ctx, d.ClaimNS, d.ClaimName, a); err != nil {
+			return reconciled, fmt.Errorf("scale: adopt orphan binding %s/%s: %w", d.ClaimNS, d.ClaimName, err)
+		}
+		reconciled++
+	}
+	return reconciled, nil
+}
+
+// notFoundName extracts the object name a genuine NotFound status carries in
+// Details.Name; empty when the error is not a structured NotFound.
+func notFoundName(err error) string {
+	var se k8serrors.APIStatus
+	if errors.As(err, &se) {
+		if d := se.Status().Details; d != nil {
+			return d.Name
+		}
+	}
+	return ""
+}
+
+// --- Default Authorizer ------------------------------------------------------
+
+// RequestUserSelectorKey names the Selector entry carrying the caller identity the
+// default Authorizer evaluates in its SubjectAccessReview. Absent, the default
+// Authorizer fails closed.
+const RequestUserSelectorKey = "authorization.cocoonstack.io/user"
+
+// SubjectAccessReviewer creates a SubjectAccessReview and returns the decided
+// object — the shape of client-go's
+// authorizationv1client.SubjectAccessReviewInterface.Create, narrowed to an
+// interface so the gateway needs no direct authz-client dependency and tests can
+// inject a fake.
+type SubjectAccessReviewer interface {
+	Create(ctx context.Context, sar *authzv1.SubjectAccessReview, opts metav1.CreateOptions) (*authzv1.SubjectAccessReview, error)
+}
+
+// QuotaChecker admits a claim against namespace ResourceQuota. Injected so tests
+// need no live quota tracker; nil skips the quota gate.
+type QuotaChecker interface {
+	Admit(ctx context.Context, namespace string) error
+}
+
+// ReviewAuthorizer is the default Authorizer. It authorizes a claim with a central
+// SubjectAccessReview against the SandboxClaim resource — the policy check the L2
+// design deliberately keeps on the apiserver — and then an optional ResourceQuota
+// admission. Both dependencies are injected, so it exercises the real decision
+// path without a live cluster.
+type ReviewAuthorizer struct {
+	Reviewer SubjectAccessReviewer
+	Quota    QuotaChecker
+	// Group/Resource/Verb default to the SandboxClaim create check when empty.
+	Group    string
+	Resource string
+	Verb     string
+}
+
+// Authorize denies fail-closed when the caller identity is absent, then runs the
+// SubjectAccessReview and (if configured) the quota check.
+func (a *ReviewAuthorizer) Authorize(ctx context.Context, req ClaimRequest) error {
+	user := req.Selector[RequestUserSelectorKey]
+	if user == "" {
+		return fmt.Errorf("missing caller identity (selector %q)", RequestUserSelectorKey)
+	}
+	sar := &authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: user,
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Namespace: req.Namespace,
+				Verb:      firstNonEmpty(a.Verb, "create"),
+				Group:     firstNonEmpty(a.Group, extv1beta1.GroupVersion.Group),
+				Resource:  firstNonEmpty(a.Resource, "sandboxclaims"),
+				Name:      req.ClaimName,
+			},
+		},
+	}
+	got, err := a.Reviewer.Create(ctx, sar, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("subjectaccessreview: %w", err)
+	}
+	if got.Status.Denied || !got.Status.Allowed {
+		return fmt.Errorf("user %q may not claim in %s: %s", user, req.Namespace, got.Status.Reason)
+	}
+	if a.Quota != nil {
+		if err := a.Quota.Admit(ctx, req.Namespace); err != nil {
+			return fmt.Errorf("quota: %w", err)
+		}
+	}
+	return nil
+}

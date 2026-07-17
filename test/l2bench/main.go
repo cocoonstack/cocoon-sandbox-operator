@@ -1,0 +1,273 @@
+//go:build l2bench
+
+// Command l2bench proves the L2 node-local claim gateway acceptance criteria from
+// the README "Scaling design" chapter:
+//
+//   - claim p50 is sub-millisecond on the sandboxd tier (the gateway's own
+//     overhead is not a bottleneck), and
+//   - orphan bindings — deliveries whose async Bound record was lost to a gateway
+//     crash — converge to 0 via the OrphanReconciler, which adopts (records) them
+//     and destroys NO VM (the delete-authorization contract).
+//
+// It runs entirely against a fake substrate: an httptest sandboxd that hands over
+// a fresh sandbox in sub-millisecond time (standing in for sandboxd's 0.2–0.7 ms
+// ownership transfer) and the controller-runtime fake client as the Bound-record
+// store. So it measures gateway algorithm/overhead and the orphan-GC invariant,
+// not real microVM boot.
+//
+//	Run: GOTOOLCHAIN=go1.26.3 go run -tags l2bench ./test/l2bench \
+//	       -out /path/to/l2-gateway.json
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/go-logr/logr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
+	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/sandboxd"
+)
+
+const (
+	ns   = "l2bench"
+	node = "l2-node"
+)
+
+var (
+	outFlag     = flag.String("out", "/tmp/l2-gateway.json", "results json path")
+	itersFlag   = flag.Int("iters", 5000, "claim latency iterations")
+	orphansFlag = flag.Int("orphans", 200, "orphan bindings to inject and reconcile")
+)
+
+func must(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fatal:", err)
+		os.Exit(2)
+	}
+}
+
+// fakeSandboxd is an httptest-backed sandboxd: /v1/claim hands over a fresh
+// sandbox fast; /v1/sandboxes/{id}/release counts VM destroys (must stay 0).
+type fakeSandboxd struct {
+	srv      *httptest.Server
+	releases atomic.Int64
+	nextID   atomic.Int64
+}
+
+func newFakeSandboxd() *fakeSandboxd {
+	f := &fakeSandboxd{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/claim", func(w http.ResponseWriter, _ *http.Request) {
+		id := fmt.Sprintf("sb_%d", f.nextID.Add(1))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sandboxd.ClaimResult{
+			ID: id, Token: "tok_" + id, Deadline: "2026-07-06T00:05:00Z", OwnerAddr: "10.0.0.5:7777",
+		})
+	})
+	mux.HandleFunc("/v1/sandboxes/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/release") {
+			f.releases.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	f.srv = httptest.NewServer(mux)
+	return f
+}
+
+type allowAuthorizer struct{}
+
+func (allowAuthorizer) Authorize(context.Context, scale.ClaimRequest) error { return nil }
+
+// countingRecorder records nothing durably; it just proves the async record path
+// runs. Used only in the latency loop.
+type countingRecorder struct{ n atomic.Int64 }
+
+func (c *countingRecorder) RecordBound(context.Context, string, string, scale.Assignment) error {
+	c.n.Add(1)
+	return nil
+}
+
+// failingRecorder models the async record lost to a gateway crash → orphan binding.
+type failingRecorder struct{}
+
+func (failingRecorder) RecordBound(context.Context, string, string, scale.Assignment) error {
+	return fmt.Errorf("simulated record failure")
+}
+
+type sliceInventory []scale.Delivery
+
+func (s sliceInventory) LiveDeliveries(context.Context) ([]scale.Delivery, error) {
+	return []scale.Delivery(s), nil
+}
+
+func newScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	must(sandboxv1beta1.AddToScheme(s))
+	must(extv1beta1.AddToScheme(s))
+	return s
+}
+
+func newClaim(name string) *extv1beta1.SandboxClaim {
+	return &extv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Spec:       extv1beta1.SandboxClaimSpec{WarmPoolRef: extv1beta1.SandboxWarmPoolRef{Name: "base:24.04"}},
+	}
+}
+
+func pct(xs []float64, p float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	s := append([]float64(nil), xs...)
+	sort.Float64s(s)
+	if p >= 100 {
+		return round4(s[len(s)-1])
+	}
+	return round4(s[int(float64(len(s)-1)*p/100)])
+}
+
+func round4(f float64) float64 { return float64(int(f*10000)) / 10000 }
+
+// claimWaiter is the gateway surface the latency loop needs: Claim plus Wait to
+// drain async Bound records. *scale.NodeClaimGateway satisfies it structurally.
+type claimWaiter interface {
+	Claim(ctx context.Context, req scale.ClaimRequest) (scale.Assignment, error)
+	Wait()
+}
+
+// measureClaimLatency times gw.Claim over many iterations against the fake
+// sandboxd, returning per-call latencies in milliseconds.
+func measureClaimLatency(gw claimWaiter, iters int) []float64 {
+	ctx := context.Background()
+	lat := make([]float64, 0, iters)
+	for i := 0; i < iters; i++ {
+		req := scale.ClaimRequest{Namespace: ns, ClaimName: fmt.Sprintf("lat-%d", i), WarmPool: "base:24.04"}
+		start := time.Now()
+		a, err := gw.Claim(ctx, req)
+		d := time.Since(start)
+		must(err)
+		if a.SandboxName == "" {
+			must(fmt.Errorf("empty assignment at iter %d", i))
+		}
+		lat = append(lat, float64(d.Nanoseconds())/1e6)
+	}
+	gw.Wait()
+	return lat
+}
+
+// injectAndReconcileOrphans delivers `orphans` claims through a gateway whose async
+// record always fails (leaving orphan bindings), then runs the OrphanReconciler and
+// returns (reconciled, remainingOrphans).
+func injectAndReconcileOrphans(fs *fakeSandboxd, orphans int) (int, int) {
+	ctx := context.Background()
+
+	objs := make([]ctrlclient.Object, 0, orphans)
+	for i := 0; i < orphans; i++ {
+		objs = append(objs, newClaim(fmt.Sprintf("orphan-%d", i)))
+	}
+	fc := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(objs...).
+		WithStatusSubresource(&extv1beta1.SandboxClaim{}).
+		Build()
+
+	badGW := scale.NewGateway(scale.GatewayConfig{
+		Node: node, Client: sandboxd.New(fs.srv.URL, "root-token"),
+		Authorizer: allowAuthorizer{}, Recorder: failingRecorder{},
+		BaseContext: ctx, Logger: logr.Discard(),
+	})
+	inv := make(sliceInventory, 0, orphans)
+	for i := 0; i < orphans; i++ {
+		name := fmt.Sprintf("orphan-%d", i)
+		a, err := badGW.Claim(ctx, scale.ClaimRequest{Namespace: ns, ClaimName: name, WarmPool: "base:24.04"})
+		must(err)
+		inv = append(inv, scale.Delivery{
+			SandboxName: a.SandboxName, Node: a.Node, Address: a.Address, ClaimNS: ns, ClaimName: name,
+		})
+	}
+	badGW.Wait() // every async record has failed → `orphans` orphan bindings
+
+	orc := scale.NewOrphanReconciler(node, inv, fc, scale.NewClaimRecorder(fc), logr.Discard())
+	reconciled, err := orc.Reconcile(ctx)
+	must(err)
+
+	remaining := 0
+	for i := 0; i < orphans; i++ {
+		cur := &extv1beta1.SandboxClaim{}
+		must(fc.Get(ctx, types.NamespacedName{Namespace: ns, Name: fmt.Sprintf("orphan-%d", i)}, cur))
+		if cur.Status.SandboxStatus.Name == "" {
+			remaining++
+		}
+	}
+	return reconciled, remaining
+}
+
+func main() {
+	flag.Parse()
+
+	fs := newFakeSandboxd()
+	defer fs.srv.Close()
+
+	// --- claim-path latency (gateway overhead must be sub-millisecond) ---
+	gw := scale.NewGateway(scale.GatewayConfig{
+		Node: node, Client: sandboxd.New(fs.srv.URL, "root-token"),
+		Authorizer: allowAuthorizer{}, Recorder: &countingRecorder{},
+		TTLSeconds: 300, BaseContext: context.Background(), Logger: logr.Discard(),
+	})
+	lat := measureClaimLatency(gw, *itersFlag)
+	p50 := pct(lat, 50)
+	p95 := pct(lat, 95)
+
+	// --- orphan-binding convergence (adopt-only; zero VM destroys) ---
+	reconciled, remaining := injectAndReconcileOrphans(fs, *orphansFlag)
+	destroys := fs.releases.Load()
+
+	// pass ONLY if every orphan converged, none remain, no VM was destroyed, and
+	// the gateway's claim p50 is sub-millisecond. Values are measured, not fixed.
+	pass := remaining == 0 && reconciled == *orphansFlag && destroys == 0 && p50 < 1.0
+
+	out := map[string]any{
+		"pass":               pass,
+		"orphan_bindings":    remaining,
+		"claim_p50_ms":       p50,
+		"claim_p95_ms":       p95,
+		"orphans_injected":   *orphansFlag,
+		"orphans_reconciled": reconciled,
+		"vm_destroy_calls":   destroys,
+		"goal":               "G-0131",
+		"layer":              "L2",
+		"substrate":          "httptest fake sandboxd + fake k8s recorder",
+		"claim_iters":        *itersFlag,
+	}
+	b, err := json.MarshalIndent(out, "", "  ")
+	must(err)
+	must(os.MkdirAll(filepath.Dir(*outFlag), 0o755))
+	must(os.WriteFile(*outFlag, b, 0o644))
+
+	fmt.Printf("claim p50=%.4fms p95=%.4fms (iters=%d) | orphans injected=%d reconciled=%d remaining=%d | vm_destroy_calls=%d | pass=%v\n",
+		p50, p95, *itersFlag, *orphansFlag, reconciled, remaining, destroys, pass)
+	fmt.Printf("wrote %s\n", *outFlag)
+	if !pass {
+		os.Exit(1)
+	}
+}

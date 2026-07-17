@@ -1,0 +1,88 @@
+// Copyright 2026 The CocoonStack Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package apiserver
+
+import (
+	"fmt"
+
+	openapinamer "k8s.io/apiserver/pkg/endpoints/openapi"
+	"k8s.io/apiserver/pkg/registry/rest"
+	genericapiserver "k8s.io/apiserver/pkg/server"
+	restclient "k8s.io/client-go/rest"
+	basecompatibility "k8s.io/component-base/compatibility"
+	openapicommon "k8s.io/kube-openapi/pkg/common"
+
+	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
+)
+
+// emptyOpenAPIDefinitions supplies no generated OpenAPI definitions. Sandboxes is
+// a read-only aggregated resource, so it needs no server-side-apply type models;
+// the group's path is ignored in the OpenAPI config below.
+func emptyOpenAPIDefinitions(openapicommon.ReferenceCallback) map[string]openapicommon.OpenAPIDefinition {
+	return map[string]openapicommon.OpenAPIDefinition{}
+}
+
+// NewOpenAPIV3Config returns the OpenAPIV3 config the aggregated server installs
+// with. A non-nil config is mandatory for InstallAPIGroup (managed fields); the
+// sandboxes group path is ignored so a read-only resource needs no generated
+// definitions.
+func NewOpenAPIV3Config() *openapicommon.OpenAPIV3Config {
+	cfg := genericapiserver.DefaultOpenAPIV3Config(emptyOpenAPIDefinitions, openapinamer.NewDefinitionNamer(Scheme))
+	cfg.Info.Title = "cocoon-sandbox-aggregated-apiserver"
+	cfg.IgnorePrefixes = []string{"/apis/" + sandboxv1beta1.GroupVersion.Group}
+	return cfg
+}
+
+// InstallSandboxAPI installs the sandboxes.agents.x-k8s.io group (version
+// v1beta1, resource "sandboxes") into server, backed by the scatter-gather
+// store. This is the metrics.k8s.io-style wiring: a custom rest.Storage rather
+// than the etcd generic registry.
+func InstallSandboxAPI(server *genericapiserver.GenericAPIServer, store scale.SandboxStore) error {
+	apiGroupInfo := genericapiserver.NewDefaultAPIGroupInfo(sandboxv1beta1.GroupVersion.Group, Scheme, ParameterCodec, Codecs)
+	apiGroupInfo.VersionedResourcesStorageMap[sandboxv1beta1.GroupVersion.Version] = map[string]rest.Storage{
+		"sandboxes": NewSandboxREST(store),
+	}
+	if err := server.InstallAPIGroup(&apiGroupInfo); err != nil {
+		return fmt.Errorf("apiserver: install sandboxes API group: %w", err)
+	}
+	return nil
+}
+
+// NewInProcessServer builds a minimal GenericAPIServer with the sandboxes API
+// installed, suitable for in-process serving via httptest. Authentication and
+// authorization are left nil (the generic handler chain treats nil as
+// "disabled", i.e. pass-through) so the aggregation acceptance harness can
+// exercise the real client-go → apiserver storage code path without TLS or
+// certificate machinery. The secure production binary (cmd/sandbox-apiserver)
+// wires delegated authn/authz on top of the same InstallSandboxAPI.
+func NewInProcessServer(name string, store scale.SandboxStore) (*genericapiserver.GenericAPIServer, error) {
+	config := genericapiserver.NewConfig(Codecs)
+	config.ExternalAddress = "localhost:443"
+	config.LoopbackClientConfig = &restclient.Config{}
+	config.EffectiveVersion = basecompatibility.NewEffectiveVersionFromString("", "", "")
+	// A non-nil OpenAPIV3 config is required to install an API group (managed
+	// fields). Ignore the sandboxes path so no generated definitions are needed.
+	config.OpenAPIV3Config = NewOpenAPIV3Config()
+
+	server, err := config.Complete(nil).New(name, genericapiserver.NewEmptyDelegate())
+	if err != nil {
+		return nil, fmt.Errorf("apiserver: build generic server: %w", err)
+	}
+	if err := InstallSandboxAPI(server, store); err != nil {
+		return nil, err
+	}
+	return server, nil
+}
