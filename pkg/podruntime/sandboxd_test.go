@@ -1,0 +1,109 @@
+// Copyright 2026 The CocoonStack Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package podruntime
+
+import (
+	"context"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+)
+
+func sandboxdPod(image string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "agent", Image: image}},
+		},
+	}
+}
+
+// TestMutateSandboxdRoutesToHotPool: sandboxd mode pins the pod to the
+// vk-cocoon-sandbox virtual node, tolerates its taint, stamps the runtime, and
+// defaults the claim template from the container image — the contract the
+// vk-cocoon-sandbox provider consumes. vk-cocoon must NOT be involved.
+func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
+	m, err := NewMutator(ModeSandboxd)
+	if err != nil {
+		t.Fatalf("NewMutator(sandboxd): %v", err)
+	}
+	sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"}}
+	pod := sandboxdPod("base:24.04")
+
+	if err := m.MutatePod(context.Background(), sandbox, pod); err != nil {
+		t.Fatalf("MutatePod: %v", err)
+	}
+
+	if got := pod.Spec.NodeSelector[sandboxdNodeLabelKey]; got != sandboxdNodeLabelValue {
+		t.Fatalf("nodeSelector %s=%q, want %q", sandboxdNodeLabelKey, got, sandboxdNodeLabelValue)
+	}
+	if got := pod.Spec.NodeSelector[vkNodeLabelKey]; got != "" {
+		t.Fatalf("sandboxd pod must NOT carry the vk-cocoon selector, got %s=%q", vkNodeLabelKey, got)
+	}
+	if pod.Annotations[RuntimeAnnotation] != ModeSandboxd {
+		t.Fatalf("runtime annotation = %q, want sandboxd", pod.Annotations[RuntimeAnnotation])
+	}
+	if pod.Annotations[sandboxdTemplateAnnotation] != "base:24.04" {
+		t.Fatalf("template default = %q, want base:24.04", pod.Annotations[sandboxdTemplateAnnotation])
+	}
+	// No cocoon MicroVM annotations leaked in.
+	if _, ok := pod.Annotations[cocoonModeAnnotation]; ok {
+		t.Fatal("sandboxd pod must not carry cocoon vk-cocoon annotations")
+	}
+	if !toleratesVKCocoon(pod.Spec.Tolerations) {
+		t.Fatal("sandboxd pod must tolerate the vk-provider taint")
+	}
+}
+
+// TestMutateSandboxdRespectsExplicitTemplate: a user-set template is preserved.
+func TestMutateSandboxdRespectsExplicitTemplate(t *testing.T) {
+	m, _ := NewMutator(ModeStandard)
+	sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"}}
+	pod := sandboxdPod("ignored:latest")
+	pod.Annotations = map[string]string{
+		RuntimeAnnotation:          ModeSandboxd,
+		sandboxdTemplateAnnotation: "myproj:v1",
+	}
+	if err := m.MutatePod(context.Background(), sandbox, pod); err != nil {
+		t.Fatalf("MutatePod: %v", err)
+	}
+	if pod.Annotations[sandboxdTemplateAnnotation] != "myproj:v1" {
+		t.Fatalf("explicit template overwritten: %q", pod.Annotations[sandboxdTemplateAnnotation])
+	}
+}
+
+// TestMutateSandboxdRejectsPinnedNode: a pinned NodeName would misroute.
+func TestMutateSandboxdRejectsPinnedNode(t *testing.T) {
+	m, _ := NewMutator(ModeSandboxd)
+	sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"}}
+	pod := sandboxdPod("base:24.04")
+	pod.Spec.NodeName = "cocoon-bd1"
+	if err := m.MutatePod(context.Background(), sandbox, pod); err == nil {
+		t.Fatal("expected error for pinned nodeName in sandboxd mode")
+	}
+}
+
+// TestNewMutatorAcceptsSandboxd guards the flag surface.
+func TestNewMutatorAcceptsSandboxd(t *testing.T) {
+	if _, err := NewMutator(ModeSandboxd); err != nil {
+		t.Fatalf("NewMutator must accept sandboxd: %v", err)
+	}
+	if _, err := NewMutator("nonsense"); err == nil {
+		t.Fatal("NewMutator must reject unknown modes")
+	}
+}
