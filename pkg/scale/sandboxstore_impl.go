@@ -286,6 +286,10 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		Template: pool.Template,
 		Net:      pool.Net,
 		Size:     pool.Size,
+		// Name the claim by the k8s object so the node's operator index echoes it
+		// back and the aggregated read path (List/Get) resolves this sandbox by
+		// "<namespace>/<name>".
+		ClaimRef: namespace + "/" + name,
 	})
 	if err != nil {
 		if errors.Is(err, sandboxd.ErrNodeAtCapacity) {

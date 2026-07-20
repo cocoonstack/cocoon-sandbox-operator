@@ -96,6 +96,9 @@ func TestStoreClaim_PicksMostWarmNodeAndRoutes(t *testing.T) {
 	assert.Equal(t, "10.0.0.2:7777", f.builtAddr)
 	assert.Equal(t, "uniform-token", f.builtToken)
 	assert.Equal(t, "img", f.claimSpec.Template)
+	// The claim carries the k8s "<namespace>/<name>" so the node echoes it into
+	// its operator index and the aggregated read path can resolve this sandbox.
+	assert.Equal(t, "ns/s1", f.claimSpec.ClaimRef)
 	assert.Equal(t, 1, f.claimCalls)
 }
 

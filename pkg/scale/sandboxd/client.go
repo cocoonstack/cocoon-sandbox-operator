@@ -97,6 +97,11 @@ type ClaimSpec struct {
 	// NoRedirect is set by an SDK retrying at a redirect target; the gateway does
 	// not chase redirects (it falls back to L1 instead), so it stays false.
 	NoRedirect bool `json:"no_redirect,omitempty"`
+	// ClaimRef is the k8s "<namespace>/<name>" of the Sandbox this claim is
+	// created for. sandboxd records it on the claim and echoes it in its
+	// operator index, so the aggregated read path can map a listed sandbox back
+	// to the name it was claimed under. Empty for claims with no k8s identity.
+	ClaimRef string `json:"claim_ref,omitempty"`
 }
 
 // ClaimResult is the POST /v1/claim success body.
