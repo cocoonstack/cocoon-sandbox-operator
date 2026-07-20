@@ -8,7 +8,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 6,
+  "version": 7,
   "refresh": "10s",
   "time": {
     "from": "now-1h",
@@ -378,8 +378,8 @@
       },
       "description": "SandboxClaim rate, operator-side and client-side.",
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 6,
+        "w": 24,
         "x": 0,
         "y": 14
       },
@@ -436,8 +436,84 @@
     },
     {
       "id": 10,
+      "type": "timeseries",
+      "title": "认领延迟 p50/p95/p99 (xx ms)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "description": "Warm-sandbox checkout latency quantiles (claim -> Ready). Unit auto-scales to ms.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "histogram_quantile(0.5, sum(rate(sandbox_loadgen_claim_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(sandbox_loadgen_claim_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(sandbox_loadgen_claim_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "last",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 11,
       "type": "heatmap",
-      "title": "认领延迟分布 (claim -> Ready)",
+      "title": "认领延迟分布 heatmap (claim -> Ready)",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
@@ -447,7 +523,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 14
+        "y": 20
       },
       "targets": [
         {
