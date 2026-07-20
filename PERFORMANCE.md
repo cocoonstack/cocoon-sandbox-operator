@@ -84,6 +84,37 @@ rebalances (an idle node went from 0 to ~127 microVMs). At very high per-node
 density the cocoon-net DHCP path is the next limiter (a small `WaitingForIP`
 tail).
 
+## sandboxd hot-pool tier (deployed, measured end-to-end)
+
+The `sandboxd` sub-millisecond claim is no longer only a data-plane number: it is
+now reachable **through the same Kubernetes API and this operator**, via
+`runtime: sandboxd`. The operator's `podruntime` mutator pins such a Sandbox to a
+[`vk-cocoon-sandbox`](https://github.com/cocoonstack/vk-cocoon-sandbox) virtual
+node (one per host, co-located with `vk-cocoon`), which serves the claim from the
+node-local `sandboxd` hot pool. Kubernetes stays the record-of-intent plane; the
+claim transaction runs on the node.
+
+Measured on the 26-node MY fleet (each node: co-located `vk-cocoon` +
+`vk-cocoon-sandbox` + `sandboxd`; warm pool of **125 golden microVMs**,
+`warm=5`/node, template `sandbox/rt:24.04` distributed **P2P** node-to-node):
+
+| metric | result |
+|---|---|
+| **Sandbox `create` → `Ready`** | **p50 < 1 s**, p95 / p99 / max **1 s** (warm claim) |
+| submit 100 `Sandbox` CRs | 2.9 s |
+| delivered | 98 / 100 warm (the 2 misses were `sandboxd` cold-provision on a single over-scheduled node, not the control plane) |
+| routing | **100 % landed on the `sandboxd` plane; 0 on `vk-cocoon`** |
+| apiserver under the burst | APF in-queue **0** throughout, **zero** new flow-control rejections, the `vke-list-limit` priority level **0 / 79** seats — no LIST-seat wedge at 100 concurrent creates (L0 cache-fed reads hold) |
+| isolation | cocoon-managed microVMs **unchanged** across the run (distinct image, `firecracker` hypervisor, `sbx-*` VMs — never cocoon's Cloud-Hypervisor VMs or image paths) |
+
+The end-to-end `create → Ready` is dominated by the Kubernetes round-trip
+(admission → operator reconcile → schedule → status propagation), sub-second at
+this scale; the underlying `sandboxd` ownership transfer itself is **0.2–0.7 ms**
+and the `vk-cocoon-sandbox` gateway overhead **~0.04 ms** (see the operator's
+`pkg/scale` L2 gateway bench). This is the operator's answer to the "cold boot is
+slow" caveat above: the hot tier now serves warm claims at node-local speed while
+`kubectl get sandboxes` keeps working.
+
 ## Data plane
 
 k8s Pod `exec` is **not** available to `vk-cocoon` microVMs on a managed cluster
