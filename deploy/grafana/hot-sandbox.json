@@ -8,7 +8,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 9,
+  "version": 10,
   "refresh": "10s",
   "time": {
     "from": "now-1h",
@@ -257,7 +257,8 @@
           "expr": "sum(agent_sandboxes{launch_type=\"warm\",owned_by=\"SandboxWarmPool\",ready_condition=\"true\"}) or vector(0)",
           "legendFormat": "剩余 (未被认领占用)",
           "refId": "B",
-          "range": true
+          "range": true,
+          "hide": true
         }
       ],
       "fieldConfig": {
@@ -271,24 +272,7 @@
             "gradientMode": "opacity"
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "剩余 (未被认领占用)"
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "viz": true,
-                  "legend": false,
-                  "tooltip": false
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "options": {
         "legend": {
