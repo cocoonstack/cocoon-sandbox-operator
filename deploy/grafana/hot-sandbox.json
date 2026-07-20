@@ -8,7 +8,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 7,
+  "version": 8,
   "refresh": "10s",
   "time": {
     "from": "now-1h",
@@ -55,7 +55,7 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(agent_sandboxes{launch_type=\"warm\"})",
+          "expr": "sum(agent_sandboxes{launch_type=\"warm\"}) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "range": true
@@ -102,7 +102,7 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(agent_sandboxes{launch_type=\"warm\",owned_by=\"SandboxWarmPool\",ready_condition=\"true\"})",
+          "expr": "sum(agent_sandboxes{launch_type=\"warm\",owned_by=\"SandboxWarmPool\",ready_condition=\"true\"}) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "range": true
@@ -149,7 +149,7 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(rate(agent_sandbox_warm_created_total[1m]))",
+          "expr": "sum(rate(agent_sandbox_warm_created_total[1m])) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "range": true
@@ -196,7 +196,7 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(rate(agent_sandbox_claim_controller_startup_latency_ms_count[1m]))",
+          "expr": "sum(rate(agent_sandbox_claim_controller_startup_latency_ms_count[1m])) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "range": true
@@ -244,7 +244,7 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(agent_sandboxes{launch_type=\"warm\"})",
+          "expr": "sum(agent_sandboxes{launch_type=\"warm\"}) or vector(0)",
           "legendFormat": "总量",
           "refId": "A",
           "range": true
@@ -254,7 +254,7 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(agent_sandboxes{launch_type=\"warm\",owned_by=\"SandboxWarmPool\",ready_condition=\"true\"})",
+          "expr": "sum(agent_sandboxes{launch_type=\"warm\",owned_by=\"SandboxWarmPool\",ready_condition=\"true\"}) or vector(0)",
           "legendFormat": "剩余 (未被认领占用)",
           "refId": "B",
           "range": true
@@ -310,7 +310,7 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(rate(agent_sandbox_warm_created_total[1m]))",
+          "expr": "sum(rate(agent_sandbox_warm_created_total[1m])) or vector(0)",
           "legendFormat": "创建 /s (warm-pool controller)",
           "refId": "A",
           "range": true
@@ -320,7 +320,7 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(rate(agent_sandbox_claim_controller_startup_latency_ms_count[1m]))",
+          "expr": "sum(rate(agent_sandbox_claim_controller_startup_latency_ms_count[1m])) or vector(0)",
           "legendFormat": "消耗 /s (claims served)",
           "refId": "B",
           "range": true
