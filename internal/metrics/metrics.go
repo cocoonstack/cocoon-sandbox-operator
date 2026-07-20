@@ -163,7 +163,7 @@ func RecordSandboxCreationLatency(duration time.Duration, namespace, launchType,
 // (go-client, python-client, controller) or "unknown" for anything else.
 func NormalizeCreatedBy(createdBy string) string {
 	switch createdBy {
-	case "go-client", "python-client", "controller":
+	case "go-client", "python-client", "controller", "loadgen":
 		return createdBy
 	default:
 		return "unknown"

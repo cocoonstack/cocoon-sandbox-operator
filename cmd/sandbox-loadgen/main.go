@@ -1,0 +1,405 @@
+// sandbox-loadgen measures the real "claim a pre-warmed sandbox from the
+// warmpool" latency (the checkout path, NOT create-from-scratch) and exports it
+// as Prometheus metrics.
+//
+// It stands up a SandboxTemplate + SandboxWarmPool (replicas=--replicas), waits
+// for the pool to warm, then SERIALLY (one outstanding at a time) issues
+// SandboxClaims against the pool, fast-polls each to Ready (a warm sandbox has
+// been delivered), records the claim latency at ms resolution, and releases the
+// claim (delete) so the pool refills. Because it drives real SandboxClaims, the
+// operator's own agent_sandbox_claim_startup_latency_ms is populated too.
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"sync/atomic"
+	"syscall"
+	"time"
+
+	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
+	"k8s.io/client-go/rest"
+	toolscache "k8s.io/client-go/tools/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+)
+
+const (
+	runtimeAnnotation = "sandbox.cocoonstack.io/runtime"
+	templateName      = "loadgen-tpl"
+	warmPoolName      = "loadgen-pool"
+	// observedAtAnnotation is read by the operator to compute the claim-startup
+	// latency (time.Since). Stamping it at create-time makes the operator record
+	// agent_sandbox_claim_startup_latency_ms for our claims.
+	observedAtAnnotation = "agents.x-k8s.io/controller-first-observed-at"
+)
+
+var (
+	// claimSeconds: client-observed time from SandboxClaim create to Ready
+	// (a warm sandbox delivered). Fine buckets — checkout is typically sub-second.
+	claimSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "sandbox_loadgen_claim_seconds",
+		Help:    "Time to claim a pre-warmed sandbox from the warmpool (create SandboxClaim -> Ready).",
+		Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1, 1.5, 2, 3, 5, 10, 30},
+	})
+	claimsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sandbox_loadgen_claims_total", Help: "SandboxClaims issued.",
+	})
+	boundTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sandbox_loadgen_bound_total", Help: "SandboxClaims served (Ready) from the warmpool.",
+	})
+	claimFailed = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "sandbox_loadgen_claim_failed_total", Help: "Failed claim operations by reason.",
+	}, []string{"reason"}) // create | timeout | delete
+	inflight = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "sandbox_loadgen_inflight", Help: "Claims currently outstanding (serial => 0 or 1).",
+	})
+	poolReady = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "sandbox_loadgen_pool_ready", Help: "SandboxWarmPool readyReplicas (warm sandboxes available).",
+	})
+	poolTarget = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "sandbox_loadgen_pool_target", Help: "SandboxWarmPool desired replicas.",
+	})
+	buildInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "sandbox_loadgen_build_info", Help: "Loadgen run parameters, constant 1.",
+	}, []string{"namespace", "warmpool", "template"})
+
+	// Event-accurate sandbox lifecycle metrics from a namespace-scoped watch.
+	// Unlike delta() on the operator's gauge, these counters preserve every
+	// creation between scrapes, so per-interval bars and rates are exact.
+	watchLive = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "sandbox_watch_live", Help: "Sandboxes currently existing (watch-derived, event-accurate).",
+	})
+	watchCreated = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sandbox_watch_created_total", Help: "Sandboxes created since loadgen start (watch ADD events after initial sync).",
+	})
+	watchDeleted = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sandbox_watch_deleted_total", Help: "Sandboxes deleted since loadgen start (watch DELETE events after initial sync).",
+	})
+)
+
+type options struct {
+	replicas      int
+	namespace     string
+	image         string
+	createdBy     string
+	metricsAddr   string
+	claimInterval time.Duration
+	poll          time.Duration
+	claimTimeout  time.Duration
+	poolPoll      time.Duration
+}
+
+func main() {
+	o := options{}
+	flag.IntVar(&o.replicas, "replicas", 100, "SandboxWarmPool size (pre-warmed sandboxes)")
+	flag.StringVar(&o.namespace, "namespace", "sandboxd-test", "namespace")
+	flag.StringVar(&o.image, "template", "ghcr.io/cocoonstack/sandbox/rt@sha256:c8cab53a1e1684e6c0c95a06855001b0535be2862b7d4f72658f9f0e784c8778", "sandbox container image (digest ref)")
+	flag.StringVar(&o.createdBy, "created-by", "loadgen", "value for the agents.x-k8s.io/created-by label")
+	flag.StringVar(&o.metricsAddr, "metrics-addr", ":9090", "Prometheus metrics listen address")
+	flag.DurationVar(&o.claimInterval, "claim-interval", 1*time.Second, "gap between serial claims")
+	flag.DurationVar(&o.poll, "poll", 25*time.Millisecond, "readiness poll interval (ms resolution)")
+	flag.DurationVar(&o.claimTimeout, "claim-timeout", 60*time.Second, "max wait for a claim to be served")
+	flag.DurationVar(&o.poolPoll, "pool-poll", 10*time.Second, "how often to refresh the warmpool gauge")
+	flag.Parse()
+
+	logf.SetLogger(zap.New(zap.UseDevMode(false)))
+	log := logf.Log.WithName("sandbox-loadgen")
+
+	// pre-initialise the failure series so panels render 0 instead of "No data".
+	for _, r := range []string{"create", "timeout", "delete"} {
+		claimFailed.WithLabelValues(r).Add(0)
+	}
+	poolTarget.Set(float64(o.replicas))
+	buildInfo.WithLabelValues(o.namespace, warmPoolName, o.image).Set(1)
+
+	cfg, err := config.GetConfig()
+	if err != nil {
+		log.Error(err, "config")
+		os.Exit(1)
+	}
+	cl, err := client.New(cfg, client.Options{})
+	if err != nil {
+		log.Error(err, "client")
+		os.Exit(1)
+	}
+
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+		log.Info("serving metrics", "addr", o.metricsAddr)
+		if err := http.ListenAndServe(o.metricsAddr, mux); err != nil {
+			log.Error(err, "metrics server exited")
+		}
+	}()
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	lg := &loadgen{cl: cl, o: o, log: log}
+	if err := lg.setup(ctx); err != nil {
+		log.Error(err, "setup template/warmpool")
+		os.Exit(1)
+	}
+	if err := startSandboxWatch(ctx, cfg, o.namespace, log); err != nil {
+		log.Error(err, "start sandbox watch") // metrics degrade to claim-only; keep benchmarking
+	}
+	go lg.poolPollLoop(ctx)
+	lg.waitPoolWarm(ctx)
+	lg.claimLoop(ctx)
+	log.Info("shutting down")
+}
+
+type loadgen struct {
+	cl  client.Client
+	o   options
+	log logr.Logger
+}
+
+func gvk(kind string) schema.GroupVersionKind { return extv1beta1.GroupVersion.WithKind(kind) }
+
+// startSandboxWatch feeds the sandbox_watch_* metrics from an informer on
+// Sandbox objects in the loadgen namespace. The live gauge counts every ADD
+// (including the initial cache replay) minus DELETEs, so it equals the store
+// size; the created/deleted counters skip the initial replay so they only
+// record real lifecycle events.
+func startSandboxWatch(ctx context.Context, cfg *rest.Config, namespace string, log logr.Logger) error {
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("dynamic client: %w", err)
+	}
+	gvr := schema.GroupVersionResource{
+		Group:    sandboxv1beta1.GroupVersion.Group,
+		Version:  sandboxv1beta1.GroupVersion.Version,
+		Resource: "sandboxes",
+	}
+	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(dyn, 0, namespace, nil)
+	informer := factory.ForResource(gvr).Informer()
+	var synced atomic.Bool
+	_, err = informer.AddEventHandler(toolscache.ResourceEventHandlerFuncs{
+		AddFunc: func(any) {
+			watchLive.Inc()
+			if synced.Load() {
+				watchCreated.Inc()
+			}
+		},
+		DeleteFunc: func(any) {
+			watchLive.Dec()
+			if synced.Load() {
+				watchDeleted.Inc()
+			}
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("add handler: %w", err)
+	}
+	factory.Start(ctx.Done())
+	go func() {
+		if !toolscache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
+			return
+		}
+		synced.Store(true)
+		log.Info("sandbox watch synced", "live", len(informer.GetStore().List()))
+	}()
+	return nil
+}
+
+// setup creates the SandboxTemplate + SandboxWarmPool (idempotent).
+func (l *loadgen) setup(ctx context.Context) error {
+	tpl := &unstructured.Unstructured{}
+	tpl.SetGroupVersionKind(gvk("SandboxTemplate"))
+	tpl.SetNamespace(l.o.namespace)
+	tpl.SetName(templateName)
+	tpl.SetLabels(map[string]string{sandboxv1beta1.CreatedByLabel: l.o.createdBy})
+	tpl.Object["spec"] = map[string]interface{}{
+		"podTemplate": map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"annotations": map[string]interface{}{runtimeAnnotation: "sandboxd"},
+				"labels":      map[string]interface{}{"app": "loadgen-warm"},
+			},
+			"spec": map[string]interface{}{
+				"containers": []interface{}{map[string]interface{}{
+					"name": "main", "image": l.o.image,
+					"resources": map[string]interface{}{"requests": map[string]interface{}{"cpu": "50m", "memory": "64Mi"}},
+				}},
+			},
+		},
+	}
+	if err := l.cl.Create(ctx, tpl); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create template: %w", err)
+	}
+
+	pool := &unstructured.Unstructured{}
+	pool.SetGroupVersionKind(gvk("SandboxWarmPool"))
+	pool.SetNamespace(l.o.namespace)
+	pool.SetName(warmPoolName)
+	pool.SetLabels(map[string]string{sandboxv1beta1.CreatedByLabel: l.o.createdBy})
+	pool.Object["spec"] = map[string]interface{}{
+		"replicas":           int64(l.o.replicas),
+		"sandboxTemplateRef": map[string]interface{}{"name": templateName},
+	}
+	if err := l.cl.Create(ctx, pool); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create warmpool: %w", err)
+	}
+	l.log.Info("template + warmpool ensured", "replicas", l.o.replicas)
+	return nil
+}
+
+// waitPoolWarm blocks until the warmpool has at least one ready sandbox.
+func (l *loadgen) waitPoolWarm(ctx context.Context) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for {
+		if r := l.poolReadyReplicas(ctx); r >= 1 {
+			l.log.Info("warmpool has ready sandboxes; starting claim benchmark", "ready", r)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// claimLoop serially claims one warm sandbox at a time, times it, and releases.
+func (l *loadgen) claimLoop(ctx context.Context) {
+	t := time.NewTicker(l.o.claimInterval)
+	defer t.Stop()
+	n := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		n++
+		l.claimOnce(ctx, fmt.Sprintf("loadgen-claim-%d", n))
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// claimOnce creates a SandboxClaim, fast-polls it to Ready (warm sandbox
+// delivered), records the claim latency, then deletes (releases) it.
+func (l *loadgen) claimOnce(ctx context.Context, name string) {
+	inflight.Inc()
+	defer inflight.Dec()
+
+	claim := &unstructured.Unstructured{}
+	claim.SetGroupVersionKind(gvk("SandboxClaim"))
+	claim.SetNamespace(l.o.namespace)
+	claim.SetName(name)
+	claim.SetLabels(map[string]string{sandboxv1beta1.CreatedByLabel: l.o.createdBy})
+	claim.SetAnnotations(map[string]string{observedAtAnnotation: time.Now().UTC().Format(time.RFC3339Nano)})
+	claim.Object["spec"] = map[string]interface{}{
+		"warmPoolRef": map[string]interface{}{"name": warmPoolName},
+	}
+
+	start := time.Now()
+	if err := l.cl.Create(ctx, claim); err != nil {
+		claimFailed.WithLabelValues("create").Inc()
+		l.log.Error(err, "create claim", "name", name)
+		return
+	}
+	claimsTotal.Inc()
+
+	poll := time.NewTicker(l.o.poll)
+	defer poll.Stop()
+	deadline := start.Add(l.o.claimTimeout)
+	served := false
+	for {
+		cur := &unstructured.Unstructured{}
+		cur.SetGroupVersionKind(gvk("SandboxClaim"))
+		if err := l.cl.Get(ctx, client.ObjectKey{Namespace: l.o.namespace, Name: name}, cur); err == nil {
+			if isReady(cur) {
+				claimSeconds.Observe(time.Since(start).Seconds())
+				boundTotal.Inc()
+				served = true
+				break
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-poll.C:
+			if time.Now().After(deadline) {
+				claimFailed.WithLabelValues("timeout").Inc()
+				l.log.Info("claim not served before timeout", "name", name)
+				break
+			}
+		}
+		if !served && time.Now().After(deadline) {
+			break
+		}
+	}
+	// release
+	rel := &unstructured.Unstructured{}
+	rel.SetGroupVersionKind(gvk("SandboxClaim"))
+	rel.SetNamespace(l.o.namespace)
+	rel.SetName(name)
+	if err := l.cl.Delete(ctx, rel); err != nil && !apierrors.IsNotFound(err) {
+		claimFailed.WithLabelValues("delete").Inc()
+	}
+}
+
+func (l *loadgen) poolPollLoop(ctx context.Context) {
+	t := time.NewTicker(l.o.poolPoll)
+	defer t.Stop()
+	for {
+		poolReady.Set(float64(l.poolReadyReplicas(ctx)))
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (l *loadgen) poolReadyReplicas(ctx context.Context) int64 {
+	pool := &unstructured.Unstructured{}
+	pool.SetGroupVersionKind(gvk("SandboxWarmPool"))
+	if err := l.cl.Get(ctx, client.ObjectKey{Namespace: l.o.namespace, Name: warmPoolName}, pool); err != nil {
+		return 0
+	}
+	rr, _, _ := unstructured.NestedInt64(pool.Object, "status", "readyReplicas")
+	return rr
+}
+
+func isReady(u *unstructured.Unstructured) bool {
+	conds, found, err := unstructured.NestedSlice(u.Object, "status", "conditions")
+	if err != nil || !found {
+		return false
+	}
+	for _, c := range conds {
+		m, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if m["type"] == "Ready" && m["status"] == string(metav1.ConditionTrue) {
+			return true
+		}
+	}
+	return false
+}
