@@ -302,7 +302,6 @@ func (l *loadgen) claimOnce(ctx context.Context, name string) {
 	poll := time.NewTicker(l.o.poll)
 	defer poll.Stop()
 	deadline := start.Add(l.o.claimTimeout)
-	served := false
 	for {
 		cur := &unstructured.Unstructured{}
 		cur.SetGroupVersionKind(gvk("SandboxClaim"))
@@ -310,7 +309,6 @@ func (l *loadgen) claimOnce(ctx context.Context, name string) {
 			if isReady(cur) {
 				claimSeconds.Observe(time.Since(start).Seconds())
 				boundTotal.Inc()
-				served = true
 				break
 			}
 		}
@@ -321,10 +319,9 @@ func (l *loadgen) claimOnce(ctx context.Context, name string) {
 			if time.Now().After(deadline) {
 				claimFailed.WithLabelValues("timeout").Inc()
 				l.log.Info("claim not served before timeout", "name", name)
-				break
 			}
 		}
-		if !served && time.Now().After(deadline) {
+		if time.Now().After(deadline) {
 			break
 		}
 	}
