@@ -62,7 +62,7 @@ spec:
                     values: ["virtual-kubelet"]
       containers:
         - name: loadgen
-          image: mindset-ap-southeast-1.cr.volces.com/g0031/sandbox-loadgen:v5
+          image: mindset-ap-southeast-1.cr.volces.com/g0031/sandbox-loadgen:v6
           args:
             - --replicas=100                # SandboxWarmPool size (pre-warmed sandboxes)
             - --namespace=sandboxd-test
@@ -75,7 +75,9 @@ spec:
             - { name: metrics, containerPort: 9090 }
           resources:
             requests: { cpu: "100m", memory: "128Mi" }
-            limits: { cpu: "500m", memory: "256Mi" }
+            # 512Mi: the sandbox watch keeps a pruned (metadata-only) cache, but
+            # leave headroom for 50k-object pools; 256Mi OOMed at 10k pre-prune.
+            limits: { cpu: "500m", memory: "512Mi" }
           readinessProbe:
             httpGet: { path: /healthz, port: 9090 }
             initialDelaySeconds: 3

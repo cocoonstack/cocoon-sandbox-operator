@@ -193,6 +193,27 @@ func startSandboxWatch(ctx context.Context, cfg *rest.Config, namespace string, 
 	}
 	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(dyn, 0, namespace, nil)
 	informer := factory.ForResource(gvr).Informer()
+	// The watch only counts lifecycle events, so keep just identity fields in
+	// the store: a full 10k-sandbox cache OOMKilled the 256Mi pod, pruned
+	// objects are ~100 bytes each.
+	if err := informer.SetTransform(func(obj interface{}) (interface{}, error) {
+		u, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return obj, nil // e.g. DeletedFinalStateUnknown tombstones
+		}
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": u.GetAPIVersion(),
+			"kind":       u.GetKind(),
+			"metadata": map[string]interface{}{
+				"name":            u.GetName(),
+				"namespace":       u.GetNamespace(),
+				"uid":             string(u.GetUID()),
+				"resourceVersion": u.GetResourceVersion(),
+			},
+		}}, nil
+	}); err != nil {
+		return fmt.Errorf("set transform: %w", err)
+	}
 	var synced atomic.Bool
 	_, err = informer.AddEventHandler(toolscache.ResourceEventHandlerFuncs{
 		AddFunc: func(any) {
