@@ -42,6 +42,7 @@ import (
 	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
 	sandboxcontrollers "github.com/cocoonstack/cocoon-sandbox-operator/controllers"
 	extensionsv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	asmetrics "github.com/cocoonstack/cocoon-sandbox-operator/internal/metrics"
 )
 
 const (
@@ -441,6 +442,7 @@ func (r *SandboxWarmPoolReconciler) createPoolSandbox(ctx context.Context, warmP
 		logger.Error(err, "Failed to create pool sandbox")
 		return err
 	}
+	asmetrics.IncWarmPoolSandboxCreated(warmPool.Namespace, warmPool.Name)
 
 	logger.Info("Created new pool sandbox", "sandbox", sandbox.Name, "poolName", warmPool.Name)
 	return nil

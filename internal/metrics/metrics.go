@@ -97,6 +97,21 @@ var (
 		[]string{"namespace", "sandbox_template", "launch_type", "warmpool_name", "pod_condition", "created_by"},
 	)
 
+	// WarmPoolSandboxCreatedTotal counts Sandboxes created by the warm-pool
+	// controller (pool fill and claim-consumed replacement alike). Event-level
+	// counter so per-interval fill rates survive scrape gaps and do not depend
+	// on any external watcher.
+	// Labels:
+	// - namespace: the namespace of the warm pool
+	// - warmpool_name: the SandboxWarmPool that created the sandbox.
+	WarmPoolSandboxCreatedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "agent_sandbox_warm_created_total",
+			Help: "Total number of Sandboxes created by the SandboxWarmPool controller.",
+		},
+		[]string{"namespace", "warmpool_name"},
+	)
+
 	// AgentSandboxesDesc describes the agent_sandboxes metric point-in-time counts.
 	// Labels:
 	// - namespace: the namespace of the sandbox
@@ -139,7 +154,13 @@ func init() {
 	metrics.Registry.MustRegister(ClaimControllerStartupLatency)
 	metrics.Registry.MustRegister(SandboxCreationLatency)
 	metrics.Registry.MustRegister(SandboxClaimCreationTotal)
+	metrics.Registry.MustRegister(WarmPoolSandboxCreatedTotal)
 	metrics.Registry.MustRegister(BuildInfo)
+}
+
+// IncWarmPoolSandboxCreated counts one Sandbox created by the warm-pool controller.
+func IncWarmPoolSandboxCreated(namespace, warmPoolName string) {
+	WarmPoolSandboxCreatedTotal.WithLabelValues(namespace, warmPoolName).Inc()
 }
 
 // RecordClaimStartupLatency records the duration since the provided start time.
