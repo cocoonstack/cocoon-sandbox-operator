@@ -78,6 +78,7 @@ func main() {
 	var sandboxTemplateConcurrentWorkers int
 	var sandboxWarmPoolMaxBatchSize int
 	var enableWarmPoolEviction bool
+	var sandboxWarmPoolDisableCRManagement bool
 	var printVersion bool
 	var webhookPort int
 	var webhookCertDir string
@@ -121,6 +122,10 @@ func main() {
 	flag.IntVar(&sandboxTemplateConcurrentWorkers, "sandbox-template-concurrent-workers", 1, "Max concurrent reconciles for the SandboxTemplate controller")
 	flag.IntVar(&sandboxWarmPoolMaxBatchSize, "sandbox-warm-pool-max-batch-size", 300, "Max batch size for parallel sandbox creation and deletion in SandboxWarmPool controller. Default is 300.")
 	flag.BoolVar(&enableWarmPoolEviction, "enable-warm-pool-eviction", true, "Mark pods created by a warm pool as ready-to-evict by default.")
+	flag.BoolVar(&sandboxWarmPoolDisableCRManagement, "sandbox-warm-pool-disable-cr-management", false,
+		"Disable per-CR Sandbox create/delete in the SandboxWarmPool controller (status-only). "+
+			"Use with the L3 writable-aggregation design, where warm capacity is driven per-node by sandboxd "+
+			"and CR-based replenishment would fight the aggregated node-local claim path.")
 	opts := zap.Options{
 		Development: false,
 	}
@@ -396,10 +401,11 @@ func main() {
 		}
 
 		if err = (&extensionscontrollers.SandboxWarmPoolReconciler{
-			Client:                 mgr.GetClient(),
-			Scheme:                 mgr.GetScheme(),
-			MaxBatchSize:           sandboxWarmPoolMaxBatchSize,
-			EnableWarmPoolEviction: enableWarmPoolEviction,
+			Client:                     mgr.GetClient(),
+			Scheme:                     mgr.GetScheme(),
+			MaxBatchSize:               sandboxWarmPoolMaxBatchSize,
+			EnableWarmPoolEviction:     enableWarmPoolEviction,
+			DisableSandboxCRManagement: sandboxWarmPoolDisableCRManagement,
 		}).SetupWithManager(mgr, sandboxWarmPoolConcurrentWorkers); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "SandboxWarmPool")
 			os.Exit(1)

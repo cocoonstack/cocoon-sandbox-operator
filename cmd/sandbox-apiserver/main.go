@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -48,12 +49,19 @@ const inventoryCacheSyncTimeout = 2 * time.Minute
 // options are the standard aggregated-apiserver options: secure serving plus
 // delegated authentication/authorization (token/SAR review against the host
 // kube-apiserver). There is deliberately no etcd option — this server stores
-// nothing.
+// nothing. The sandboxd token wires the node-local claim/release write path.
 type options struct {
 	SecureServing  *genericoptions.SecureServingOptionsWithLoopback
 	Authentication *genericoptions.DelegatingAuthenticationOptions
 	Authorization  *genericoptions.DelegatingAuthorizationOptions
 	Features       *genericoptions.FeatureOptions
+
+	// SandboxdToken is the uniform fleet-wide sandboxd api_token presented on the
+	// node-local claim/release verbs. SandboxdTokenFile, when set, is read at
+	// startup (a Secret mount) and takes precedence. When both are empty the
+	// Create/Delete write path stays disabled (fails closed).
+	SandboxdToken     string
+	SandboxdTokenFile string
 }
 
 func newOptions() *options {
@@ -75,6 +83,23 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	o.Authentication.AddFlags(fs)
 	o.Authorization.AddFlags(fs)
 	o.Features.AddFlags(fs)
+	fs.StringVar(&o.SandboxdToken, "sandboxd-token", o.SandboxdToken,
+		"Uniform fleet-wide sandboxd api_token presented on node-local claim/release. Prefer --sandboxd-token-file for a Secret mount.")
+	fs.StringVar(&o.SandboxdTokenFile, "sandboxd-token-file", o.SandboxdTokenFile,
+		"Path to a file (Secret mount) holding the sandboxd api_token; overrides --sandboxd-token when set.")
+}
+
+// resolveSandboxdToken returns the sandboxd token, reading it from the token file
+// (a Secret mount) when one is configured, else the literal flag value.
+func (o *options) resolveSandboxdToken() (string, error) {
+	if o.SandboxdTokenFile == "" {
+		return o.SandboxdToken, nil
+	}
+	b, err := os.ReadFile(o.SandboxdTokenFile)
+	if err != nil {
+		return "", fmt.Errorf("read sandboxd token file %q: %w", o.SandboxdTokenFile, err)
+	}
+	return strings.TrimSpace(string(b)), nil
 }
 
 // serverConfig assembles a GenericAPIServer config from the options.
@@ -122,7 +147,17 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	store := scale.NewScatterGatherStore(scale.NewClientInventorySource(reader))
+	token, err := o.resolveSandboxdToken()
+	if err != nil {
+		return err
+	}
+	// WithClaimRouting wires the node-local claim/release write path: the uniform
+	// fleet token plus a per-node sandboxd HTTP client keyed on each node's
+	// advertised address (NodeInventory.Address). Empty token leaves it fail-closed.
+	store := scale.NewScatterGatherStore(
+		scale.NewClientInventorySource(reader),
+		scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()),
+	)
 
 	server, err := cfg.Complete(nil).New("cocoon-sandbox-apiserver", genericapiserver.NewEmptyDelegate())
 	if err != nil {

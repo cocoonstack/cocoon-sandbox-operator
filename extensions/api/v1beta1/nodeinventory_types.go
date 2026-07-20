@@ -19,6 +19,25 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// PoolCapacity is one sandboxd warm pool's capacity as reported by its owning
+// node's GET /v1/info: the pool key plus its warm/target counts. The aggregated
+// apiserver reads it to pick a node that already holds a warm microVM for a
+// requested (template, net, size).
+type PoolCapacity struct {
+	// template is the pool's base image (the sandbox template).
+	Template string `json:"template"`
+	// net is the pool's network shape (e.g. "none", "egress").
+	// +optional
+	Net string `json:"net,omitempty"`
+	// size is the pool's VM size class (e.g. "small").
+	// +optional
+	Size string `json:"size,omitempty"`
+	// warm is the number of ready-to-claim warm microVMs currently in the pool.
+	Warm int `json:"warm"`
+	// target is the pool's desired warm depth.
+	Target int `json:"target"`
+}
+
 // InventoryEntry is one live sandbox as summarized by its owning node.
 type InventoryEntry struct {
 	// name is the sandbox "<namespace>/<name>"; an unqualified name means the
@@ -56,6 +75,14 @@ type NodeInventory struct {
 	// entries summarizes the node's live sandboxes.
 	// +optional
 	Entries []InventoryEntry `json:"entries,omitempty"`
+	// address is the node's sandboxd advertise address ("host:port"); the
+	// aggregated apiserver routes a claim to this node's sandboxd through it.
+	// +optional
+	Address string `json:"address,omitempty"`
+	// pools is the node's per-pool warm capacity, used to pick a node that
+	// already holds a warm microVM for a requested (template, net, size).
+	// +optional
+	Pools []PoolCapacity `json:"pools,omitempty"`
 }
 
 // +kubebuilder:object:root=true

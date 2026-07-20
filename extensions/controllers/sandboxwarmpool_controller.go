@@ -62,6 +62,14 @@ type SandboxWarmPoolReconciler struct {
 	Scheme                 *runtime.Scheme
 	MaxBatchSize           int
 	EnableWarmPoolEviction bool
+	// DisableSandboxCRManagement makes the controller stop creating/deleting
+	// per-pool Sandbox CRs and only report status. In the L3 writable-aggregation
+	// design warm capacity is driven per node by sandboxd (PUT /v1/pools), NOT by
+	// N Sandbox CRs — and because Sandbox create now routes through the aggregated
+	// apiserver's node-local claim, CR-based replenishment would fight that path
+	// (claiming the very warm VMs the pool is meant to hold). The zero value keeps
+	// the legacy CR-management behavior, so existing deployments are unaffected.
+	DisableSandboxCRManagement bool
 }
 
 //+kubebuilder:rbac:groups=extensions.agents.x-k8s.io,resources=sandboxwarmpools,verbs=get;list;watch;create;update;patch;delete
@@ -110,6 +118,13 @@ func (r *SandboxWarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 // reconcilePool ensures the correct number of pre-allocated sandboxes exist in the pool.
 func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) error {
 	logger := log.FromContext(ctx)
+
+	// In the L3 writable-aggregation design warm capacity lives per-node in
+	// sandboxd, not as Sandbox CRs, and creating CRs would fight the aggregated
+	// node-local claim path. When disabled, report status without any create/delete.
+	if r.DisableSandboxCRManagement {
+		return r.reconcilePoolStatusOnly(ctx, warmPool)
+	}
 
 	// Compute hash of the warm pool name for the pool label
 	poolNameHash := sandboxcontrollers.NameHash(warmPool.Name)
@@ -238,6 +253,36 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 	}
 
 	return allErrors
+}
+
+// reconcilePoolStatusOnly reports pool status without creating or deleting any
+// Sandbox CRs. It is the reconcile used when DisableSandboxCRManagement is set:
+// warm capacity is driven per-node by sandboxd, so the controller only surfaces
+// the current CR-backed member count (typically zero in that mode) and never
+// mutates the aggregated node-local claim path.
+func (r *SandboxWarmPoolReconciler) reconcilePoolStatusOnly(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) error {
+	poolNameHash := sandboxcontrollers.NameHash(warmPool.Name)
+	labelSelector := labels.SelectorFromSet(labels.Set{warmPoolSandboxLabel: poolNameHash})
+
+	sandboxList := &sandboxv1beta1.SandboxList{}
+	if err := r.List(ctx, sandboxList,
+		client.InNamespace(warmPool.Namespace),
+		client.MatchingFields{sandboxWarmPoolLabelIndex: poolNameHash},
+	); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list sandboxes (status-only reconcile)")
+		return err
+	}
+
+	readyReplicas := int32(0)
+	for i := range sandboxList.Items {
+		if isSandboxReady(&sandboxList.Items[i]) {
+			readyReplicas++
+		}
+	}
+	warmPool.Status.Replicas = int32(len(sandboxList.Items))
+	warmPool.Status.ReadyReplicas = readyReplicas
+	warmPool.Status.Selector = labelSelector.String()
+	return nil
 }
 
 // adoptSandbox sets this warmpool as the owner of an orphaned sandbox.

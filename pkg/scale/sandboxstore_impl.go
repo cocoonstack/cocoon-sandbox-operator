@@ -16,6 +16,7 @@ package scale
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -38,6 +39,7 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/sandboxd"
 )
 
 // Synthesized-Sandbox label keys. The aggregated store stamps these onto every
@@ -101,14 +103,50 @@ func WithWatchPollInterval(d time.Duration) StoreOption {
 	return func(s *scatterGatherStore) { s.watchPoll = d }
 }
 
+// SandboxdClientFactory builds a sandboxd client for one node's advertise address
+// and the uniform fleet api_token. It is injected so tests need no live node and
+// production wires the real HTTP client (NewSandboxdClientFactory).
+type SandboxdClientFactory func(addr, token string) SandboxdClient
+
+// WithClaimRouting enables the Create/Delete write path: token is the uniform
+// fleet-wide sandboxd api_token presented on claim/release, and factory builds a
+// per-node sandboxd client for a node's advertise address. Without it, Claim and
+// Release fail closed and the store stays read-only.
+func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
+	return func(s *scatterGatherStore) {
+		s.sandboxdToken = token
+		s.sandboxdFactory = factory
+	}
+}
+
+// NewSandboxdClientFactory returns the production SandboxdClientFactory: an HTTP
+// sandboxd client per node advertise address (a bare "host:port" is given the
+// http scheme; an address that already carries a scheme is used verbatim).
+func NewSandboxdClientFactory() SandboxdClientFactory {
+	return func(addr, token string) SandboxdClient {
+		base := addr
+		if !strings.Contains(base, "://") {
+			base = "http://" + base
+		}
+		return sandboxd.New(base, token)
+	}
+}
+
 // scatterGatherStore is the concrete SandboxStore: List/Get/Watch synthesize
 // Sandbox objects from live NodeInventory rather than reading any per-sandbox
-// etcd object, exactly the metrics.k8s.io aggregation pattern.
+// etcd object, and Create/Delete are node-local claim/release — exactly the
+// metrics.k8s.io aggregation pattern extended with a synchronous write path.
 type scatterGatherStore struct {
 	src         InventorySource
 	log         logr.Logger
 	concurrency int
 	watchPoll   time.Duration
+
+	// sandboxdToken is the uniform fleet api_token; sandboxdFactory builds a
+	// per-node sandboxd client. Both are nil/empty until WithClaimRouting is set,
+	// which is what gates the write path (Claim/Release).
+	sandboxdToken   string
+	sandboxdFactory SandboxdClientFactory
 }
 
 // Compile-time assertions for the L3 contracts.
@@ -218,6 +256,127 @@ func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*
 		}
 	}
 	return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), name)
+}
+
+// --- Write path: node-local claim / release (no per-sandbox etcd object) ------
+
+// ErrNoWarmCapacity is returned by Claim when no node advertises a warm microVM
+// for the requested pool (or a node's advertised warm count was stale and its
+// sandboxd had none left). The aggregated apiserver maps it to a retryable 503 so
+// the client retries as warm capacity refills, rather than writing an object.
+// Test it with IsNoWarmCapacity rather than comparing directly.
+var ErrNoWarmCapacity = errors.New("scale: no node has warm capacity for the requested pool")
+
+// IsNoWarmCapacity reports whether err means Claim found no warm node.
+func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }
+
+// Claim picks the node with the most warm capacity for pool and hands over one of
+// its already-running microVMs via that node's sandboxd, returning the assignment.
+// No per-sandbox object is written to etcd. It fails closed if claim routing is
+// not configured, and returns ErrNoWarmCapacity when no warm node is available.
+func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, pool PoolKey) (Assignment, error) {
+	if s.sandboxdFactory == nil {
+		return Assignment{}, fmt.Errorf("scale: claim routing not configured (call WithClaimRouting)")
+	}
+	node, addr, err := s.pickWarmNode(ctx, pool)
+	if err != nil {
+		return Assignment{}, err
+	}
+	res, err := s.sandboxdFactory(addr, s.sandboxdToken).Claim(ctx, sandboxd.ClaimSpec{
+		Template: pool.Template,
+		Net:      pool.Net,
+		Size:     pool.Size,
+	})
+	if err != nil {
+		if errors.Is(err, sandboxd.ErrNodeAtCapacity) {
+			// The node's advertised warm count was stale (raced to zero): surface as
+			// no-capacity so the caller retries rather than 500s.
+			return Assignment{}, fmt.Errorf("scale: claim %s/%s: node %q warm-raced: %w", namespace, name, node, ErrNoWarmCapacity)
+		}
+		return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, node, err)
+	}
+	return Assignment{SandboxName: res.ID, Node: node, Address: res.OwnerAddr}, nil
+}
+
+// Release returns the claimed microVM id to node's pool via that node's sandboxd,
+// resolving the sandboxd address from the node's NodeInventory. It fails closed if
+// claim routing is not configured. Callers must only reach this on owner-authorized
+// teardown (the delete-authorization contract); it never destroys a VM on pod state.
+func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error {
+	if s.sandboxdFactory == nil {
+		return fmt.Errorf("scale: claim routing not configured (call WithClaimRouting)")
+	}
+	if id == "" {
+		return fmt.Errorf("scale: release requires a claim id")
+	}
+	inv, err := s.src.NodeInventory(ctx, node)
+	if err != nil {
+		return fmt.Errorf("scale: resolve node %q for release of %q: %w", node, id, err)
+	}
+	if inv.Address == "" {
+		return fmt.Errorf("scale: node %q advertises no sandboxd address to release %q", node, id)
+	}
+	// The uniform fleet api_token authorizes release by id.
+	if err := s.sandboxdFactory(inv.Address, s.sandboxdToken).Release(ctx, id, s.sandboxdToken); err != nil {
+		return fmt.Errorf("scale: sandboxd release of %q on node %q: %w", id, node, err)
+	}
+	return nil
+}
+
+// pickWarmNode scans node inventories and returns the node (and its sandboxd
+// advertise address) with the most warm capacity for pool. A node with no
+// advertised address is skipped (there is nowhere to route a claim). Returns
+// ErrNoWarmCapacity when no node has Warm>0 for the pool.
+func (s *scatterGatherStore) pickWarmNode(ctx context.Context, pool PoolKey) (node, addr string, err error) {
+	nodes, err := s.src.ListNodes(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("scale: enumerate node inventories: %w", err)
+	}
+	bestWarm := 0
+	for _, n := range nodes {
+		inv, err := s.src.NodeInventory(ctx, n)
+		if err != nil {
+			s.log.V(1).Info("node inventory unavailable during claim node-pick; skipping",
+				"node", n, "err", err.Error())
+			continue
+		}
+		if inv.Address == "" {
+			continue
+		}
+		for i := range inv.Pools {
+			pc := inv.Pools[i]
+			if pc.Warm > bestWarm && poolCapacityMatches(pc, pool) {
+				bestWarm, node, addr = pc.Warm, n, inv.Address
+			}
+		}
+	}
+	if node == "" {
+		return "", "", ErrNoWarmCapacity
+	}
+	return node, addr, nil
+}
+
+// poolCapacityMatches reports whether a node's advertised pool capacity serves the
+// requested pool key, normalizing the net/size defaults ("none"/"small") on both
+// sides so an unset axis matches its default-named pool.
+func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
+	return pc.Template == key.Template &&
+		normNet(pc.Net) == normNet(key.Net) &&
+		normSize(pc.Size) == normSize(key.Size)
+}
+
+func normNet(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
+}
+
+func normSize(s string) string {
+	if s == "" {
+		return "small"
+	}
+	return s
 }
 
 // Watch merges per-node inventory into a single Sandbox event stream. This

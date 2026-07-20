@@ -16,34 +16,58 @@ package apiserver
 
 import (
 	"context"
+	"fmt"
+	"net"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/watch"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
+	"k8s.io/apiserver/pkg/storage/names"
 
 	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
 )
 
+// Aggregated-Sandbox annotations. Create stamps the claim id + delivered address
+// onto the returned object; Delete reads the claim id (falling back to the sandbox
+// name) to release exactly the node-local microVM that was handed over.
+const (
+	// ClaimIDAnnotation carries the sandboxd claim id of a Create-claimed sandbox.
+	ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+	// AddressAnnotation carries the delivered sandbox connection address.
+	AddressAnnotation = "sandbox.cocoonstack.io/address"
+	// NetAnnotation selects the pool network mode on Create (default "none").
+	NetAnnotation = "sandbox.cocoonstack.io/net"
+)
+
 // sandboxREST is the aggregated-apiserver storage for sandboxes.agents.x-k8s.io.
 // It is backed by a scale.SandboxStore (scatter-gather over node inventory), NOT
 // by the etcd-backed generic registry — so List/Get/Watch are synthesized from
-// live node state and no per-sandbox object exists in etcd.
+// live node state and Create/Delete are synchronous node-local claim/release; no
+// per-sandbox object ever exists in etcd.
 type sandboxREST struct {
 	store          scale.SandboxStore
 	tableConvertor rest.TableConvertor
 }
 
-// The read-only verb set an aggregated, scatter-gather resource implements.
+// The verb set an aggregated, scatter-gather resource implements: the read triad
+// plus a node-local claim (Create) and release (GracefulDeleter).
 var (
 	_ rest.Storage              = (*sandboxREST)(nil)
 	_ rest.Scoper               = (*sandboxREST)(nil)
 	_ rest.Lister               = (*sandboxREST)(nil)
 	_ rest.Getter               = (*sandboxREST)(nil)
 	_ rest.Watcher              = (*sandboxREST)(nil)
+	_ rest.Creater              = (*sandboxREST)(nil) //nolint:misspell // rest.Creater is the upstream Kubernetes interface name.
+	_ rest.GracefulDeleter      = (*sandboxREST)(nil)
 	_ rest.TableConvertor       = (*sandboxREST)(nil)
 	_ rest.SingularNameProvider = (*sandboxREST)(nil)
 )
@@ -88,6 +112,87 @@ func (r *sandboxREST) Watch(ctx context.Context, options *metainternalversion.Li
 	return r.store.Watch(ctx, toScaleListOptions(ctx, options))
 }
 
+// Create is the L3 write path: it derives the warm pool from the submitted
+// Sandbox and asks the store to hand over an already-running microVM from a node
+// with warm capacity for that pool (a synchronous node-local claim). It writes NO
+// per-sandbox object to etcd; it synthesizes and returns a Ready Sandbox carrying
+// the claim id + connection address. With no warm node it returns a retryable 503.
+func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createValidation rest.ValidateObjectFunc, _ *metav1.CreateOptions) (runtime.Object, error) {
+	sb, ok := obj.(*sandboxv1beta1.Sandbox)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected a Sandbox object, got %T", obj))
+	}
+	if createValidation != nil {
+		if err := createValidation(ctx, obj); err != nil {
+			return nil, err
+		}
+	}
+
+	// Identity: namespace from the request path, name (honoring generateName) from
+	// the submitted object.
+	namespace := genericapirequest.NamespaceValue(ctx)
+	if namespace == "" {
+		namespace = sb.Namespace
+	}
+	name := sb.Name
+	if name == "" && sb.GenerateName != "" {
+		name = names.SimpleNameGenerator.GenerateName(sb.GenerateName)
+	}
+	if name == "" {
+		return nil, apierrors.NewBadRequest("Sandbox has neither metadata.name nor metadata.generateName")
+	}
+
+	pool := poolKeyForSandbox(sb)
+	assignment, err := r.store.Claim(ctx, namespace, name, pool)
+	if err != nil {
+		if scale.IsNoWarmCapacity(err) {
+			// Retryable: warm capacity refills asynchronously (the node's sandboxd
+			// pool), so tell the client to retry rather than surfacing a 500.
+			return nil, apierrors.NewServiceUnavailable(fmt.Sprintf(
+				"no warm sandbox available for pool (template=%q net=%q size=%q); retry as warm capacity refills",
+				pool.Template, pool.Net, pool.Size))
+		}
+		return nil, apierrors.NewInternalError(fmt.Errorf("claim sandbox %s/%s: %w", namespace, name, err))
+	}
+	return synthesizeClaimedSandbox(namespace, name, sb, assignment), nil
+}
+
+// Delete is the L3 release path. It resolves the sandbox from live node inventory
+// (so it knows the owning node), reads the claim id (falling back to the sandbox
+// name), and releases the node-local claim via the store. Per the delete-
+// authorization contract this is owner-authorized teardown of the Sandbox resource
+// itself; it never destroys a VM on pod state alone. Returns (object, true).
+func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation rest.ValidateObjectFunc, _ *metav1.DeleteOptions) (runtime.Object, bool, error) {
+	namespace := genericapirequest.NamespaceValue(ctx)
+	sb, err := r.store.Get(ctx, namespace, name)
+	if err != nil {
+		// NotFound propagates unchanged so IsNotFound stays true for the caller.
+		return nil, false, err
+	}
+	if deleteValidation != nil {
+		if err := deleteValidation(ctx, sb); err != nil {
+			return nil, false, err
+		}
+	}
+
+	node := sb.Status.NodeName
+	claimID := sb.Annotations[ClaimIDAnnotation]
+	if claimID == "" {
+		// The synthesized read path carries no claim id (only the Create response
+		// does), so fall back to the sandbox name as the node-local id.
+		claimID = name
+	}
+	if node == "" {
+		// No owning node resolved: nothing to release against. Report it deleted.
+		return sb, true, nil
+	}
+	if err := r.store.Release(ctx, node, claimID); err != nil {
+		return nil, false, apierrors.NewInternalError(
+			fmt.Errorf("release sandbox %s/%s (node %q id %q): %w", namespace, name, node, claimID, err))
+	}
+	return sb, true, nil
+}
+
 // ConvertToTable renders the default Name/Age table for `kubectl get`.
 func (r *sandboxREST) ConvertToTable(ctx context.Context, object runtime.Object, tableOptions runtime.Object) (*metav1.Table, error) {
 	return r.tableConvertor.ConvertToTable(ctx, object, tableOptions)
@@ -106,4 +211,103 @@ func toScaleListOptions(ctx context.Context, options *metainternalversion.ListOp
 		}
 	}
 	return o
+}
+
+// poolKeyForSandbox derives the warm-pool key from a Sandbox: the template is the
+// first container's image, the size is a t-shirt class mapped from that container's
+// resources, and the net comes from the NetAnnotation (default "none").
+func poolKeyForSandbox(sb *sandboxv1beta1.Sandbox) scale.PoolKey {
+	var template string
+	containers := sb.Spec.PodTemplate.Spec.Containers
+	if len(containers) > 0 {
+		template = containers[0].Image
+	}
+	net := sb.Annotations[NetAnnotation]
+	if net == "" {
+		net = "none"
+	}
+	return scale.PoolKey{
+		Template: template,
+		Net:      net,
+		Size:     sizeClassForContainers(containers),
+	}
+}
+
+// Coarse, documented t-shirt-size thresholds mapping a container's CPU/memory
+// request (falling back to its limit) onto the warm pool size classes.
+var (
+	sizeCPUMedium = resource.MustParse("1")
+	sizeMemMedium = resource.MustParse("2Gi")
+	sizeCPULarge  = resource.MustParse("4")
+	sizeMemLarge  = resource.MustParse("8Gi")
+)
+
+// sizeClassForContainers maps the first container's CPU/memory onto small|medium|
+// large. It prefers requests, falls back to limits, and defaults to "small" when
+// neither is set. Thresholds: >4 CPU or >8Gi -> large; >1 CPU or >2Gi -> medium.
+func sizeClassForContainers(containers []corev1.Container) string {
+	if len(containers) == 0 {
+		return "small"
+	}
+	res := containers[0].Resources
+	cpu := res.Requests.Cpu()
+	if cpu.IsZero() {
+		cpu = res.Limits.Cpu()
+	}
+	mem := res.Requests.Memory()
+	if mem.IsZero() {
+		mem = res.Limits.Memory()
+	}
+	switch {
+	case cpu.Cmp(sizeCPULarge) > 0 || mem.Cmp(sizeMemLarge) > 0:
+		return "large"
+	case cpu.Cmp(sizeCPUMedium) > 0 || mem.Cmp(sizeMemMedium) > 0:
+		return "medium"
+	default:
+		return "small"
+	}
+}
+
+// synthesizeClaimedSandbox builds the Sandbox object Create returns: the submitted
+// spec echoed back under the request name/namespace, a fresh UID/creationTimestamp,
+// the claim id + address annotations, and a Ready status pointing at the owning
+// node. It is never persisted — it is the response for a node-local claim.
+func synthesizeClaimedSandbox(namespace, name string, in *sandboxv1beta1.Sandbox, a scale.Assignment) *sandboxv1beta1.Sandbox {
+	out := in.DeepCopy()
+	out.Namespace = namespace
+	out.Name = name
+	out.GenerateName = ""
+	out.UID = uuid.NewUUID()
+	out.CreationTimestamp = metav1.Now()
+	out.ResourceVersion = ""
+	if out.Annotations == nil {
+		out.Annotations = map[string]string{}
+	}
+	out.Annotations[ClaimIDAnnotation] = a.SandboxName
+	if a.Address != "" {
+		out.Annotations[AddressAnnotation] = a.Address
+	}
+	out.Status = sandboxv1beta1.SandboxStatus{
+		NodeName: a.Node,
+		PodIPs:   addressHosts(a.Address),
+	}
+	apimeta.SetStatusCondition(&out.Status.Conditions, metav1.Condition{
+		Type:    string(sandboxv1beta1.SandboxConditionReady),
+		Status:  metav1.ConditionTrue,
+		Reason:  sandboxv1beta1.SandboxReasonDependenciesReady,
+		Message: fmt.Sprintf("warm sandbox %q delivered by node %q", a.SandboxName, a.Node),
+	})
+	return out
+}
+
+// addressHosts strips the port from a host:port connection address, yielding the
+// pod IP list on the synthesized status.
+func addressHosts(addr string) []string {
+	if addr == "" {
+		return nil
+	}
+	if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
+		return []string{host}
+	}
+	return []string{addr}
 }
