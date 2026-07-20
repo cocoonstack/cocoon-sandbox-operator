@@ -62,7 +62,7 @@ spec:
                     values: ["virtual-kubelet"]
       containers:
         - name: loadgen
-          image: mindset-ap-southeast-1.cr.volces.com/g0031/sandbox-loadgen:v6
+          image: mindset-ap-southeast-1.cr.volces.com/g0031/sandbox-loadgen:v8
           args:
             - --replicas=100                # SandboxWarmPool size (pre-warmed sandboxes)
             - --namespace=sandboxd-test

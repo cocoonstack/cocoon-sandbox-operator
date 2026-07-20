@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -31,10 +32,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/dynamic/dynamicinformer"
-	"k8s.io/client-go/rest"
-	toolscache "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -80,19 +77,6 @@ var (
 	buildInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sandbox_loadgen_build_info", Help: "Loadgen run parameters, constant 1.",
 	}, []string{"namespace", "warmpool", "template"})
-
-	// Event-accurate sandbox lifecycle metrics from a namespace-scoped watch.
-	// Unlike delta() on the operator's gauge, these counters preserve every
-	// creation between scrapes, so per-interval bars and rates are exact.
-	watchLive = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "sandbox_watch_live", Help: "Sandboxes currently existing (watch-derived, event-accurate).",
-	})
-	watchCreated = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "sandbox_watch_created_total", Help: "Sandboxes created since loadgen start (watch ADD events after initial sync).",
-	})
-	watchDeleted = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "sandbox_watch_deleted_total", Help: "Sandboxes deleted since loadgen start (watch DELETE events after initial sync).",
-	})
 )
 
 type options struct {
@@ -101,6 +85,8 @@ type options struct {
 	image         string
 	createdBy     string
 	metricsAddr   string
+	concurrency   int
+	total         int
 	claimInterval time.Duration
 	poll          time.Duration
 	claimTimeout  time.Duration
@@ -114,7 +100,9 @@ func main() {
 	flag.StringVar(&o.image, "template", "ghcr.io/cocoonstack/sandbox/rt@sha256:c8cab53a1e1684e6c0c95a06855001b0535be2862b7d4f72658f9f0e784c8778", "sandbox container image (digest ref)")
 	flag.StringVar(&o.createdBy, "created-by", "loadgen", "value for the agents.x-k8s.io/created-by label")
 	flag.StringVar(&o.metricsAddr, "metrics-addr", ":9090", "Prometheus metrics listen address")
-	flag.DurationVar(&o.claimInterval, "claim-interval", 1*time.Second, "gap between serial claims")
+	flag.IntVar(&o.concurrency, "concurrency", 1, "number of parallel claim workers (in-flight claims)")
+	flag.IntVar(&o.total, "total", 0, "stop after this many claims (0 = run until terminated)")
+	flag.DurationVar(&o.claimInterval, "claim-interval", 1*time.Second, "per-worker gap between claims (0 = as fast as possible)")
 	flag.DurationVar(&o.poll, "poll", 25*time.Millisecond, "readiness poll interval (ms resolution)")
 	flag.DurationVar(&o.claimTimeout, "claim-timeout", 60*time.Second, "max wait for a claim to be served")
 	flag.DurationVar(&o.poolPoll, "pool-poll", 10*time.Second, "how often to refresh the warmpool gauge")
@@ -159,12 +147,15 @@ func main() {
 		log.Error(err, "setup template/warmpool")
 		os.Exit(1)
 	}
-	if err := startSandboxWatch(ctx, cfg, o.namespace, log); err != nil {
-		log.Error(err, "start sandbox watch") // metrics degrade to claim-only; keep benchmarking
-	}
 	go lg.poolPollLoop(ctx)
 	lg.waitPoolWarm(ctx)
 	lg.claimLoop(ctx)
+	// Keep serving /metrics after a bounded (--total) run completes so the final
+	// latency histogram stays scrapeable instead of vanishing on pod restart.
+	if o.total > 0 {
+		log.Info("claim benchmark finished; serving metrics until terminated")
+		<-ctx.Done()
+	}
 	log.Info("shutting down")
 }
 
@@ -175,73 +166,6 @@ type loadgen struct {
 }
 
 func gvk(kind string) schema.GroupVersionKind { return extv1beta1.GroupVersion.WithKind(kind) }
-
-// startSandboxWatch feeds the sandbox_watch_* metrics from an informer on
-// Sandbox objects in the loadgen namespace. The live gauge counts every ADD
-// (including the initial cache replay) minus DELETEs, so it equals the store
-// size; the created/deleted counters skip the initial replay so they only
-// record real lifecycle events.
-func startSandboxWatch(ctx context.Context, cfg *rest.Config, namespace string, log logr.Logger) error {
-	dyn, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("dynamic client: %w", err)
-	}
-	gvr := schema.GroupVersionResource{
-		Group:    sandboxv1beta1.GroupVersion.Group,
-		Version:  sandboxv1beta1.GroupVersion.Version,
-		Resource: "sandboxes",
-	}
-	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(dyn, 0, namespace, nil)
-	informer := factory.ForResource(gvr).Informer()
-	// The watch only counts lifecycle events, so keep just identity fields in
-	// the store: a full 10k-sandbox cache OOMKilled the 256Mi pod, pruned
-	// objects are ~100 bytes each.
-	if err := informer.SetTransform(func(obj interface{}) (interface{}, error) {
-		u, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			return obj, nil // e.g. DeletedFinalStateUnknown tombstones
-		}
-		return &unstructured.Unstructured{Object: map[string]interface{}{
-			"apiVersion": u.GetAPIVersion(),
-			"kind":       u.GetKind(),
-			"metadata": map[string]interface{}{
-				"name":            u.GetName(),
-				"namespace":       u.GetNamespace(),
-				"uid":             string(u.GetUID()),
-				"resourceVersion": u.GetResourceVersion(),
-			},
-		}}, nil
-	}); err != nil {
-		return fmt.Errorf("set transform: %w", err)
-	}
-	var synced atomic.Bool
-	_, err = informer.AddEventHandler(toolscache.ResourceEventHandlerFuncs{
-		AddFunc: func(any) {
-			watchLive.Inc()
-			if synced.Load() {
-				watchCreated.Inc()
-			}
-		},
-		DeleteFunc: func(any) {
-			watchLive.Dec()
-			if synced.Load() {
-				watchDeleted.Inc()
-			}
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("add handler: %w", err)
-	}
-	factory.Start(ctx.Done())
-	go func() {
-		if !toolscache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
-			return
-		}
-		synced.Store(true)
-		log.Info("sandbox watch synced", "live", len(informer.GetStore().List()))
-	}()
-	return nil
-}
 
 // setup creates the SandboxTemplate + SandboxWarmPool (idempotent).
 func (l *loadgen) setup(ctx context.Context) error {
@@ -301,25 +225,54 @@ func (l *loadgen) waitPoolWarm(ctx context.Context) {
 	}
 }
 
-// claimLoop serially claims one warm sandbox at a time, times it, and releases.
+// claimLoop runs --concurrency parallel workers that each claim a warm sandbox,
+// time it, and release, until --total claims are done (or forever if total==0).
+// A shared atomic counter hands out claim indices so exactly --total claims are
+// issued regardless of worker count.
 func (l *loadgen) claimLoop(ctx context.Context) {
-	t := time.NewTicker(l.o.claimInterval)
-	defer t.Stop()
-	n := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		n++
-		l.claimOnce(ctx, fmt.Sprintf("loadgen-claim-%d", n))
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
+	workers := l.o.concurrency
+	if workers < 1 {
+		workers = 1
 	}
+	var issued atomic.Int64
+	var served atomic.Int64
+	start := time.Now()
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				n := issued.Add(1)
+				if l.o.total > 0 && n > int64(l.o.total) {
+					return
+				}
+				l.claimOnce(ctx, fmt.Sprintf("loadgen-claim-%d", n))
+				served.Add(1)
+				if l.o.claimInterval > 0 {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(l.o.claimInterval):
+					}
+				}
+			}
+		}()
+	}
+
+	if l.o.total > 0 {
+		wg.Wait()
+		l.log.Info("claim benchmark complete",
+			"claims", served.Load(), "concurrency", workers, "elapsed", time.Since(start).String())
+		return
+	}
+	// unbounded run: block until the context is cancelled, then drain.
+	<-ctx.Done()
+	wg.Wait()
 }
 
 // claimOnce creates a SandboxClaim, fast-polls it to Ready (warm sandbox
