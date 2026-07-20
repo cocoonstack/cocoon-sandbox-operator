@@ -2,6 +2,9 @@ SHELL := /usr/bin/env bash
 
 BINARY := bin/cocoon-sandbox-operator
 MAIN := ./cmd/cocoon-sandbox-operator
+APISERVER_BINARY := bin/sandbox-apiserver
+APISERVER_MAIN := ./cmd/sandbox-apiserver
+APISERVER_IMG ?= ghcr.io/cocoonstack/cocoon-sandbox-apiserver:dev
 VERSION_PKG := github.com/cocoonstack/cocoon-sandbox-operator/internal/version
 
 GIT_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
@@ -18,6 +21,15 @@ all: fmt-check vet test build
 build: ## Build the operator binary.
 	mkdir -p bin
 	go build -ldflags "$(LD_FLAGS)" -o $(BINARY) $(MAIN)
+
+.PHONY: apiserver-build
+apiserver-build: ## Build the aggregated sandbox-apiserver binary.
+	mkdir -p bin
+	go build -ldflags "-s -w" -o $(APISERVER_BINARY) $(APISERVER_MAIN)
+
+.PHONY: apiserver-image
+apiserver-image: ## Build the aggregated sandbox-apiserver image (override APISERVER_IMG).
+	docker build -f Dockerfile.apiserver -t $(APISERVER_IMG) .
 
 .PHONY: test
 test: ## Run unit tests.

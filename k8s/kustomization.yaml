@@ -20,6 +20,7 @@ resources:
   # is a second copy of the controller Deployment; we patch the core one instead)
   - extensions.yaml
   - extensions-rbac.generated.yaml
+  - crds/extensions.agents.x-k8s.io_nodeinventories.yaml
   - crds/extensions.agents.x-k8s.io_sandboxclaims.yaml
   - crds/extensions.agents.x-k8s.io_sandboxtemplates.yaml
   - crds/extensions.agents.x-k8s.io_sandboxwarmpools.yaml

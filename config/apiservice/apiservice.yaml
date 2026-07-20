@@ -4,14 +4,24 @@
 # agents.x-k8s.io/v1beta1 group-version to the aggregated sandbox-apiserver,
 # which serves `sandboxes` by scatter-gathering per-node NodeInventory rather
 # than reading per-sandbox objects from etcd. That group-version contains only
-# the `sandboxes` resource (the SandboxClaim/SandboxTemplate/SandboxWarmPool CRDs
-# live in the separate `extensions.agents.x-k8s.io` group and are untouched).
+# the `sandboxes` resource: the SandboxClaim/SandboxTemplate/SandboxWarmPool
+# CRDs — and the NodeInventory CRD the scatter-gather reads from — live in the
+# separate `extensions.agents.x-k8s.io` group, which this APIService does not
+# touch. (NodeInventory deliberately does NOT share the aggregated group: the
+# aggregated server serves only `sandboxes`, so anything else registered under
+# agents.x-k8s.io/v1beta1 would 404 once this APIService is applied.)
 #
 # Ordering caveat: an APIService takes precedence over a CRD for the same
 # group-version, so once this is applied the aggregated server owns
 # agents.x-k8s.io/v1beta1 `sandboxes`. The Sandbox CRD for this group-version
 # should therefore NOT also be installed (aggregation replaces it), exactly as
 # metrics.k8s.io replaces any CRD for its group.
+#
+# TLS: cert-manager injects the CA of the serving certificate
+# (config/apiserver/certificate.yaml) into spec.caBundle via the
+# inject-ca-from annotation, so the kube-apiserver verifies the aggregated
+# server's certificate — no TLS-verify escape hatch. The backing Service and
+# the Deployment it selects live in config/apiserver/.
 apiVersion: apiregistration.k8s.io/v1
 kind: APIService
 metadata:
@@ -19,6 +29,8 @@ metadata:
   labels:
     app.kubernetes.io/name: cocoon-sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
+  annotations:
+    cert-manager.io/inject-ca-from: cocoon-sandbox-system/cocoon-sandbox-apiserver-serving
 spec:
   group: agents.x-k8s.io
   version: v1beta1
@@ -26,29 +38,5 @@ spec:
     name: cocoon-sandbox-apiserver
     namespace: cocoon-sandbox-system
     port: 443
-  # Production injects a caBundle (cert-manager / the apiserver serving CA) so
-  # the kube-apiserver validates the aggregated server's TLS. insecureSkipTLSVerify
-  # is set here only as the self-signed-cert bootstrap default (as metrics-server
-  # ships); replace it with `caBundle:` in a real deployment.
-  insecureSkipTLSVerify: true
   groupPriorityMinimum: 1000
   versionPriority: 15
----
-# Backing Service the APIService resolves to. Selects the aggregated apiserver
-# Deployment pods, which serve HTTPS on 6443 (see cmd/sandbox-apiserver).
-apiVersion: v1
-kind: Service
-metadata:
-  name: cocoon-sandbox-apiserver
-  namespace: cocoon-sandbox-system
-  labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
-    app.kubernetes.io/component: aggregated-apiserver
-spec:
-  selector:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
-  ports:
-    - name: https
-      port: 443
-      targetPort: 6443
-      protocol: TCP

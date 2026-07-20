@@ -32,12 +32,12 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
 )
 
 // Synthesized-Sandbox label keys. The aggregated store stamps these onto every
@@ -54,13 +54,12 @@ const (
 )
 
 // NodeInventoryGVK is the GroupVersionKind of the O(nodes) intent object the
-// publisher server-side-applies. It shares the sandboxes group so one APIService
-// and one RBAC surface cover both.
-var NodeInventoryGVK = schema.GroupVersionKind{
-	Group:   sandboxv1beta1.GroupVersion.Group,
-	Version: sandboxv1beta1.GroupVersion.Version,
-	Kind:    "NodeInventory",
-}
+// publisher server-side-applies. It lives in the extensions CRD group next to
+// SandboxClaim/Template/WarmPool — NOT in the aggregated agents.x-k8s.io group:
+// the APIService hands that entire group-version to the aggregated server,
+// which serves only `sandboxes`, so a NodeInventory registered there would 404
+// once the APIService cuts over.
+var NodeInventoryGVK = extv1beta1.GroupVersion.WithKind("NodeInventory")
 
 // InventorySource enumerates the per-node NodeInventory objects that back the
 // aggregated store. It is deliberately granular — a node enumeration plus a
@@ -461,38 +460,6 @@ func (w *inventoryWatcher) send(ctx context.Context, ev watch.Event) bool {
 	}
 }
 
-// --- NodeInventory as a runtime.Object ---------------------------------------
-
-// DeepCopyInto copies the receiver into out.
-func (in *NodeInventory) DeepCopyInto(out *NodeInventory) {
-	*out = *in
-	out.TypeMeta = in.TypeMeta
-	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
-	if in.Entries != nil {
-		out.Entries = make([]InventoryEntry, len(in.Entries))
-		copy(out.Entries, in.Entries)
-	}
-}
-
-// DeepCopy returns a deep copy of the NodeInventory.
-func (in *NodeInventory) DeepCopy() *NodeInventory {
-	if in == nil {
-		return nil
-	}
-	out := new(NodeInventory)
-	in.DeepCopyInto(out)
-	return out
-}
-
-// DeepCopyObject satisfies runtime.Object so the inventory can flow through
-// client machinery.
-func (in *NodeInventory) DeepCopyObject() runtime.Object {
-	if c := in.DeepCopy(); c != nil {
-		return c
-	}
-	return nil
-}
-
 // --- NodeInventory publisher (the O(nodes) write path) -----------------------
 
 // NodeLiveSource is a node's own live sandbox state — the sandboxd inventory /
@@ -700,9 +667,9 @@ func (s *StaticInventorySource) ApplyCount() int {
 
 // ClientInventorySource is the production InventorySource: it reads NodeInventory
 // objects through a controller-runtime reader. Back it with a cache-fed reader
-// (the manager's cache) so the O(nodes) enumeration is served from an informer,
-// never a hot-path LIST off etcd. Objects are read as unstructured so the
-// aggregated server needs no compiled NodeInventory CRD type.
+// (cmd/sandbox-apiserver builds one scoped to exactly this GVK) so the O(nodes)
+// enumeration is served from an informer, never a hot-path LIST off etcd.
+// Objects are read as unstructured so any reader works without scheme wiring.
 type ClientInventorySource struct {
 	reader client.Reader
 }

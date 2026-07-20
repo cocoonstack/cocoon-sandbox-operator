@@ -20,19 +20,30 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/pflag"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	genericoptions "k8s.io/apiserver/pkg/server/options"
 	apiservercompatibility "k8s.io/apiserver/pkg/util/compatibility"
+	restclient "k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/apiserver"
 )
+
+// inventoryCacheSyncTimeout bounds the startup wait for the NodeInventory
+// informer to sync. If the NodeInventory CRD is not installed or the
+// kube-apiserver is unreachable, the binary fails loud instead of serving
+// empty sandbox lists.
+const inventoryCacheSyncTimeout = 2 * time.Minute
 
 // options are the standard aggregated-apiserver options: secure serving plus
 // delegated authentication/authorization (token/SAR review against the host
@@ -98,16 +109,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	ctx := genericapiserver.SetupSignalContext()
 
-	// The store reads NodeInventory objects through a cache-fed client: O(nodes)
-	// enumeration, no per-sandbox object, no hot-path LIST off etcd.
+	// The store reads NodeInventory objects through a cache-fed reader: the
+	// O(nodes) enumeration is served from an informer, never a hot-path LIST
+	// against the kube-apiserver/etcd.
 	restCfg, err := ctrl.GetConfig()
 	if err != nil {
 		return fmt.Errorf("load kube config: %w", err)
 	}
-	reader, err := client.New(restCfg, client.Options{})
+	reader, err := startInventoryCache(ctx, restCfg)
 	if err != nil {
-		return fmt.Errorf("build inventory reader: %w", err)
+		return err
 	}
 	store := scale.NewScatterGatherStore(scale.NewClientInventorySource(reader))
 
@@ -118,7 +131,45 @@ func run() error {
 	if err := sandboxapiserver.InstallSandboxAPI(server, store); err != nil {
 		return err
 	}
-	return server.PrepareRun().RunWithContext(genericapiserver.SetupSignalContext())
+	return server.PrepareRun().RunWithContext(ctx)
+}
+
+// startInventoryCache builds, starts, and syncs a controller-runtime cache
+// scoped to exactly the NodeInventory GVK, returning it as the store's reader.
+// ReaderFailOnMissingInformer makes a read of any other GVK fail loudly instead
+// of silently spawning a cluster-wide informer, so the cache watches nothing
+// but the O(nodes) NodeInventory objects.
+func startInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache.Cache, error) {
+	inv := &unstructured.Unstructured{}
+	inv.SetGroupVersionKind(scale.NodeInventoryGVK)
+	invCache, err := cache.New(restCfg, cache.Options{
+		ByObject:                    map[client.Object]cache.ByObject{inv: {}},
+		ReaderFailOnMissingInformer: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build inventory cache: %w", err)
+	}
+	// Register the informer up front: with ReaderFailOnMissingInformer set,
+	// reads never create informers implicitly.
+	if _, err := invCache.GetInformer(ctx, inv); err != nil {
+		return nil, fmt.Errorf("register node inventory informer: %w", err)
+	}
+	cacheErr := make(chan error, 1)
+	go func() { cacheErr <- invCache.Start(ctx) }()
+	syncCtx, cancel := context.WithTimeout(ctx, inventoryCacheSyncTimeout)
+	defer cancel()
+	if !invCache.WaitForCacheSync(syncCtx) {
+		select {
+		case err := <-cacheErr:
+			if err != nil {
+				return nil, fmt.Errorf("run inventory cache: %w", err)
+			}
+		default:
+		}
+		return nil, fmt.Errorf("node inventory cache did not sync within %s (is the %s CRD installed?)",
+			inventoryCacheSyncTimeout, scale.NodeInventoryGVK.GroupKind())
+	}
+	return invCache, nil
 }
 
 func main() {

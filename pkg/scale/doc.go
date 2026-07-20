@@ -27,7 +27,8 @@
 //     node inventories; etcd stores only intent (warm-pool desired replicas plus
 //     one O(nodes) NodeInventory object per node), the metrics.k8s.io pattern.
 //
-// These are interface skeletons: the full implementations are follow-up work
-// (see the goal G-0130 phases). They compile and pin the contracts so callers
-// and reviewers can align before the wiring lands.
+// Both contracts are implemented here: the sandboxd-backed ClaimGateway and its
+// orphan reconciler (claimgateway_impl.go), and the scatter-gather store with
+// its NodeInventory publisher and cache-fed inventory source
+// (sandboxstore_impl.go), served by cmd/sandbox-apiserver via pkg/scale/apiserver.
 package scale

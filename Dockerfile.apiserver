@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+
+# Image for cmd/sandbox-apiserver, the L3 aggregated apiserver serving
+# sandboxes.agents.x-k8s.io (see config/apiserver/ for the Deployment).
+#   docker build -f Dockerfile.apiserver -t <registry>/cocoon-sandbox-apiserver:<tag> .
+
+FROM --platform=$BUILDPLATFORM golang:1.26.5 AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH
+
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY api/ ./api/
+COPY cmd/ ./cmd/
+COPY cocoon/ ./cocoon/
+COPY controllers/ ./controllers/
+COPY extensions/ ./extensions/
+COPY internal/ ./internal/
+COPY pkg/ ./pkg/
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+    -ldflags="-s -w" \
+    -o /sandbox-apiserver ./cmd/sandbox-apiserver
+
+FROM gcr.io/distroless/static-debian13:nonroot
+COPY --from=builder /sandbox-apiserver /sandbox-apiserver
+ENTRYPOINT ["/sandbox-apiserver"]

@@ -1,0 +1,80 @@
+# RBAC for the aggregated sandbox-apiserver, least privilege:
+#
+#   1. system:auth-delegator — lets the server delegate authentication
+#      (TokenReview) and authorization (SubjectAccessReview) to the host
+#      kube-apiserver, as every aggregated apiserver does.
+#   2. extension-apiserver-authentication-reader — read access to the
+#      kube-system/extension-apiserver-authentication ConfigMap (client-CA and
+#      requestheader config for delegated authn).
+#   3. nodeinventories read — get/list/watch on the O(nodes) NodeInventory
+#      objects (extensions.agents.x-k8s.io) the scatter-gather store is fed
+#      from. The server reads nothing else and writes nothing.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cocoon-sandbox-apiserver:system:auth-delegator
+  labels:
+    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/component: aggregated-apiserver
+subjects:
+- kind: ServiceAccount
+  name: cocoon-sandbox-apiserver
+  namespace: cocoon-sandbox-system
+roleRef:
+  kind: ClusterRole
+  name: system:auth-delegator
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cocoon-sandbox-apiserver-auth-reader
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/component: aggregated-apiserver
+subjects:
+- kind: ServiceAccount
+  name: cocoon-sandbox-apiserver
+  namespace: cocoon-sandbox-system
+roleRef:
+  kind: Role
+  name: extension-apiserver-authentication-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cocoon-sandbox-apiserver-inventory-reader
+  labels:
+    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/component: aggregated-apiserver
+rules:
+- apiGroups:
+  - extensions.agents.x-k8s.io
+  resources:
+  - nodeinventories
+  verbs:
+  - get
+  - list
+  - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cocoon-sandbox-apiserver-inventory-reader
+  labels:
+    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/component: aggregated-apiserver
+subjects:
+- kind: ServiceAccount
+  name: cocoon-sandbox-apiserver
+  namespace: cocoon-sandbox-system
+roleRef:
+  kind: ClusterRole
+  name: cocoon-sandbox-apiserver-inventory-reader
+  apiGroup: rbac.authorization.k8s.io

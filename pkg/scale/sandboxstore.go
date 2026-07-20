@@ -17,10 +17,10 @@ package scale
 import (
 	"context"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 
 	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
 )
 
 // ListOptions is the subset of client list parameters the aggregated store
@@ -48,21 +48,12 @@ type SandboxStore interface {
 }
 
 // InventoryEntry is one live sandbox as summarized by its owning node.
-type InventoryEntry struct {
-	Name     string `json:"name"`
-	Phase    string `json:"phase"`
-	ClaimRef string `json:"claimRef,omitempty"`
-	Address  string `json:"addr,omitempty"`
-}
+type InventoryEntry = extv1beta1.InventoryEntry
 
 // NodeInventory is the single O(nodes) etcd object per node: the durable summary
 // of that node's live sandboxes, server-side-applied on a slow cadence. The
 // per-sandbox truth lives in the node (the L0 node-scoped cache), not etcd; a
 // lost NodeInventory is rebuilt from the node's own live state on next publish.
-type NodeInventory struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Node    string           `json:"node"`
-	Entries []InventoryEntry `json:"entries"`
-}
+// The canonical type (and its CRD) lives in the extensions.agents.x-k8s.io
+// group; these aliases keep the scale contracts self-contained for callers.
+type NodeInventory = extv1beta1.NodeInventory
