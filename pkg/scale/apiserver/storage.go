@@ -37,11 +37,14 @@ import (
 )
 
 // Aggregated-Sandbox annotations. Create stamps the claim id + delivered address
-// onto the returned object; Delete reads the claim id (falling back to the sandbox
-// name) to release exactly the node-local microVM that was handed over.
+// onto the returned object; the synthesized read path stamps the same claim id
+// from node inventory, and Delete reads it to release exactly the node-local
+// microVM that was handed over.
 const (
-	// ClaimIDAnnotation carries the sandboxd claim id of a Create-claimed sandbox.
-	ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+	// ClaimIDAnnotation carries the sandboxd claim id of a claimed sandbox. It is
+	// defined in package scale (whose store stamps it on synthesized reads); this
+	// alias keeps apiserver call sites writing and reading the identical key.
+	ClaimIDAnnotation = scale.ClaimIDAnnotation
 	// AddressAnnotation carries the delivered sandbox connection address.
 	AddressAnnotation = "sandbox.cocoonstack.io/address"
 	// NetAnnotation selects the pool network mode on Create (default "none").
@@ -158,8 +161,8 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 }
 
 // Delete is the L3 release path. It resolves the sandbox from live node inventory
-// (so it knows the owning node), reads the claim id (falling back to the sandbox
-// name), and releases the node-local claim via the store. Per the delete-
+// (so it knows the owning node), reads the sandboxd claim id the node published
+// on that entry, and releases the node-local claim via the store. Per the delete-
 // authorization contract this is owner-authorized teardown of the Sandbox resource
 // itself; it never destroys a VM on pod state alone. Returns (object, true).
 func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation rest.ValidateObjectFunc, _ *metav1.DeleteOptions) (runtime.Object, bool, error) {
@@ -176,15 +179,18 @@ func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation 
 	}
 
 	node := sb.Status.NodeName
-	claimID := sb.Annotations[ClaimIDAnnotation]
-	if claimID == "" {
-		// The synthesized read path carries no claim id (only the Create response
-		// does), so fall back to the sandbox name as the node-local id.
-		claimID = name
-	}
 	if node == "" {
 		// No owning node resolved: nothing to release against. Report it deleted.
 		return sb, true, nil
+	}
+	claimID := sb.Annotations[ClaimIDAnnotation]
+	if claimID == "" {
+		// The node knows the sandbox but has not published its sandboxd claim id.
+		// Releasing by the k8s name would target the wrong claim (or none), so
+		// fail loud rather than silently mis-releasing or leaking the microVM.
+		return nil, false, apierrors.NewInternalError(fmt.Errorf(
+			"cannot delete sandbox %s/%s: node %q inventory carries no %s (sandboxd claim id); refusing to release by name",
+			namespace, name, node, ClaimIDAnnotation))
 	}
 	if err := r.store.Release(ctx, node, claimID); err != nil {
 		return nil, false, apierrors.NewInternalError(

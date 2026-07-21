@@ -43,6 +43,13 @@ type InventoryEntry struct {
 	// name is the sandbox "<namespace>/<name>"; an unqualified name means the
 	// default namespace.
 	Name string `json:"name"`
+	// id is the owning node's sandboxd claim id ("sb_..."), the handle its
+	// sandbox-release verb needs. The aggregated apiserver surfaces it on the
+	// synthesized Sandbox so Delete can release exactly this node-local microVM
+	// (releasing by k8s name would target the wrong claim). Empty until the
+	// node publishes it.
+	// +optional
+	ID string `json:"id,omitempty"`
 	// phase is the node-reported sandbox phase (e.g. Running).
 	Phase string `json:"phase"`
 	// claimRef is the "<namespace>/<name>" of the SandboxClaim the sandbox is

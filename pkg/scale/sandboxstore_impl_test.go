@@ -163,16 +163,30 @@ func TestScatterGatherGet_RoutesToOwningNode(t *testing.T) {
 
 func TestScatterGatherGet_SynthesizesStatus(t *testing.T) {
 	src := NewStaticInventorySource()
-	src.Put(inv("n1", InventoryEntry{Name: "ns/s1", Phase: "Running", ClaimRef: "ns/claim-1", Address: "10.1.2.3:7777"}))
+	src.Put(inv("n1", InventoryEntry{Name: "ns/s1", ID: "sb_abc123", Phase: "Running", ClaimRef: "ns/claim-1", Address: "10.1.2.3:7777"}))
 	store := NewScatterGatherStore(src)
 
 	got, err := store.Get(context.Background(), "ns", "s1")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"10.1.2.3"}, got.Status.PodIPs)
 	assert.Equal(t, "claim-1", got.Labels[ClaimLabel])
+	// The sandboxd claim id rides as an annotation so the apiserver's Delete can
+	// release exactly this microVM (never by k8s name).
+	assert.Equal(t, "sb_abc123", got.Annotations[ClaimIDAnnotation])
 	require.Len(t, got.Status.Conditions, 1)
 	assert.Equal(t, metav1.ConditionTrue, got.Status.Conditions[0].Status)
 	assert.Equal(t, "Running", got.Status.Conditions[0].Reason)
+}
+
+func TestEntryToSandbox_StampsClaimIDAnnotation(t *testing.T) {
+	withID := entryToSandbox("n1", InventoryEntry{Name: "ns/s1", ID: "sb_abc", Phase: "Running"})
+	assert.Equal(t, "sb_abc", withID.Annotations[ClaimIDAnnotation])
+
+	// A node that has not published the id yet stamps no annotation, so Delete
+	// refuses to release rather than guessing by name.
+	noID := entryToSandbox("n1", InventoryEntry{Name: "ns/s1", Phase: "Running"})
+	_, ok := noID.Annotations[ClaimIDAnnotation]
+	assert.False(t, ok, "expected no claim-id annotation when the entry has no id")
 }
 
 func TestScatterGatherWatch_EmitsAddModifyDelete(t *testing.T) {

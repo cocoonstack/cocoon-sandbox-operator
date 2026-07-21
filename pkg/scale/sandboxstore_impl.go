@@ -55,6 +55,14 @@ const (
 	ClaimLabel = "sandbox.cocoonstack.io/claim"
 )
 
+// ClaimIDAnnotation carries the owning node's sandboxd claim id ("sb_...") on a
+// synthesized Sandbox. Unlike the label keys above it is an annotation — an
+// opaque node-local handle, not a selector axis: the aggregated apiserver reads
+// it on Delete to release exactly the microVM this Sandbox stands for (releasing
+// by k8s name would target the wrong claim). This is the single definition of
+// the key; apiserver.ClaimIDAnnotation aliases it so both write it identically.
+const ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+
 // NodeInventoryGVK is the GroupVersionKind of the O(nodes) intent object the
 // publisher server-side-applies. It lives in the extensions CRD group next to
 // SandboxClaim/Template/WarmPool — NOT in the aggregated agents.x-k8s.io group:
@@ -503,6 +511,7 @@ func entryToSandbox(node string, e InventoryEntry) *sandboxv1beta1.Sandbox {
 			Namespace:       ns,
 			Name:            name,
 			Labels:          synthLabels(node, e),
+			Annotations:     synthAnnotations(e),
 			ResourceVersion: resourceVersionFor(ns, name, e),
 		},
 		Status: sandboxv1beta1.SandboxStatus{
@@ -531,6 +540,17 @@ func synthLabels(node string, e InventoryEntry) map[string]string {
 		}
 	}
 	return l
+}
+
+// synthAnnotations carries the opaque node-local handles a synthesized Sandbox
+// needs but that are not selector axes — the sandboxd claim id, which Delete
+// uses to release the right microVM. Nil when the node has not published an id
+// yet, so Delete refuses to release rather than guessing by name.
+func synthAnnotations(e InventoryEntry) map[string]string {
+	if e.ID == "" {
+		return nil
+	}
+	return map[string]string{ClaimIDAnnotation: e.ID}
 }
 
 func sandboxFields(sb *sandboxv1beta1.Sandbox) fields.Set {
@@ -571,7 +591,7 @@ func addressIPs(addr string) []string {
 // unchanged one. It is opaque, as the API contract requires.
 func resourceVersionFor(ns, name string, e InventoryEntry) string {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address))
+	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address))
 	return fmt.Sprintf("%d", h.Sum64())
 }
 
