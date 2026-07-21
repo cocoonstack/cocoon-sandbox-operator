@@ -28,21 +28,18 @@ import (
 	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
 )
 
-// emptyOpenAPIDefinitions supplies no generated OpenAPI definitions. Sandboxes is
-// a read-only aggregated resource, so it needs no server-side-apply type models;
-// the group's path is ignored in the OpenAPI config below.
-func emptyOpenAPIDefinitions(openapicommon.ReferenceCallback) map[string]openapicommon.OpenAPIDefinition {
-	return map[string]openapicommon.OpenAPIDefinition{}
-}
-
 // NewOpenAPIV3Config returns the OpenAPIV3 config the aggregated server installs
-// with. A non-nil config is mandatory for InstallAPIGroup (managed fields); the
-// sandboxes group path is ignored so a read-only resource needs no generated
-// definitions.
+// with. A non-nil config is mandatory for InstallAPIGroup (managed fields).
+//
+// The sandboxes group is WRITABLE (rest.Creater), so its path must NOT be
+// ignored: getResourceNamesForGroup skips ignored paths, which would leave the
+// managed-fields TypeConverter without a Sandbox model and make every Create log
+// "[SHOULD NOT HAPPEN] failed to update managedFields". sandboxOpenAPIDefinitions
+// supplies the minimal model (with the x-kubernetes-group-version-kind marker)
+// the TypeConverter needs.
 func NewOpenAPIV3Config() *openapicommon.OpenAPIV3Config {
-	cfg := genericapiserver.DefaultOpenAPIV3Config(emptyOpenAPIDefinitions, openapinamer.NewDefinitionNamer(Scheme))
+	cfg := genericapiserver.DefaultOpenAPIV3Config(sandboxOpenAPIDefinitions, openapinamer.NewDefinitionNamer(Scheme))
 	cfg.Info.Title = "cocoon-sandbox-aggregated-apiserver"
-	cfg.IgnorePrefixes = []string{"/apis/" + sandboxv1beta1.GroupVersion.Group}
 	return cfg
 }
 
