@@ -238,15 +238,26 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 	var wg sync.WaitGroup
 	for i := range nodes {
 		node := nodes[i]
-		specs := make([]sandboxd.PoolSpec, 0, len(desired))
+		// Aggregate targets BY KEY: two SandboxWarmPools may resolve to the same
+		// (template,net,size) — their warm targets sum, and sandboxd rejects a PUT
+		// that repeats a key ("duplicate pool"). One spec per distinct key.
+		byKey := make(map[scale.PoolKey]int, len(desired))
 		for _, dp := range desired {
-			specs = append(specs, sandboxd.PoolSpec{
-				Template: dp.key.Template,
-				Net:      dp.key.Net,
-				Size:     dp.key.Size,
-				Warm:     dp.targets[node.name],
-			})
+			byKey[dp.key] += dp.targets[node.name]
 		}
+		specs := make([]sandboxd.PoolSpec, 0, len(byKey))
+		for key, warm := range byKey {
+			specs = append(specs, sandboxd.PoolSpec{Template: key.Template, Net: key.Net, Size: key.Size, Warm: warm})
+		}
+		sort.Slice(specs, func(a, b int) bool {
+			if specs[a].Template != specs[b].Template {
+				return specs[a].Template < specs[b].Template
+			}
+			if specs[a].Net != specs[b].Net {
+				return specs[a].Net < specs[b].Net
+			}
+			return specs[a].Size < specs[b].Size
+		})
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {

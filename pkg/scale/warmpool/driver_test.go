@@ -183,6 +183,40 @@ func TestReconcileWritesWarmStatus(t *testing.T) {
 	}
 }
 
+// TestTwoPoolsSameKeyAggregate pins that two SandboxWarmPools resolving to the
+// same pool key produce ONE spec per node with SUMMED warm — sandboxd rejects a
+// PUT that repeats a key ("duplicate pool"), which silently stalled every node.
+func TestTwoPoolsSameKeyAggregate(t *testing.T) {
+	// Both pools reference the same template "tpl" → identical key.
+	d, setter, inv, _ := newTestDriver(t, warmPool("p1", 3), warmPool2("p2", 5), template())
+	putNodes(inv, 2)
+	if err := d.reconcileOnce(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	sum := 0
+	for addr, specs := range setter.byAddr {
+		// The load-bearing invariant: ONE spec per node (keys aggregated, no
+		// duplicate the PUT would reject), and every spec carries the shared key.
+		if len(specs) != 1 {
+			t.Fatalf("node %s got %d specs, want 1 aggregated (no duplicate key): %+v", addr, len(specs), specs)
+		}
+		if specs[0].Template != testImage {
+			t.Fatalf("node %s wrong key %q", addr, specs[0].Template)
+		}
+		sum += specs[0].Warm
+	}
+	// p1(3) + p2(5) summed across the fleet = 8, regardless of per-node rounding.
+	if sum != 8 {
+		t.Fatalf("fleet warm total = %d, want 8 (3+5 summed)", sum)
+	}
+}
+
+// warmPool2 builds a second pool referencing the same template.
+func warmPool2(name string, replicas int32) *extv1beta1.SandboxWarmPool {
+	p := warmPool(name, replicas)
+	return p
+}
+
 // TestDrainOnZeroReplicas: replicas=0 sets every node's target to 0 (the
 // control-plane drain — kubectl scale to 0 or delete recycles the pool).
 func TestDrainOnZeroReplicas(t *testing.T) {

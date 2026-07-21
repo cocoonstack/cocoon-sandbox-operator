@@ -33,6 +33,7 @@ import (
 	genericoptions "k8s.io/apiserver/pkg/server/options"
 	apiservercompatibility "k8s.io/apiserver/pkg/util/compatibility"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -148,6 +149,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Route controller-runtime logs (the warm-pool driver's) through klog so they
+	// land in the apiserver's own log stream instead of being silently discarded.
+	ctrl.SetLogger(klog.NewKlogr())
 	ctx := genericapiserver.SetupSignalContext()
 
 	// The store reads NodeInventory objects through a cache-fed reader: the
