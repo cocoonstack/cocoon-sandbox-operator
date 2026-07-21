@@ -19,6 +19,16 @@
 // every invocation and inflated p50 to ~12s), the client here builds its
 // RESTMapper once, so the histogram reflects the apiserver round-trip (warm
 // claim), not client bootstrap cost.
+//
+// Safety properties (hard, by construction):
+//   - EXACTLY --total creates are issued, then the run stops. --total is
+//     REQUIRED and positive; there is no unbounded mode.
+//   - With --cleanup (default true), each worker BLOCKS until its sandbox's
+//     release is confirmed before creating the next one, so live claims never
+//     exceed --concurrency. A delete that returns NotFound is NOT success —
+//     it means the read view has not published the object yet (vk lag, ~10s);
+//     the worker retries until the delete lands or --release-timeout expires,
+//     and an expiry is counted in sandbox_sdk_leaked_total and logged loudly.
 package main
 
 import (
@@ -60,7 +70,7 @@ var (
 	})
 	deleteSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "sandbox_sdk_delete_seconds",
-		Help:    "Latency of Delete(Sandbox) against the aggregated apiserver (exact-VM release).",
+		Help:    "Latency of the FIRST successful Delete call (exact-VM release), excluding read-view NotFound retries.",
 		Buckets: prometheus.ExponentialBuckets(0.001, 2, 16),
 	})
 	createsTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -69,7 +79,15 @@ var (
 	})
 	deletesTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "sandbox_sdk_deletes_total",
-		Help: "Sandboxes successfully deleted (only when --cleanup).",
+		Help: "Sandboxes whose release was CONFIRMED (Delete accepted by the apiserver).",
+	})
+	deleteRetries = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sandbox_sdk_delete_notfound_retries_total",
+		Help: "Delete attempts that hit NotFound because the read view had not published the object yet (vk lag).",
+	})
+	leakedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sandbox_sdk_leaked_total",
+		Help: "Sandboxes created but whose release could NOT be confirmed within --release-timeout. Anything >0 means node claims were left for the TTL reaper — investigate.",
 	})
 	createFailed = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "sandbox_sdk_create_failed_total",
@@ -85,16 +103,19 @@ var (
 	}, []string{"version"})
 )
 
+var failReasons = []string{"no-warm-503", "throttled-429", "internal-500", "timeout", "conflict", "other"}
+
 type options struct {
-	namespace   string
-	image       string
-	namegen     string
-	concurrency int
-	total       int
-	interval    time.Duration
-	timeout     time.Duration
-	cleanup     bool
-	metricsAddr string
+	namespace      string
+	image          string
+	namegen        string
+	concurrency    int
+	total          int
+	interval       time.Duration
+	timeout        time.Duration
+	cleanup        bool
+	releaseTimeout time.Duration
+	metricsAddr    string
 }
 
 func main() {
@@ -102,16 +123,30 @@ func main() {
 	flag.StringVar(&o.namespace, "namespace", "sandbox-sdk-loadgen", "namespace to create Sandboxes in")
 	flag.StringVar(&o.image, "template", "ghcr.io/cocoonstack/sandbox/rt@sha256:c8cab53a1e1684e6c0c95a06855001b0535be2862b7d4f72658f9f0e784c8778", "container image; picks the warm pool (image=template, no resources=size small, no net annotation=none)")
 	flag.StringVar(&o.namegen, "name-prefix", "sdklg", "generated Sandbox name prefix")
-	flag.IntVar(&o.concurrency, "concurrency", 10, "parallel create workers (in-flight creates)")
-	flag.IntVar(&o.total, "total", 0, "stop after this many successful creates (0 = run until signalled)")
+	flag.IntVar(&o.concurrency, "concurrency", 1, "parallel create workers; with --cleanup this is also the max live claims")
+	flag.IntVar(&o.total, "total", 0, "REQUIRED: issue exactly this many creates, then stop (must be > 0; there is no unbounded mode)")
 	flag.DurationVar(&o.interval, "interval", 0, "per-worker gap between creates (0 = as fast as possible)")
 	flag.DurationVar(&o.timeout, "timeout", 30*time.Second, "per-create context timeout")
-	flag.BoolVar(&o.cleanup, "cleanup", false, "delete each Sandbox right after creating it (release the claim); measures sustained warm-claim latency without draining the pool")
+	flag.BoolVar(&o.cleanup, "cleanup", true, "delete each Sandbox after creating it and BLOCK until the release is confirmed (bounds live claims to --concurrency)")
+	flag.DurationVar(&o.releaseTimeout, "release-timeout", 120*time.Second, "max time to retry a Delete past the read-view publish lag before counting the sandbox as leaked")
 	flag.StringVar(&o.metricsAddr, "metrics-addr", ":9090", "Prometheus metrics listen address")
 	flag.Parse()
 
+	// Hard gate: never start an unbounded or ill-configured run. The one time
+	// this binary ran with an unbounded total it drained the fleet's warm pools
+	// and leaked ~19k claims. Exactly --total, or nothing.
+	if o.total <= 0 {
+		fatal("--total is required and must be > 0 (got %d): this loadgen issues exactly --total creates and refuses to run unbounded", o.total)
+	}
+	if o.concurrency <= 0 {
+		fatal("--concurrency must be > 0 (got %d)", o.concurrency)
+	}
+	if o.concurrency > o.total {
+		o.concurrency = o.total
+	}
+
 	buildInfo.WithLabelValues(version).Set(1)
-	for _, r := range []string{"no-warm-503", "throttled-429", "timeout", "conflict", "other"} {
+	for _, r := range failReasons {
 		createFailed.WithLabelValues(r).Add(0) // pre-init so panels render 0 not "No data"
 	}
 
@@ -133,7 +168,7 @@ func main() {
 		fatal("build client: %v", err)
 	}
 
-	// Serve metrics for the whole run (and after a bounded run finishes) so
+	// Serve metrics for the whole run (and after the bounded run finishes) so
 	// vmagent always has a live endpoint to scrape.
 	go func() {
 		mux := http.NewServeMux()
@@ -147,37 +182,65 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	fmt.Printf("sandbox-sdk-loadgen %s: ns=%s concurrency=%d total=%d cleanup=%v image=%s\n",
-		version, o.namespace, o.concurrency, o.total, o.cleanup, o.image)
+	fmt.Printf("sandbox-sdk-loadgen %s: ns=%s total=%d concurrency=%d cleanup=%v release-timeout=%s image=%s\n",
+		version, o.namespace, o.total, o.concurrency, o.cleanup, o.releaseTimeout, o.image)
 
-	run(ctx, cl, &o)
+	summary := run(ctx, cl, &o)
+	fmt.Println(summary)
+	if summary.leaked > 0 {
+		fmt.Printf("ERROR: %d sandbox(es) leaked — their node claims were left for the TTL reaper. Do NOT scale this run up until the leak is explained.\n", summary.leaked)
+	}
 
 	// Keep /metrics alive so the final histogram/counters remain scrapeable.
 	fmt.Println("run complete; serving /metrics until terminated")
 	<-context.Background().Done()
 }
 
-// run fans out o.concurrency workers that create Sandboxes until the context is
-// cancelled or the shared counter reaches o.total.
-func run(ctx context.Context, cl client.Client, o *options) {
-	var created int64
+// runSummary is the end-of-run accounting printed to stdout.
+type runSummary struct {
+	issued, created, failed, released, leaked int64
+	elapsed                                   time.Duration
+}
+
+func (s runSummary) String() string {
+	return fmt.Sprintf("summary: issued=%d created=%d failed=%d released=%d leaked=%d elapsed=%s",
+		s.issued, s.created, s.failed, s.released, s.leaked, s.elapsed.Round(time.Millisecond))
+}
+
+// run fans out o.concurrency workers. A worker RESERVES a slot from the shared
+// issue counter before each create, so across all workers exactly o.total
+// creates are issued — failures consume their slot and are not retried (a retry
+// would exceed the requested count).
+func run(ctx context.Context, cl client.Client, o *options) runSummary {
+	var s runSummary
+	var issued int64
+	start := time.Now()
 	var wg sync.WaitGroup
 	for w := 0; w < o.concurrency; w++ {
 		wg.Add(1)
 		go func(worker int) {
 			defer wg.Done()
-			var seq int
 			for {
 				if ctx.Err() != nil {
 					return
 				}
-				if o.total > 0 && atomic.LoadInt64(&created) >= int64(o.total) {
+				slot := atomic.AddInt64(&issued, 1)
+				if slot > int64(o.total) {
 					return
 				}
-				name := fmt.Sprintf("%s-w%d-%d", o.namegen, worker, seq)
-				seq++
-				if createOne(ctx, cl, o, name) {
-					atomic.AddInt64(&created, 1)
+				name := fmt.Sprintf("%s-%d", o.namegen, slot)
+				sb, err := createOne(ctx, cl, o, name)
+				if err != nil {
+					atomic.AddInt64(&s.failed, 1)
+				} else {
+					atomic.AddInt64(&s.created, 1)
+					if o.cleanup {
+						if releaseWithRetry(ctx, cl, o, sb) {
+							atomic.AddInt64(&s.released, 1)
+						} else {
+							atomic.AddInt64(&s.leaked, 1)
+						}
+					}
 				}
 				if o.interval > 0 {
 					select {
@@ -190,11 +253,14 @@ func run(ctx context.Context, cl client.Client, o *options) {
 		}(w)
 	}
 	wg.Wait()
+	s.issued = min64(atomic.LoadInt64(&issued), int64(o.total))
+	s.elapsed = time.Since(start)
+	return s
 }
 
-// createOne issues a single Create (and optional Delete), records latency and
-// outcome, and returns true on a successful create.
-func createOne(ctx context.Context, cl client.Client, o *options, name string) bool {
+// createOne issues a single Create, records latency and outcome, and returns
+// the created object (for cleanup) or the error.
+func createOne(ctx context.Context, cl client.Client, o *options, name string) (*sandboxv1beta1.Sandbox, error) {
 	sb := newSandbox(o.namespace, name, o.image)
 
 	cctx, cancel := context.WithTimeout(ctx, o.timeout)
@@ -207,27 +273,50 @@ func createOne(ctx context.Context, cl client.Client, o *options, name string) b
 	inflight.Dec()
 
 	if err != nil {
-		createFailed.WithLabelValues(classify(err)).Inc()
-		return false
+		reason := classify(err)
+		createFailed.WithLabelValues(reason).Inc()
+		logSampled(reason, "create %s/%s failed: %v", o.namespace, name, err)
+		return nil, err
 	}
 	createSeconds.Observe(elapsed)
 	createsTotal.Inc()
-
-	if o.cleanup {
-		deleteOne(ctx, cl, o, sb)
-	}
-	return true
+	return sb, nil
 }
 
-func deleteOne(ctx context.Context, cl client.Client, o *options, sb *sandboxv1beta1.Sandbox) {
-	dctx, cancel := context.WithTimeout(ctx, o.timeout)
-	defer cancel()
-	start := time.Now()
-	if err := cl.Delete(dctx, sb); err != nil && !apierrors.IsNotFound(err) {
-		return
+// releaseWithRetry deletes sb and BLOCKS until the apiserver accepts the
+// delete, retrying NotFound: a freshly created sandbox is not deletable until
+// the node's vk publishes it into the read view (~10s), and a NotFound before
+// then means "not yet", NOT "already gone". Returns false — and counts the
+// sandbox as leaked — only after --release-timeout.
+func releaseWithRetry(ctx context.Context, cl client.Client, o *options, sb *sandboxv1beta1.Sandbox) bool {
+	deadline := time.Now().Add(o.releaseTimeout)
+	for attempt := 0; ; attempt++ {
+		dctx, cancel := context.WithTimeout(ctx, o.timeout)
+		start := time.Now()
+		err := cl.Delete(dctx, sb)
+		cancel()
+		switch {
+		case err == nil:
+			deleteSeconds.Observe(time.Since(start).Seconds())
+			deletesTotal.Inc()
+			return true
+		case apierrors.IsNotFound(err):
+			// Read view lag — retry until the object appears.
+			deleteRetries.Inc()
+		default:
+			logSampled("delete", "delete %s/%s failed (attempt %d): %v", sb.Namespace, sb.Name, attempt, err)
+		}
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			leakedTotal.Inc()
+			fmt.Printf("ERROR: sandbox %s/%s leaked: release not confirmed within %s (last err: %v)\n",
+				sb.Namespace, sb.Name, o.releaseTimeout, err)
+			return false
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
+		}
 	}
-	deleteSeconds.Observe(time.Since(start).Seconds())
-	deletesTotal.Inc()
 }
 
 // newSandbox builds a Sandbox whose derived pool is (image, net=none, size=small)
@@ -256,13 +345,16 @@ func newSandbox(ns, name, image string) *sandboxv1beta1.Sandbox {
 
 // classify buckets a Create error for the failed-by-reason counter. no-warm is
 // the meaningful signal: the apiserver returns 503 ServiceUnavailable when the
-// derived pool has no warm VM (NewServiceUnavailable in storage.Create).
+// derived pool has no warm VM (NewServiceUnavailable in storage.Create); claim
+// plumbing failures surface as 500 InternalError.
 func classify(err error) string {
 	switch {
 	case apierrors.IsServiceUnavailable(err):
 		return "no-warm-503"
 	case apierrors.IsTooManyRequests(err):
 		return "throttled-429"
+	case apierrors.IsInternalError(err):
+		return "internal-500"
 	case apierrors.IsServerTimeout(err), apierrors.IsTimeout(err), err == context.DeadlineExceeded:
 		return "timeout"
 	case apierrors.IsConflict(err), apierrors.IsAlreadyExists(err):
@@ -270,6 +362,30 @@ func classify(err error) string {
 	default:
 		return "other"
 	}
+}
+
+// logSampled prints at most one line per key per 5s so failure causes are always
+// visible in the pod log without flooding it at load-test rates.
+var (
+	logMu   sync.Mutex
+	lastLog = map[string]time.Time{}
+)
+
+func logSampled(key, format string, args ...interface{}) {
+	logMu.Lock()
+	defer logMu.Unlock()
+	if time.Since(lastLog[key]) < 5*time.Second {
+		return
+	}
+	lastLog[key] = time.Now()
+	fmt.Printf(format+"\n", args...)
+}
+
+func min64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func fatal(format string, args ...interface{}) {

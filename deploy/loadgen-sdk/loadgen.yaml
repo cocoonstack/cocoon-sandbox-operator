@@ -1,7 +1,12 @@
 # sandbox-sdk-loadgen: persistent-client Create(Sandbox) latency benchmark.
 # Ships at replicas 0 — scale to 1 to start a run:
 #   kubectl -n sandbox-sdk-loadgen scale deploy/sandbox-sdk-loadgen --replicas=1
-# Tune load via the container args (concurrency / total / cleanup / interval).
+#
+# SAFETY: --total is REQUIRED by the binary (it refuses to start without it) and
+# the run issues EXACTLY that many creates, then stops. --cleanup=true makes each
+# worker block until its sandbox's release is confirmed, so live claims never
+# exceed --concurrency. Set the numbers below to the run you were asked for —
+# never scale this up "to see what happens".
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -62,8 +67,8 @@ spec:
         image: mindset-ap-southeast-1.cr.volces.com/g0031/cocoon-sandbox-sdk-loadgen:g0133-sdk1
         args:
         - --namespace=sandbox-sdk-loadgen
-        - --concurrency=20
-        - --total=0
+        - --concurrency=2
+        - --total=10
         - --cleanup=true
         - --metrics-addr=:9090
         ports:
