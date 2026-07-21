@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+
+# Image for cmd/sandbox-sdk-loadgen, the persistent-client create-latency
+# benchmark that drives the writable aggregated apiserver (see deploy/loadgen-sdk/).
+#   docker build -f Dockerfile.sdkloadgen -t <registry>/cocoon-sandbox-sdk-loadgen:<tag> .
+
+FROM --platform=$BUILDPLATFORM golang:1.26.5 AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH
+ARG VERSION=dev
+
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY api/ ./api/
+COPY cmd/ ./cmd/
+COPY cocoon/ ./cocoon/
+COPY controllers/ ./controllers/
+COPY extensions/ ./extensions/
+COPY internal/ ./internal/
+COPY pkg/ ./pkg/
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+    -ldflags="-s -w -X main.version=${VERSION}" \
+    -o /sandbox-sdk-loadgen ./cmd/sandbox-sdk-loadgen
+
+FROM gcr.io/distroless/static-debian13:nonroot
+COPY --from=builder /sandbox-sdk-loadgen /sandbox-sdk-loadgen
+ENTRYPOINT ["/sandbox-sdk-loadgen"]
