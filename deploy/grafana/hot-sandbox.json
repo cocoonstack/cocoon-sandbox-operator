@@ -8,8 +8,8 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 10,
-  "refresh": "10s",
+  "version": 12,
+  "refresh": "5s",
   "time": {
     "from": "now-1h",
     "to": "now"
@@ -23,9 +23,9 @@
   "editable": true,
   "panels": [
     {
-      "id": 1,
+      "id": 900,
       "type": "row",
-      "title": "① 池子 / Warm pool (operator)",
+      "title": "⓪ 填充点阵 / Fill matrix — 每节点 warm 实时(5s 采样)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -36,16 +36,18 @@
       "panels": []
     },
     {
-      "id": 2,
-      "type": "stat",
-      "title": "总量 (total)",
+      "id": 901,
+      "type": "status-history",
+      "title": "每节点 warm 点阵(格子=某时刻该节点 warm 数,越绿越满)",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
       },
+      "interval": "5s",
+      "description": "sum by(host)(sandboxd_pool_warm). 每行一个节点, X 轴时间(5s 一格). 开池瞬间整列由红转绿即体现填充速度.",
       "gridPos": {
-        "h": 4,
-        "w": 6,
+        "h": 10,
+        "w": 18,
         "x": 0,
         "y": 1
       },
@@ -55,7 +57,193 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(agent_sandboxes{launch_type=\"warm\"}) or vector(0)",
+          "expr": "sum by (host) (sandboxd_pool_warm)",
+          "legendFormat": "{{host}}",
+          "refId": "A",
+          "interval": "5s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "dark-red",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              },
+              {
+                "color": "orange",
+                "value": 10
+              },
+              {
+                "color": "yellow",
+                "value": 25
+              },
+              {
+                "color": "green",
+                "value": 37
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 90,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "colWidth": 0.95,
+        "rowHeight": 0.9,
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 902,
+      "type": "timeseries",
+      "title": "总 warm (5s)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "interval": "5s",
+      "description": "sum(sandboxd_pool_warm). 5s 采样, 开池是近乎垂直的一跳=填充秒级.",
+      "gridPos": {
+        "h": 10,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(sandboxd_pool_warm) or vector(0)",
+          "legendFormat": "warm",
+          "refId": "A",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(sandboxd_pool_target) or vector(0)",
+          "legendFormat": "target",
+          "refId": "B",
+          "interval": "5s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "always",
+            "pointSize": 4,
+            "gradientMode": "opacity",
+            "stepInterval": null
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    6,
+                    6
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 1,
+      "type": "row",
+      "title": "① 池子实时状态 / Pool state — 全 fleet sandboxd 直采",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Warm 可认领",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "description": "sandboxd_pool_warm summed across all nodes — claim-ready warm VMs.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(sandboxd_pool_warm) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "range": true
@@ -85,16 +273,17 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "剩余 (available)",
+      "title": "Claimed 已认领/活跃",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
       },
+      "description": "sandboxd_claimed — live claims across the fleet.",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 1
+        "w": 4,
+        "x": 4,
+        "y": 12
       },
       "targets": [
         {
@@ -102,7 +291,7 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(agent_sandboxes{launch_type=\"warm\",owned_by=\"SandboxWarmPool\",ready_condition=\"true\"}) or vector(0)",
+          "expr": "sum(sandboxd_claimed) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "range": true
@@ -132,16 +321,17 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "创建速度 (/s)",
+      "title": "Hibernated 休眠",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
       },
+      "description": "sandboxd_hibernated — claims currently hibernated.",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 1
+        "w": 4,
+        "x": 8,
+        "y": 12
       },
       "targets": [
         {
@@ -149,7 +339,7 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(rate(agent_sandbox_warm_created_total[1m])) or vector(0)",
+          "expr": "sum(sandboxd_hibernated) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "range": true
@@ -157,7 +347,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
+          "unit": "none",
           "color": {
             "mode": "fixed",
             "fixedColor": "purple"
@@ -179,16 +369,17 @@
     {
       "id": 5,
       "type": "stat",
-      "title": "消耗速度 (/s)",
+      "title": "Archived 归档",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
       },
+      "description": "sandboxd_archived — claims checkpointed to the archive store.",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 1
+        "w": 4,
+        "x": 12,
+        "y": 12
       },
       "targets": [
         {
@@ -196,7 +387,358 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(rate(agent_sandbox_claim_controller_startup_latency_ms_count[1m])) or vector(0)",
+          "expr": "sum(sandboxd_archived) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Target 目标水位",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "description": "sandboxd_pool_target — configured warm watermark across all pools.",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 12
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(sandboxd_pool_target) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Draining 排水节点",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "description": "sandboxd_draining — nodes cordoned for maintenance (>0 = attention).",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 12
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(sandboxd_draining) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "所有状态随时间 / all states over time",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "description": "Every sandboxd lifecycle gauge stacked: warm + claimed + hibernated + archived.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(sandboxd_pool_warm) or vector(0)",
+          "legendFormat": "warm 可认领",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(sandboxd_claimed) or vector(0)",
+          "legendFormat": "claimed 已认领",
+          "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(sandboxd_hibernated) or vector(0)",
+          "legendFormat": "hibernated 休眠",
+          "refId": "C",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(sandboxd_archived) or vector(0)",
+          "legendFormat": "archived 归档",
+          "refId": "D",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(sandboxd_pool_target) or vector(0)",
+          "legendFormat": "target 目标水位",
+          "refId": "E",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "gradientMode": "opacity",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target 目标水位"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    8,
+                    6
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "last",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "② 吞吐 / Throughput — 创建·消耗·回收速率",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "创建速度 claims/s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "description": "rate(sandboxd_claims_total) — VMs handed out per second, all tiers.",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(rate(sandboxd_claims_total[1m])) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "释放速度 releases/s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "description": "rate(sandboxd_releases_total) — claims explicitly released per second.",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(rate(sandboxd_releases_total[1m])) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "range": true
@@ -224,19 +766,19 @@
       }
     },
     {
-      "id": 6,
-      "type": "timeseries",
-      "title": "池子 总量 / 剩余",
+      "id": 12,
+      "type": "stat",
+      "title": "回收速度 reaps/s",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
       },
-      "description": "agent_sandboxes gauge from the operator; 剩余 = owned_by=SandboxWarmPool & ready.",
+      "description": "rate(sandboxd_reaps_total) — claims reaped at TTL deadline per second.",
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 5
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 25
       },
       "targets": [
         {
@@ -244,8 +786,56 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(agent_sandboxes{launch_type=\"warm\"}) or vector(0)",
-          "legendFormat": "总量",
+          "expr": "sum(rate(sandboxd_reaps_total[1m])) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "创建速度 by tier (warm / clone / cold) + 消耗 + 回收",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "description": "Claim throughput split by provisioning tier, plus release and reap rates.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum by (tier) (rate(sandboxd_claims_total[1m]))",
+          "legendFormat": "claim {{tier}}",
           "refId": "A",
           "range": true
         },
@@ -254,8 +844,161 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(agent_sandboxes{launch_type=\"warm\",owned_by=\"SandboxWarmPool\",ready_condition=\"true\"}) or vector(0)",
-          "legendFormat": "剩余 (未被认领占用)",
+          "expr": "sum(rate(sandboxd_releases_total[1m])) or vector(0)",
+          "legendFormat": "release",
+          "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(rate(sandboxd_reaps_total[1m])) or vector(0)",
+          "legendFormat": "reap",
+          "refId": "C",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "last",
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "row",
+      "title": "③ 认领延迟 / Claim latency",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "平均认领延迟 (ms)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "description": "sandboxd_claim_seconds_total / sandboxd_claims_total over 5m — mean warm-checkout latency. sandboxd exports totals (not a histogram), so this is the mean, not a quantile.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 38
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "(sum(rate(sandboxd_claim_seconds_total[5m])) / sum(rate(sandboxd_claims_total[5m])) * 1000) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 200
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "平均认领延迟随时间 (ms)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "volc-vmp"
+      },
+      "description": "Mean warm-checkout latency over time. Warm hits are sub-ms; a rising line means the pool is draining faster than it refills (cold/clone fallback).",
+      "gridPos": {
+        "h": 8,
+        "w": 18,
+        "x": 6,
+        "y": 38
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "(sum(rate(sandboxd_claim_seconds_total[5m])) / sum(rate(sandboxd_claims_total[5m])) * 1000) or vector(0)",
+          "legendFormat": "平均 (fleet)",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "(sum by (host) (rate(sandboxd_claim_seconds_total[5m])) / sum by (host) (rate(sandboxd_claims_total[5m])) * 1000)",
+          "legendFormat": "{{host}}",
           "refId": "B",
           "range": true,
           "hide": true
@@ -263,7 +1006,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
+          "unit": "ms",
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
@@ -291,98 +1034,32 @@
       }
     },
     {
-      "id": 7,
-      "type": "timeseries",
-      "title": "创建速度 / 消耗速度",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "volc-vmp"
-      },
-      "description": "创建 = agent_sandbox_warm_created_total, counted inside the operator at its create call. 消耗 = warm sandboxes handed to claims.",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 5
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "volc-vmp"
-          },
-          "expr": "sum(rate(agent_sandbox_warm_created_total[1m])) or vector(0)",
-          "legendFormat": "创建 /s (warm-pool controller)",
-          "refId": "A",
-          "range": true
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "volc-vmp"
-          },
-          "expr": "sum(rate(agent_sandbox_claim_controller_startup_latency_ms_count[1m])) or vector(0)",
-          "legendFormat": "消耗 /s (claims served)",
-          "refId": "B",
-          "range": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "gradientMode": "opacity"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "last",
-            "max",
-            "mean"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 8,
+      "id": 17,
       "type": "row",
-      "title": "② 认领 / Claims",
+      "title": "④ 生命周期事件 / Lifecycle transitions",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 46
       },
       "panels": []
     },
     {
-      "id": 9,
+      "id": 18,
       "type": "timeseries",
-      "title": "认领速度 (/s)",
+      "title": "fork / checkpoint / hibernate / wake / archive / promote (/s)",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
       },
-      "description": "SandboxClaim rate, operator-side and client-side.",
+      "description": "All remaining sandboxd transition counters as rates — captures fork-snapshot, hibernate/wake, archive/unarchive, template promote activity.",
       "gridPos": {
-        "h": 6,
+        "h": 8,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 47
       },
       "targets": [
         {
@@ -390,8 +1067,8 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(rate(agent_sandbox_claim_creation_total[1m]))",
-          "legendFormat": "claims created /s (operator)",
+          "expr": "sum(rate(sandboxd_forks_total[1m])) or vector(0)",
+          "legendFormat": "fork",
           "refId": "A",
           "range": true
         },
@@ -400,9 +1077,59 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(rate(sandbox_loadgen_bound_total[1m]))",
-          "legendFormat": "claims served /s (client)",
+          "expr": "sum(rate(sandboxd_checkpoints_total[1m])) or vector(0)",
+          "legendFormat": "checkpoint",
           "refId": "B",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(rate(sandboxd_hibernates_total[1m])) or vector(0)",
+          "legendFormat": "hibernate",
+          "refId": "C",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(rate(sandboxd_wakes_total[1m])) or vector(0)",
+          "legendFormat": "wake",
+          "refId": "D",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(rate(sandboxd_archives_total[1m])) or vector(0)",
+          "legendFormat": "archive",
+          "refId": "E",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(rate(sandboxd_unarchives_total[1m])) or vector(0)",
+          "legendFormat": "unarchive",
+          "refId": "F",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "volc-vmp"
+          },
+          "expr": "sum(rate(sandboxd_promotes_total[1m])) or vector(0)",
+          "legendFormat": "promote",
+          "refId": "G",
           "range": true
         }
       ],
@@ -412,7 +1139,7 @@
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
-            "fillOpacity": 8,
+            "fillOpacity": 6,
             "showPoints": "never",
             "gradientMode": "opacity"
           }
@@ -425,8 +1152,7 @@
           "placement": "bottom",
           "calcs": [
             "last",
-            "max",
-            "mean"
+            "max"
           ]
         },
         "tooltip": {
@@ -436,19 +1162,32 @@
       }
     },
     {
-      "id": 10,
+      "id": 19,
+      "type": "row",
+      "title": "⑤ 每节点分布 / Per-node (26 nodes)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 55
+      },
+      "panels": []
+    },
+    {
+      "id": 20,
       "type": "timeseries",
-      "title": "认领延迟 p50/p95/p99 (xx ms)",
+      "title": "Warm 每节点",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
       },
-      "description": "Warm-sandbox checkout latency quantiles (claim -> Ready). Unit auto-scales to ms.",
+      "description": "sandboxd_pool_warm by node — uneven lines flag a node whose refill is lagging.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 12,
         "x": 0,
-        "y": 20
+        "y": 56
       },
       "targets": [
         {
@@ -456,53 +1195,30 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "histogram_quantile(0.5, sum(rate(sandbox_loadgen_claim_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p50",
+          "expr": "sum by (host) (sandboxd_pool_warm)",
+          "legendFormat": "{{host}}",
           "refId": "A",
-          "range": true
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "volc-vmp"
-          },
-          "expr": "histogram_quantile(0.95, sum(rate(sandbox_loadgen_claim_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p95",
-          "refId": "B",
-          "range": true
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "volc-vmp"
-          },
-          "expr": "histogram_quantile(0.99, sum(rate(sandbox_loadgen_claim_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p99",
-          "refId": "C",
           "range": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "none",
           "custom": {
             "drawStyle": "line",
-            "lineWidth": 2,
+            "lineWidth": 1,
             "fillOpacity": 0,
-            "showPoints": "never",
-            "gradientMode": "opacity"
+            "showPoints": "never"
           }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
+          "displayMode": "list",
+          "placement": "right",
           "calcs": [
-            "last",
-            "max",
-            "mean"
+            "last"
           ]
         },
         "tooltip": {
@@ -512,19 +1228,19 @@
       }
     },
     {
-      "id": 11,
-      "type": "heatmap",
-      "title": "认领延迟分布 heatmap (claim -> Ready)",
+      "id": 21,
+      "type": "timeseries",
+      "title": "Claimed 每节点",
       "datasource": {
         "type": "prometheus",
         "uid": "volc-vmp"
       },
-      "description": "Client-observed distribution of warm-sandbox checkout latency.",
+      "description": "sandboxd_claimed by node — live load spread across the fleet.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 12,
         "x": 12,
-        "y": 20
+        "y": 56
       },
       "targets": [
         {
@@ -532,55 +1248,36 @@
             "type": "prometheus",
             "uid": "volc-vmp"
           },
-          "expr": "sum(rate(sandbox_loadgen_claim_seconds_bucket[5m])) by (le)",
-          "format": "heatmap",
-          "legendFormat": "{{le}}",
+          "expr": "sum by (host) (sandboxd_claimed)",
+          "legendFormat": "{{host}}",
           "refId": "A",
           "range": true
         }
       ],
-      "options": {
-        "calculate": false,
-        "cellGap": 1,
-        "color": {
-          "mode": "scheme",
-          "scheme": "Spectral",
-          "steps": 64,
-          "reverse": false
-        },
-        "yAxis": {
-          "unit": "s",
-          "axisPlacement": "left"
-        },
-        "tooltip": {
-          "show": true,
-          "yHistogram": false
-        },
-        "legend": {
-          "show": true
-        },
-        "rowsFrame": {
-          "layout": "auto"
-        },
-        "cellValues": {},
-        "filterValues": {
-          "le": 1e-09
-        }
-      },
       "fieldConfig": {
         "defaults": {
+          "unit": "none",
           "custom": {
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
-            }
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never"
           }
         },
         "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     }
   ]
