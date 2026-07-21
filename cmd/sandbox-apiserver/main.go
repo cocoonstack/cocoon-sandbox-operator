@@ -28,6 +28,7 @@ import (
 
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	genericoptions "k8s.io/apiserver/pkg/server/options"
 	apiservercompatibility "k8s.io/apiserver/pkg/util/compatibility"
@@ -36,8 +37,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/apiserver"
+	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/warmpool"
 )
 
 // inventoryCacheSyncTimeout bounds the startup wait for the NodeInventory
@@ -62,6 +65,12 @@ type options struct {
 	// Create/Delete write path stays disabled (fails closed).
 	SandboxdToken     string
 	SandboxdTokenFile string
+
+	// WarmPoolDriver enables the in-process SandboxWarmPool → sandboxd pool
+	// reconcile loop (the control-plane surface for warm capacity). Pool-level,
+	// O(pools+nodes); never per-sandbox. WarmPoolInterval is its resync cadence.
+	WarmPoolDriver   bool
+	WarmPoolInterval time.Duration
 }
 
 func newOptions() *options {
@@ -70,6 +79,7 @@ func newOptions() *options {
 		Authentication: genericoptions.NewDelegatingAuthenticationOptions(),
 		Authorization:  genericoptions.NewDelegatingAuthorizationOptions(),
 		Features:       genericoptions.NewFeatureOptions(),
+		WarmPoolDriver: true,
 	}
 	o.SecureServing.BindPort = 6443
 	// Allow running without a remote kubeconfig (in-cluster service account).
@@ -87,6 +97,10 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 		"Uniform fleet-wide sandboxd api_token presented on node-local claim/release. Prefer --sandboxd-token-file for a Secret mount.")
 	fs.StringVar(&o.SandboxdTokenFile, "sandboxd-token-file", o.SandboxdTokenFile,
 		"Path to a file (Secret mount) holding the sandboxd api_token; overrides --sandboxd-token when set.")
+	fs.BoolVar(&o.WarmPoolDriver, "enable-warm-pool-driver", o.WarmPoolDriver,
+		"Run the in-process SandboxWarmPool → sandboxd pool reconcile loop (control-plane warm-capacity surface; pool-level, never per-sandbox).")
+	fs.DurationVar(&o.WarmPoolInterval, "warm-pool-sync-interval", o.WarmPoolInterval,
+		"Resync cadence for the SandboxWarmPool driver (0 = default 20s).")
 }
 
 // resolveSandboxdToken returns the sandboxd token, reading it from the token file
@@ -154,10 +168,23 @@ func run() error {
 	// WithClaimRouting wires the node-local claim/release write path: the uniform
 	// fleet token plus a per-node sandboxd HTTP client keyed on each node's
 	// advertised address (NodeInventory.Address). Empty token leaves it fail-closed.
+	invSource := scale.NewClientInventorySource(reader)
 	store := scale.NewScatterGatherStore(
-		scale.NewClientInventorySource(reader),
+		invSource,
 		scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()),
 	)
+
+	// The SandboxWarmPool driver is the control-plane surface for warm capacity:
+	// it reconciles official SandboxWarmPool CRs into node-local sandboxd pool
+	// targets and writes their status back from live inventory. It runs in THIS
+	// process alongside the NodeInventory cache — one component polls node state
+	// and writes back CR status. It is pool-level (O(pools+nodes)); there is no
+	// per-sandbox reconcile, so the apiserver never carries per-sandbox load.
+	if o.WarmPoolDriver {
+		if err := startWarmPoolDriver(ctx, restCfg, invSource, token, o.WarmPoolInterval); err != nil {
+			return err
+		}
+	}
 
 	server, err := cfg.Complete(nil).New("cocoon-sandbox-apiserver", genericapiserver.NewEmptyDelegate())
 	if err != nil {
@@ -205,6 +232,27 @@ func startInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache
 			inventoryCacheSyncTimeout, scale.NodeInventoryGVK.GroupKind())
 	}
 	return invCache, nil
+}
+
+// startWarmPoolDriver builds a direct client (extensions scheme) for the
+// O(pools) SandboxWarmPool/SandboxTemplate reads + status writes, and launches
+// the driver's reconcile loop as a background goroutine bound to ctx. The reads
+// are not on any hot path, so a cached informer is unnecessary.
+func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, inv scale.InventorySource, token string, interval time.Duration) error {
+	scheme := runtime.NewScheme()
+	if err := extv1beta1.AddToScheme(scheme); err != nil {
+		return fmt.Errorf("register extensions scheme: %w", err)
+	}
+	kube, err := client.New(restCfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return fmt.Errorf("build warm-pool client: %w", err)
+	}
+	driver := warmpool.New(kube, inv, token, warmpool.NewSandboxdFactory(), warmpool.Options{
+		Interval: interval,
+		Log:      ctrl.Log.WithName("warmpool"),
+	})
+	go driver.Run(ctx)
+	return nil
 }
 
 func main() {

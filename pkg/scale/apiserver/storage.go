@@ -19,10 +19,8 @@ import (
 	"fmt"
 	"net"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -221,57 +219,10 @@ func toScaleListOptions(ctx context.Context, options *metainternalversion.ListOp
 
 // poolKeyForSandbox derives the warm-pool key from a Sandbox: the template is the
 // first container's image, the size is a t-shirt class mapped from that container's
-// resources, and the net comes from the NetAnnotation (default "none").
+// resources, and the net comes from the NetAnnotation (default "none"). It defers
+// to scale.PoolKeyFor so the SandboxWarmPool driver derives an identical key.
 func poolKeyForSandbox(sb *sandboxv1beta1.Sandbox) scale.PoolKey {
-	var template string
-	containers := sb.Spec.PodTemplate.Spec.Containers
-	if len(containers) > 0 {
-		template = containers[0].Image
-	}
-	net := sb.Annotations[NetAnnotation]
-	if net == "" {
-		net = "none"
-	}
-	return scale.PoolKey{
-		Template: template,
-		Net:      net,
-		Size:     sizeClassForContainers(containers),
-	}
-}
-
-// Coarse, documented t-shirt-size thresholds mapping a container's CPU/memory
-// request (falling back to its limit) onto the warm pool size classes.
-var (
-	sizeCPUMedium = resource.MustParse("1")
-	sizeMemMedium = resource.MustParse("2Gi")
-	sizeCPULarge  = resource.MustParse("4")
-	sizeMemLarge  = resource.MustParse("8Gi")
-)
-
-// sizeClassForContainers maps the first container's CPU/memory onto small|medium|
-// large. It prefers requests, falls back to limits, and defaults to "small" when
-// neither is set. Thresholds: >4 CPU or >8Gi -> large; >1 CPU or >2Gi -> medium.
-func sizeClassForContainers(containers []corev1.Container) string {
-	if len(containers) == 0 {
-		return "small"
-	}
-	res := containers[0].Resources
-	cpu := res.Requests.Cpu()
-	if cpu.IsZero() {
-		cpu = res.Limits.Cpu()
-	}
-	mem := res.Requests.Memory()
-	if mem.IsZero() {
-		mem = res.Limits.Memory()
-	}
-	switch {
-	case cpu.Cmp(sizeCPULarge) > 0 || mem.Cmp(sizeMemLarge) > 0:
-		return "large"
-	case cpu.Cmp(sizeCPUMedium) > 0 || mem.Cmp(sizeMemMedium) > 0:
-		return "medium"
-	default:
-		return "small"
-	}
+	return scale.PoolKeyFor(sb.Spec.PodTemplate.Spec.Containers, sb.Annotations[NetAnnotation])
 }
 
 // synthesizeClaimedSandbox builds the Sandbox object Create returns: the submitted

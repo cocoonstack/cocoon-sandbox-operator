@@ -61,6 +61,25 @@ rules:
   - get
   - list
   - watch
+# The in-process SandboxWarmPool driver reads pools + templates and writes pool
+# status back from live inventory (control-plane warm-capacity surface).
+- apiGroups:
+  - extensions.agents.x-k8s.io
+  resources:
+  - sandboxwarmpools
+  - sandboxtemplates
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - extensions.agents.x-k8s.io
+  resources:
+  - sandboxwarmpools/status
+  verbs:
+  - get
+  - update
+  - patch
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

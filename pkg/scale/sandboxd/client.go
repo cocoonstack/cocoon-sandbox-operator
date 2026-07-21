@@ -156,6 +156,73 @@ func (c *Client) Claim(ctx context.Context, spec ClaimSpec) (ClaimResult, error)
 	}
 }
 
+// PoolSpec is one entry of the PUT /v1/pools body: the desired warm watermark
+// for a single (template, net, size) pool on this node. It mirrors the claim
+// key so a SandboxWarmPool's target lands on the exact pool a Create claims from.
+type PoolSpec struct {
+	Template string `json:"template"`
+	Net      string `json:"net,omitempty"`
+	Size     string `json:"size,omitempty"`
+	Warm     int    `json:"warm"`
+}
+
+// NodeInfo is the PUT /v1/pools (and GET /v1/info) response: the node's live
+// per-pool warm state plus its lifecycle counters. Only the fields the warm-pool
+// driver reports on are decoded.
+type NodeInfo struct {
+	Pools []struct {
+		Key struct {
+			Template string `json:"template"`
+			Net      string `json:"net"`
+			Size     string `json:"size"`
+		} `json:"key"`
+		Warm      int  `json:"warm"`
+		Refilling int  `json:"refilling"`
+		Target    int  `json:"target"`
+		Golden    bool `json:"golden"`
+	} `json:"pools"`
+	Claimed    int `json:"claimed"`
+	Hibernated int `json:"hibernated"`
+	Archived   int `json:"archived"`
+}
+
+// SetPools performs PUT /v1/pools, replacing this node's desired warm targets
+// with the supplied set (an omitted pool is drained). It authenticates with the
+// node api_token. The whole set is sent in one request because sandboxd replaces
+// its pool config wholesale — a partial list silently drains the rest.
+func (c *Client) SetPools(ctx context.Context, pools []PoolSpec) (*NodeInfo, error) {
+	if pools == nil {
+		pools = []PoolSpec{}
+	}
+	body, err := json.Marshal(struct {
+		Pools []PoolSpec `json:"pools"`
+	}{Pools: pools})
+	if err != nil {
+		return nil, fmt.Errorf("sandboxd: encode pools: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/v1/pools", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.authenticate(req, c.token)
+
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("sandboxd: set pools: %w", err)
+	}
+	defer drainAndClose(resp)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, statusError(resp)
+	}
+	var info NodeInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("sandboxd: decode pools response: %w", err)
+	}
+	return &info, nil
+}
+
 // Release performs POST /v1/sandboxes/{id}/release, which DESTROYS the VM. It
 // authenticates with the sandbox's own token. A 404 (unknown id or already gone)
 // is treated as success, matching the SDK. Callers must only reach this on
