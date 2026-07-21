@@ -37,6 +37,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
@@ -185,7 +186,7 @@ func run() error {
 	// and writes back CR status. It is pool-level (O(pools+nodes)); there is no
 	// per-sandbox reconcile, so the apiserver never carries per-sandbox load.
 	if o.WarmPoolDriver {
-		if err := startWarmPoolDriver(ctx, restCfg, invSource, token, o.WarmPoolInterval); err != nil {
+		if err := startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval); err != nil {
 			return err
 		}
 	}
@@ -238,25 +239,53 @@ func startInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache
 	return invCache, nil
 }
 
-// startWarmPoolDriver builds a direct client (extensions scheme) for the
-// O(pools) SandboxWarmPool/SandboxTemplate reads + status writes, and launches
-// the driver's reconcile loop as a background goroutine bound to ctx. The reads
-// are not on any hot path, so a cached informer is unnecessary.
-func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, inv scale.InventorySource, token string, interval time.Duration) error {
+// startWarmPoolDriver runs the SandboxWarmPool driver as a controller inside a
+// controller-runtime manager: it WATCHES SandboxWarmPool and NodeInventory, so a
+// `kubectl apply/patch/delete` reconciles in milliseconds instead of waiting for
+// a poll tick (the only latency that ever mattered — the node side fills a pool
+// in under a second). Leader election makes exactly one of the apiserver replicas
+// drive the pools. The manager's own metrics/health servers are disabled; the
+// aggregated apiserver owns the serving port.
+func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token string, interval time.Duration) error {
 	scheme := runtime.NewScheme()
 	if err := extv1beta1.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("register extensions scheme: %w", err)
 	}
-	kube, err := client.New(restCfg, client.Options{Scheme: scheme})
+	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
+		Scheme:                  scheme,
+		Metrics:                 metricsserver.Options{BindAddress: "0"},
+		HealthProbeBindAddress:  "0",
+		LeaderElection:          true,
+		LeaderElectionID:        "cocoon-warmpool-driver",
+		LeaderElectionNamespace: currentNamespace(),
+	})
 	if err != nil {
-		return fmt.Errorf("build warm-pool client: %w", err)
+		return fmt.Errorf("build warm-pool manager: %w", err)
 	}
-	driver := warmpool.New(kube, inv, token, warmpool.NewSandboxdFactory(), warmpool.Options{
+	driver := warmpool.New(nil, nil, token, warmpool.NewSandboxdFactory(), warmpool.Options{
 		Interval: interval,
 		Log:      ctrl.Log.WithName("warmpool"),
 	})
-	go driver.Run(ctx)
+	if err := driver.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("set up warm-pool controller: %w", err)
+	}
+	go func() {
+		if err := mgr.Start(ctx); err != nil {
+			klog.ErrorS(err, "warm-pool manager exited")
+		}
+	}()
 	return nil
+}
+
+// currentNamespace returns the pod's namespace (for the leader-election lease),
+// read from the service-account mount, defaulting to the deployment namespace.
+func currentNamespace() string {
+	if b, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+		if ns := strings.TrimSpace(string(b)); ns != "" {
+			return ns
+		}
+	}
+	return "cocoon-sandbox-system"
 }
 
 func main() {

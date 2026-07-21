@@ -36,7 +36,10 @@ import (
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
@@ -99,23 +102,39 @@ func New(kube client.Client, inv scale.InventorySource, token string, factory Cl
 	return &Driver{kube: kube, inv: inv, token: token, factory: factory, interval: opts.Interval, log: opts.Log}
 }
 
-// Run reconciles once immediately, then every interval until ctx is cancelled.
-func (d *Driver) Run(ctx context.Context) {
-	timer := time.NewTicker(d.interval)
-	defer timer.Stop()
+// Reconcile runs a full pool reconcile on ANY SandboxWarmPool or NodeInventory
+// event — so a `kubectl apply/patch/delete` reacts in milliseconds, not after a
+// poll tick. It ignores the request key (the loop is global, O(pools+nodes)) and
+// requeues after d.interval as a drift backstop. The node side fills a pool in
+// well under a second (refill_concurrency up to 64); the only latency that ever
+// mattered was this trigger, which is now event-driven.
+func (d *Driver) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	if err := d.reconcileOnce(ctx); err != nil {
-		d.log.Error(err, "warm-pool initial reconcile failed")
+		return ctrl.Result{}, err
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			if err := d.reconcileOnce(ctx); err != nil {
-				d.log.Error(err, "warm-pool reconcile failed")
-			}
-		}
+	return ctrl.Result{RequeueAfter: d.interval}, nil
+}
+
+// SetupWithManager registers the driver as a controller watching SandboxWarmPool
+// (the desired-state object) and NodeInventory (the node set to spread across).
+// It uses the manager's cached client for pool/template reads and status writes.
+func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
+	if d.kube == nil {
+		d.kube = mgr.GetClient()
 	}
+	if d.inv == nil {
+		d.inv = scale.NewClientInventorySource(mgr.GetClient())
+	}
+	// Any NodeInventory change (a node joined, restarted, changed address) must
+	// re-spread every pool, so map it to a single global reconcile trigger.
+	enqueueAll := handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
+		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: "sync"}}}
+	})
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&extv1beta1.SandboxWarmPool{}).
+		Watches(&extv1beta1.NodeInventory{}, enqueueAll).
+		Named("sandboxwarmpool").
+		Complete(d)
 }
 
 // nodeView is one schedulable node: its name, sandboxd address, and current
