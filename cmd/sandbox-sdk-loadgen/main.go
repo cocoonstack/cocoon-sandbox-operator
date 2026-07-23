@@ -56,10 +56,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+	sdk "github.com/cocoonstack/sandbox/sdk/go"
 )
 
 // version is stamped at build time (-ldflags "-X main.version=...").
 var version = "dev"
+
+// L3 Create stamps these onto the returned Sandbox: the delivered connection
+// address, per-sandbox exec token, and sandboxd claim id. Together they let the
+// loadgen exec into exactly what it claimed (create -> exec latency).
+const (
+	addressAnnotation = "sandbox.cocoonstack.io/address"
+	tokenAnnotation   = "sandbox.cocoonstack.io/token"
+	claimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+)
+
+// sdkClient is the shared silkd data-plane client; per-sandbox handles are built
+// with Attach (no lookup round-trip) from the claim's address/id/token.
+var sdkClient *sdk.Client
 
 var (
 	createSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
@@ -72,6 +86,21 @@ var (
 		Name:    "sandbox_sdk_delete_seconds",
 		Help:    "Latency of the FIRST successful Delete call (exact-VM release), excluding read-view NotFound retries.",
 		Buckets: prometheus.ExponentialBuckets(0.001, 2, 16),
+	})
+	// execSeconds is the metric that matters: wall time from Create() start to a
+	// successful exec inside the delivered sandbox — the real "usable" latency.
+	execSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "sandbox_sdk_exec_seconds",
+		Help:    "Latency from Create(Sandbox) start to first successful in-sandbox exec (create->exec).",
+		Buckets: prometheus.ExponentialBuckets(0.001, 2, 16),
+	})
+	execsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sandbox_sdk_execs_total",
+		Help: "Sandboxes where a post-create exec succeeded.",
+	})
+	execFailed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sandbox_sdk_exec_failed_total",
+		Help: "Sandboxes where the post-create exec failed.",
 	})
 	createsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "sandbox_sdk_creates_total",
@@ -166,6 +195,14 @@ func main() {
 	cl, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
 		fatal("build client: %v", err)
+	}
+
+	// Shared silkd data-plane client. The entry addr is unused for exec (Attach
+	// binds each handle to the claim's own owner address); only the HTTP client
+	// it carries matters for the relayed silkd dial.
+	sdkClient, err = sdk.Connect("127.0.0.1:7777")
+	if err != nil {
+		fatal("build sdk client: %v", err)
 	}
 
 	// Serve metrics for the whole run (and after the bounded run finishes) so
@@ -280,6 +317,28 @@ func createOne(ctx context.Context, cl client.Client, o *options, name string) (
 	}
 	createSeconds.Observe(elapsed)
 	createsTotal.Inc()
+
+	// create -> exec: exec a trivial command in the delivered sandbox to measure
+	// the real usable latency (not just the Create round-trip). The token/address
+	// ride back as annotations on the L3-created object.
+	addr := sb.Annotations[addressAnnotation]
+	id := sb.Annotations[claimIDAnnotation]
+	tok := sb.Annotations[tokenAnnotation]
+	if addr != "" && id != "" && tok != "" {
+		ectx, ecancel := context.WithTimeout(ctx, o.timeout)
+		out, xerr := sdkClient.Attach(addr, id, tok).Exec(ectx, "true")
+		ecancel()
+		if xerr == nil {
+			execSeconds.Observe(time.Since(start).Seconds())
+			execsTotal.Inc()
+		} else {
+			execFailed.Inc()
+			logSampled("exec", "exec %s/%s (addr=%s id=%s) failed: %v out=%q", o.namespace, name, addr, id, xerr, out)
+		}
+	} else {
+		execFailed.Inc()
+		logSampled("exec", "exec %s/%s: missing addr/id/token annotations (addr=%q id=%q tok?=%v)", o.namespace, name, addr, id, tok != "")
+	}
 	return sb, nil
 }
 
