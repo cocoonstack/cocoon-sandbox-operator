@@ -17,8 +17,7 @@ kind: ServiceAccount
 metadata:
   name: sandbox-sdk-loadgen
   namespace: sandbox-sdk-loadgen
-imagePullSecrets:
-- name: mindset-cr
+# Add imagePullSecrets here if you host the loadgen image in a private registry.
 ---
 # CRUD on the aggregated sandboxes resource. This is the ONLY object the loadgen
 # touches; it never reads NodeInventory or any desktop/CocoonSet resource.
@@ -64,7 +63,8 @@ spec:
       serviceAccountName: sandbox-sdk-loadgen
       containers:
       - name: loadgen
-        image: mindset-ap-southeast-1.cr.volces.com/g0031/cocoon-sandbox-sdk-loadgen:g0133-sdk1
+        # Build with Dockerfile.sdkloadgen and push to your registry.
+        image: ghcr.io/cocoonstack/cocoon-sandbox-sdk-loadgen:latest
         args:
         - --namespace=sandbox-sdk-loadgen
         - --concurrency=2

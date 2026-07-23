@@ -62,7 +62,8 @@ spec:
                     values: ["virtual-kubelet"]
       containers:
         - name: loadgen
-          image: mindset-ap-southeast-1.cr.volces.com/g0031/sandbox-loadgen:v8
+          # Build from sandbox-loadgen/ and push to your registry.
+          image: ghcr.io/cocoonstack/sandbox-loadgen:latest
           args:
             - --replicas=100                # SandboxWarmPool size (pre-warmed sandboxes)
             - --namespace=sandboxd-test
