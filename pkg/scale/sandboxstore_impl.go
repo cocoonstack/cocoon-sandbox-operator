@@ -307,7 +307,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 		}
 		return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, node, err)
 	}
-	return Assignment{SandboxName: res.ID, Node: node, Address: res.OwnerAddr}, nil
+	return Assignment{SandboxName: res.ID, Node: node, Address: res.OwnerAddr, Token: res.Token}, nil
 }
 
 // Release returns the claimed microVM id to node's pool via that node's sandboxd,

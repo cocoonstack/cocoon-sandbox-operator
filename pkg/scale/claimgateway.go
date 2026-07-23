@@ -35,6 +35,10 @@ type Assignment struct {
 	SandboxName string
 	Node        string
 	Address     string
+	// Token is the per-sandbox ownership credential returned by sandboxd on the
+	// claim. It authenticates agent/exec against the delivered VM; the L3 Create
+	// path surfaces it as an annotation so a caller can exec into what it claimed.
+	Token string
 }
 
 // ClaimGateway is the L2 node-local fast path for warm-pool claims. A claim is

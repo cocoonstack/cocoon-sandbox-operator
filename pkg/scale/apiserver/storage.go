@@ -45,6 +45,9 @@ const (
 	ClaimIDAnnotation = scale.ClaimIDAnnotation
 	// AddressAnnotation carries the delivered sandbox connection address.
 	AddressAnnotation = "sandbox.cocoonstack.io/address"
+	// TokenAnnotation carries the per-sandbox ownership token so a caller can
+	// exec/agent into the sandbox it claimed via the L3 apiserver.
+	TokenAnnotation = "sandbox.cocoonstack.io/token"
 	// NetAnnotation selects the pool network mode on Create (default "none").
 	NetAnnotation = "sandbox.cocoonstack.io/net"
 )
@@ -243,6 +246,9 @@ func synthesizeClaimedSandbox(namespace, name string, in *sandboxv1beta1.Sandbox
 	out.Annotations[ClaimIDAnnotation] = a.SandboxName
 	if a.Address != "" {
 		out.Annotations[AddressAnnotation] = a.Address
+	}
+	if a.Token != "" {
+		out.Annotations[TokenAnnotation] = a.Token
 	}
 	out.Status = sandboxv1beta1.SandboxStatus{
 		NodeName: a.Node,

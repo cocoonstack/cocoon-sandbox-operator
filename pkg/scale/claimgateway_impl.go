@@ -190,7 +190,7 @@ func (g *nodeClaimGateway) Claim(ctx context.Context, req ClaimRequest) (Assignm
 
 	// (3) Build the Assignment and remember the ownership credential so a later
 	// owner-authorized Release can destroy exactly this VM.
-	a := Assignment{SandboxName: res.ID, Node: g.node, Address: res.OwnerAddr}
+	a := Assignment{SandboxName: res.ID, Node: g.node, Address: res.OwnerAddr, Token: res.Token}
 	g.mu.Lock()
 	g.holdings[a.SandboxName] = delivered{id: res.ID, token: res.Token}
 	g.mu.Unlock()
