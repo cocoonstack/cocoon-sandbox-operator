@@ -29,6 +29,15 @@
 //     it means the read view has not published the object yet (vk lag, ~10s);
 //     the worker retries until the delete lands or --release-timeout expires,
 //     and an expiry is counted in sandbox_sdk_leaked_total and logged loudly.
+//
+// Cycle mode (--wave-size > 0) replaces the single bounded run with a
+// soak cycle: create --wave-size sandboxes at --concurrency, pause
+// --wave-pause, repeat until --target creates have been issued this cycle;
+// then delete every sandbox this loadgen owns (its namespace + name prefix)
+// at --delete-concurrency with the same confirm-or-leak release semantics;
+// then (with --loop) start the next cycle. Live claims stay bounded by
+// --target: waves never issue past it and the delete phase empties the
+// namespace before the next cycle begins.
 package main
 
 import (
@@ -38,6 +47,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -126,6 +136,14 @@ var (
 		Name: "sandbox_sdk_inflight",
 		Help: "In-flight Create calls.",
 	})
+	cyclesTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sandbox_sdk_cycles_total",
+		Help: "Completed create->delete cycles (cycle mode).",
+	})
+	phaseGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "sandbox_sdk_phase",
+		Help: "Current cycle-mode phase: 0 idle, 1 create wave, 2 wave pause, 3 delete.",
+	})
 	buildInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sandbox_sdk_build_info",
 		Help: "Loadgen build info; value is always 1.",
@@ -145,6 +163,13 @@ type options struct {
 	cleanup        bool
 	releaseTimeout time.Duration
 	metricsAddr    string
+
+	// Cycle mode (enabled by waveSize > 0).
+	waveSize          int
+	wavePause         time.Duration
+	target            int
+	deleteConcurrency int
+	loop              bool
 }
 
 func main() {
@@ -159,19 +184,36 @@ func main() {
 	flag.BoolVar(&o.cleanup, "cleanup", true, "delete each Sandbox after creating it and BLOCK until the release is confirmed (bounds live claims to --concurrency)")
 	flag.DurationVar(&o.releaseTimeout, "release-timeout", 120*time.Second, "max time to retry a Delete past the read-view publish lag before counting the sandbox as leaked")
 	flag.StringVar(&o.metricsAddr, "metrics-addr", ":9090", "Prometheus metrics listen address")
+	flag.IntVar(&o.waveSize, "wave-size", 0, "cycle mode: creates per wave (0 disables cycle mode)")
+	flag.DurationVar(&o.wavePause, "wave-pause", 3*time.Minute, "cycle mode: pause between create waves")
+	flag.IntVar(&o.target, "target", 0, "cycle mode: creates issued per cycle before the delete phase (required with --wave-size)")
+	flag.IntVar(&o.deleteConcurrency, "delete-concurrency", 10, "cycle mode: parallel delete workers in the delete phase")
+	flag.BoolVar(&o.loop, "loop", true, "cycle mode: start the next cycle after the delete phase (false = one cycle)")
 	flag.Parse()
 
 	// Hard gate: never start an unbounded or ill-configured run. The one time
 	// this binary ran with an unbounded total it drained the fleet's warm pools
-	// and leaked ~19k claims. Exactly --total, or nothing.
-	if o.total <= 0 {
-		fatal("--total is required and must be > 0 (got %d): this loadgen issues exactly --total creates and refuses to run unbounded", o.total)
-	}
+	// and leaked ~19k claims. Exactly --total (or, in cycle mode, at most
+	// --target live per cycle with a delete phase in between), or nothing.
 	if o.concurrency <= 0 {
 		fatal("--concurrency must be > 0 (got %d)", o.concurrency)
 	}
-	if o.concurrency > o.total {
-		o.concurrency = o.total
+	if o.waveSize > 0 {
+		if o.target <= 0 {
+			fatal("--target is required and must be > 0 in cycle mode (got %d)", o.target)
+		}
+		if o.deleteConcurrency <= 0 {
+			fatal("--delete-concurrency must be > 0 (got %d)", o.deleteConcurrency)
+		}
+		// Claims must persist until the cycle's delete phase.
+		o.cleanup = false
+	} else {
+		if o.total <= 0 {
+			fatal("--total is required and must be > 0 (got %d): this loadgen issues exactly --total creates and refuses to run unbounded", o.total)
+		}
+		if o.concurrency > o.total {
+			o.concurrency = o.total
+		}
 	}
 
 	buildInfo.WithLabelValues(version).Set(1)
@@ -219,6 +261,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	if o.waveSize > 0 {
+		fmt.Printf("sandbox-sdk-loadgen %s: CYCLE mode ns=%s target=%d wave=%d pause=%s create-concurrency=%d delete-concurrency=%d loop=%v image=%s\n",
+			version, o.namespace, o.target, o.waveSize, o.wavePause, o.concurrency, o.deleteConcurrency, o.loop, o.image)
+		runCycles(ctx, cl, &o)
+		if ctx.Err() != nil {
+			return
+		}
+		// --loop=false single cycle finished: keep the histograms scrapeable.
+		fmt.Println("cycle complete; serving /metrics until terminated")
+		<-context.Background().Done()
+		return
+	}
+
 	fmt.Printf("sandbox-sdk-loadgen %s: ns=%s total=%d concurrency=%d cleanup=%v release-timeout=%s image=%s\n",
 		version, o.namespace, o.total, o.concurrency, o.cleanup, o.releaseTimeout, o.image)
 
@@ -231,6 +286,129 @@ func main() {
 	// Keep /metrics alive so the final histogram/counters remain scrapeable.
 	fmt.Println("run complete; serving /metrics until terminated")
 	<-context.Background().Done()
+}
+
+// runCycles drives create-in-waves -> delete-all cycles until the context is
+// cancelled (or after one cycle with --loop=false). Sandbox names use a
+// process-lifetime sequence so a cycle never collides with an undeleted
+// leftover from a previous one.
+func runCycles(ctx context.Context, cl client.Client, o *options) {
+	defer phaseGauge.Set(0)
+	var nameSeq int64
+	for cycle := 1; ctx.Err() == nil; cycle++ {
+		fmt.Printf("cycle %d: create phase (target=%d wave=%d concurrency=%d)\n", cycle, o.target, o.waveSize, o.concurrency)
+		issued := 0
+		for issued < o.target && ctx.Err() == nil {
+			n := o.target - issued
+			if n > o.waveSize {
+				n = o.waveSize
+			}
+			phaseGauge.Set(1)
+			s := createBatch(ctx, cl, o, &nameSeq, n)
+			issued += int(s.issued)
+			fmt.Printf("cycle %d: wave done (%s), issued %d/%d\n", cycle, s, issued, o.target)
+			if issued >= o.target || ctx.Err() != nil {
+				break
+			}
+			phaseGauge.Set(2)
+			sleepCtx(ctx, o.wavePause)
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		phaseGauge.Set(3)
+		listed, deleted, leaked := deleteAll(ctx, cl, o)
+		fmt.Printf("cycle %d: delete phase done: listed=%d deleted=%d leaked=%d\n", cycle, listed, deleted, leaked)
+		cyclesTotal.Inc()
+		if !o.loop {
+			return
+		}
+	}
+}
+
+// createBatch issues exactly n creates at o.concurrency without cleanup,
+// drawing names from seq. Failures consume their slot and are not retried.
+func createBatch(ctx context.Context, cl client.Client, o *options, seq *int64, n int) runSummary {
+	var s runSummary
+	var issued int64
+	start := time.Now()
+	var wg sync.WaitGroup
+	for w := 0; w < o.concurrency; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				if atomic.AddInt64(&issued, 1) > int64(n) {
+					return
+				}
+				name := fmt.Sprintf("%s-%d", o.namegen, atomic.AddInt64(seq, 1))
+				if _, err := createOne(ctx, cl, o, name); err != nil {
+					atomic.AddInt64(&s.failed, 1)
+				} else {
+					atomic.AddInt64(&s.created, 1)
+				}
+				if o.interval > 0 {
+					sleepCtx(ctx, o.interval)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	s.issued = min64(atomic.LoadInt64(&issued), int64(n))
+	s.elapsed = time.Since(start)
+	return s
+}
+
+// deleteAll releases every sandbox this loadgen owns — its namespace, filtered
+// by the generated name prefix (labels are not relied on: the L3 read view
+// synthesizes objects from node inventory and does not guarantee label
+// round-trip) — at o.deleteConcurrency with confirm-or-leak semantics.
+func deleteAll(ctx context.Context, cl client.Client, o *options) (listed, deleted, leaked int64) {
+	var list sandboxv1beta1.SandboxList
+	if err := cl.List(ctx, &list, client.InNamespace(o.namespace)); err != nil {
+		fmt.Printf("delete phase: list %s failed: %v\n", o.namespace, err)
+		return 0, 0, 0
+	}
+	prefix := o.namegen + "-"
+	work := make(chan *sandboxv1beta1.Sandbox)
+	var wg sync.WaitGroup
+	for w := 0; w < o.deleteConcurrency; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for sb := range work {
+				if releaseWithRetry(ctx, cl, o, sb) {
+					atomic.AddInt64(&deleted, 1)
+				} else {
+					atomic.AddInt64(&leaked, 1)
+				}
+			}
+		}()
+	}
+	for i := range list.Items {
+		sb := &list.Items[i]
+		if !strings.HasPrefix(sb.Name, prefix) {
+			continue
+		}
+		listed++
+		if ctx.Err() != nil {
+			break
+		}
+		work <- sb
+	}
+	close(work)
+	wg.Wait()
+	return listed, deleted, leaked
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
+	}
 }
 
 // runSummary is the end-of-run accounting printed to stdout.
