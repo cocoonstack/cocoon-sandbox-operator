@@ -115,6 +115,70 @@ and the `vk-cocoon-sandbox` gateway overhead **~0.04 ms** (see the operator's
 slow" caveat above: the hot tier now serves warm claims at node-local speed while
 `kubectl get sandboxes` keeps working.
 
+## Fleet scale: 50 000 microVMs from one `kubectl patch`
+
+The 100-sandbox run above is the deployed hot tier at small scale. The same
+stack, driven by one CRD write, was measured to **50 000** concurrent microVMs.
+
+**Method.** A single `SandboxWarmPool` patched `replicas: 0 → 50000` on **20
+homogeneous bare-metal nodes** (384 vCPU / 1.5 TiB / local NVMe, 2 500 microVMs
+per node). `status.readyReplicas` polled at 1 s; each node's fill cross-checked
+by node-side telemetry at 5 s. Sandboxes are real Cloud-Hypervisor/KVM microVMs
+restored from a golden snapshot.
+
+**Result.** Full supply in **10–15 s** (node telemetry) / 15.7 s (CR
+wall-clock) — an effective **3 300–5 000 microVMs/s** (CR steady-state
+3 654/s), at **99 MB net RAM per microVM**.
+
+![0 to 50000 fill, three rounds](docs/images/perf-50k-fill-rounds.png)
+
+Three rounds isolate where the speed comes from — same target, same driver
+command, same measurement script:
+
+| round | nodes | recovery path | fill time |
+|---|---|---|---|
+| 1 | 26 | eager copy | 172.7 s |
+| 2 | 26 | mmap CoW (incl. one HDD-backed node) | 290.1 s |
+| 3 | 20 | mmap CoW, homogeneous NVMe | **12 ± 3 s** |
+
+Round 2 is the honest counter-example: on the single HDD-backed node, mmap CoW
+*regressed* fill from ~140 s to ~295 s while every NVMe node in the same round
+improved — the optimization's sign is set by the storage medium. Round 3 drops
+the six heterogeneous nodes and lands the clean 12 ± 3 s curve.
+
+### Memory ledger
+
+Per-VM footprint, same golden and pool, from `/proc/<pid>/smaps` and a
+`MemAvailable` node delta:
+
+| recovery | CH RSS | private | shared | net / VM | per node (1 923 VMs) |
+|---|---|---|---|---|---|
+| eager copy | 359 MB | 353 | 6 | 358 MB | 672 G |
+| mmap CoW | 163 MB | 96 | 67 | **99 MB** | **186 G** |
+
+![memory footprint, eager copy versus mmap CoW](docs/images/perf-memory-mmap-cow.png)
+
+### Scaling law
+
+Supply time is `T(S, N) ≈ T₀ + S / (N · r)` with a node-local constant
+`r ≈ 200–270/s` and a control-plane constant `T₀ ≈ 5–6 s`. r is constant
+because every input to supply — golden image, 256-way refill budget, SQLite
+metadata — is node-local, and the control plane touches each node with one O(1)
+`PUT /v1/pools` every 5 s; nodes are zero-coupled, so cluster rate = N · r.
+
+| scenario | N | S | s = S/N | RAM/node | predicted T | status |
+|---|---|---|---|---|---|---|
+| this run (round 3) | 20 | 50 000 | 2 500 | 242 G | ≈15 s | **measured 15.7 s (CR) / 10–15 s (node)** |
+| single-cluster ceiling | 20 | 100 000 | 5 000 | ≈495 G | ≈25 s | >50% RAM headroom; 4 000/node co-residency measured |
+| linear extrapolation | 200 | 1 000 000 | 5 000 | ≈495 G | ≈25 s | control plane O(N): etcd ≈7 writes/s, driver 200 PUT/5 s |
+
+![supply rate is linear in node count](docs/images/perf-scaling-law.png)
+
+Because sandbox objects are synthesized from `NodeInventory` rather than stored,
+etcd carried **~2 writes/s** across the whole 50 k run (20 inventories every
+30 s plus a little `status`), independent of sandbox count; the claim path
+writes nothing to etcd at all.
+
 ## Data plane
 
 k8s Pod `exec` is **not** available to `vk-cocoon` microVMs on a managed cluster

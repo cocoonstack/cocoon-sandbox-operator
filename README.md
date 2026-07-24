@@ -183,6 +183,118 @@ Summary (full methodology in [PERFORMANCE.md](PERFORMANCE.md), measured on a liv
   claims in **0.2–0.7 ms** (its own published benchmarks) for use cases that can
   adopt its non-Kubernetes data plane.
 
+### Fleet benchmark: 50 000 microVMs from one `kubectl patch`
+
+The numbers above are single-node / small-pool. The question at fleet scale is
+different: *how long does one `kubectl` command take to stand up 50 000
+claimable sandboxes?* Driven by nothing but a standard CRD write —
+
+```bash
+kubectl patch sandboxwarmpool wp-speed -p '{"spec":{"replicas":50000}}'
+```
+
+— on **20 bare-metal nodes** (384 vCPU / 1.5 TiB / local NVMe, 2 500 microVMs
+per node), the whole fleet reaches full supply in **10–15 s**: an effective
+**3 300–5 000 sandboxes/s**, at **99 MB net RAM per microVM**, with claim
+latency holding at **p50 12 ms**. All figures are measured on real
+Cloud-Hypervisor/KVM microVMs through the Kubernetes API — node telemetry
+sampled at 5 s, CR `status` polled at 1 s.
+
+| Metric | Value | Basis |
+|---|---|---|
+| Target | **50 000** microVMs | `SandboxWarmPool` `replicas: 0→50000`, one patch |
+| Fleet | 20 bare metal | 384 vCPU / 1.5 TiB / local NVMe · 2 500 per node |
+| Fill time | **10–15 s** (node telemetry) · 15.7 s (CR wall-clock) | node side at 5 s granularity; CR adds a ≤5 s status-sampling lag |
+| Effective supply | **3 300–5 000 /s** | 50 000 ÷ node-side fill window; CR steady-state 3 654/s |
+| Per-node rate | 170–270 /s | the node-local constant *r* (see scaling law below) |
+| RAM / microVM | **99 MB** | `MemAvailable` delta ÷ live count |
+| Claim latency | p50 **12 ms** (claim) · 40 ms (create→exec) | upstream `agent-sandbox` Go SDK, 5 000 claims, 0 leaked |
+
+#### Supply: 0 → 50 000 ready
+
+![0 to 50000 fill, three rounds](docs/images/perf-50k-fill-rounds.png)
+
+*Same command, same target, three engine configs. Round 1 eager-copy recovery
+**172.7 s**; round 2 mmap-CoW **290.1 s** — one HDD-backed node dominates the
+tail; round 3 on 20 homogeneous NVMe nodes **12 ± 3 s**. An 11–18× speedup, all
+of it from the data-plane and control-plane changes below.*
+
+<table>
+<tr>
+<td><img src="docs/images/perf-50k-warm-ramp.jpg" alt="fleet warm count ramping 0 to 50000"></td>
+<td><img src="docs/images/perf-50k-per-node.jpg" alt="per-node fill, every node to its 2500 share"></td>
+</tr>
+</table>
+
+*Left: fleet-wide warm count ramping 0 → 50 000 (live `sandboxd` telemetry).
+Right: per-node fill — every node climbs to its 2 500 share in the same window.
+That zero-coupling is what makes cluster rate = N × node rate.*
+
+![CR status, round-3 zoom](docs/images/perf-50k-cr-status.png)
+
+*Round-3 `status.readyReplicas`: first visible at t+4.8 s (19 193, the first 5 s
+batch), 50 000 at t+15.7 s — the status-sampling lag on top of the ~10 s
+physical fill.*
+
+#### Memory: mmap CoW brings each microVM to 99 MB
+
+![memory footprint, eager copy versus mmap CoW](docs/images/perf-memory-mmap-cow.png)
+
+*Recovery defaults from eager copy (each clone privately copies guest RAM) to
+mmap copy-on-write (clones share one file-backed golden page cache; pages
+privatize on first write). Same golden, same pool, same instant: per-VM CH RSS
+**359 MB → 163 MB**, net per-VM footprint **358 MB → 99 MB** (3.6×), so a
+1 923-VM node holds **672 G → 186 G**. The gain's sign is set by the storage
+medium — mmap trades RAM for page-faults, so it needs NVMe (the round-2 tail is
+the HDD counter-example).*
+
+#### Claim latency through the official SDK
+
+Claiming a warm sandbox is control-plane only — the microVM is already running —
+so it is one Kubernetes round-trip with **no etcd write on the claim path**.
+Measured with the upstream `agent-sandbox` Go client (not a private SDK), 5 000
+claims at a steady 2/s, in-cluster:
+
+| Path | avg | p50 | p90 | p95 | p99 |
+|---|---|---|---|---|---|
+| **claim** (k8s API round-trip) | 11 ms | **12 ms** | 15 ms | 16 ms | 23 ms |
+| create→exec (+ one vsock exec) | 33 ms | 40 ms | 59 ms | 62 ms | 64 ms |
+
+![live create to exec latency panels](docs/images/perf-claim-exec-latency.jpg)
+
+Under a 2 → 100/s open-loop ramp from an off-cluster client (11 220 claims, **0
+failed, 0 leaked**) the claim p50 stays flat to ~50/s; the knee is the client's
+own ceiling, not a server rejection (the off-cluster network hop lifts the
+in-cluster 12 ms p50 to ~32 ms):
+
+| target | procs | actual | avg | p50 | p99 |
+|---|---|---|---|---|---|
+| 2/s | 1 | 1.9/s | 17.4 ms | 32 ms | 64 ms |
+| 20/s | 4 | 18.5/s | 17.4 ms | 32 ms | 32 ms |
+| 50/s | 5 | 42.8/s | 20.2 ms | 32 ms | 64 ms |
+| 100/s | 10 | 81.9/s | 28.5 ms | 32 ms | 128 ms |
+
+#### Why it scales: etcd is not on the path
+
+Supply is fully node-local — golden image, 256-way refill budget and SQLite
+metadata all live on the node, and the control plane's only per-node
+interaction is one O(1) `PUT /v1/pools` every 5 s. Sandbox objects never touch
+etcd: the aggregated apiserver synthesizes them from a per-node `NodeInventory`
+(published every 30 s, O(nodes)) plus a handful of `SandboxWarmPool`s
+(O(pools)), so across the entire 50 k run etcd sees **~2 writes/s, independent of
+sandbox count**.
+
+![supply rate is linear in node count](docs/images/perf-scaling-law.png)
+
+*Supply time is T(S, N) ≈ T₀ + S / (N · r): a node-local constant r ≈ 250/s and
+a control-plane constant T₀ ≈ 5–6 s. The 20-node / 50 000 point is measured
+(15.7 s); with r and the O(N) control-plane budget both established, 200
+homogeneous nodes extrapolate to ~1 000 000 microVMs in ≈25 s — the same
+delivery curve, scaled linearly.*
+
+The full methodology, per-round raw sampling, and the memory-accounting ledger
+are in [PERFORMANCE.md](PERFORMANCE.md).
+
 ## Scaling design: decentralized sandbox scheduling on Kubernetes semantics
 
 Modal's ["1M concurrent sandboxes"](https://modal.com/blog/scaling-to-1-million-concurrent-sandboxes-in-seconds)
