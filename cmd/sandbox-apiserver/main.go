@@ -102,7 +102,7 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&o.WarmPoolDriver, "enable-warm-pool-driver", o.WarmPoolDriver,
 		"Run the in-process SandboxWarmPool → sandboxd pool reconcile loop (control-plane warm-capacity surface; pool-level, never per-sandbox).")
 	fs.DurationVar(&o.WarmPoolInterval, "warm-pool-sync-interval", o.WarmPoolInterval,
-		"Resync cadence for the SandboxWarmPool driver (0 = default 20s).")
+		"Resync cadence for the SandboxWarmPool driver, and with it the sampling period of the warm count in pool status (0 = default 5s).")
 }
 
 // resolveSandboxdToken returns the sandboxd token, reading it from the token file
