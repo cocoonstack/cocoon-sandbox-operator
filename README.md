@@ -132,6 +132,25 @@ spec:
 For low-latency acquisition, define a `SandboxTemplate` + `SandboxWarmPool` and
 create `SandboxClaim`s — see [examples/](examples/).
 
+## Use it with the e2b SDK
+
+The aggregated apiserver can also serve an e2b-compatible REST surface, so an
+**unmodified e2b SDK** claims from these same warm pools — point `E2B_API_URL`
+at it:
+
+```bash
+sandbox-apiserver --enable-e2b-api --e2b-api-key-file=/etc/e2b/keys
+```
+
+```js
+export E2B_API_URL=https://your-apiserver:8080
+const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
+```
+
+It is a translation layer, not a second control plane: an e2b create is the same
+node-local claim, and the sandbox stays visible to `kubectl get sandboxes`. Flags,
+endpoint mapping, and limits in [docs/e2b-compat.md](docs/e2b-compat.md).
+
 ## Install
 
 Helm:

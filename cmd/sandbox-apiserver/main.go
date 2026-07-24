@@ -21,7 +21,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -40,6 +43,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/e2bcompat"
 	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/apiserver"
 	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/warmpool"
@@ -50,6 +54,14 @@ import (
 // kube-apiserver is unreachable, the binary fails loud instead of serving
 // empty sandbox lists.
 const inventoryCacheSyncTimeout = 2 * time.Minute
+
+const (
+	// e2bReadHeaderTimeout bounds how long a client may take to send its request
+	// headers on the e2b surface, so a stalled connection cannot pin a handler.
+	e2bReadHeaderTimeout = 10 * time.Second
+	// e2bShutdownTimeout bounds the graceful drain of in-flight e2b requests.
+	e2bShutdownTimeout = 10 * time.Second
+)
 
 // options are the standard aggregated-apiserver options: secure serving plus
 // delegated authentication/authorization (token/SAR review against the host
@@ -73,6 +85,16 @@ type options struct {
 	// O(pools+nodes); never per-sandbox. WarmPoolInterval is its resync cadence.
 	WarmPoolDriver   bool
 	WarmPoolInterval time.Duration
+
+	// E2B* configure the optional e2b-compatible REST surface, which lets an
+	// unmodified e2b SDK drive the same warm pools. It is off by default and
+	// serves on its own address, so the aggregated API is never affected.
+	E2BAPI            bool
+	E2BAddr           string
+	E2BNamespace      string
+	E2BDomain         string
+	E2BAPIKeyFile     string
+	E2BAllowAnonymous bool
 }
 
 func newOptions() *options {
@@ -82,6 +104,8 @@ func newOptions() *options {
 		Authorization:  genericoptions.NewDelegatingAuthorizationOptions(),
 		Features:       genericoptions.NewFeatureOptions(),
 		WarmPoolDriver: true,
+		E2BAddr:        ":8080",
+		E2BNamespace:   "default",
 	}
 	o.SecureServing.BindPort = 6443
 	// Allow running without a remote kubeconfig (in-cluster service account).
@@ -103,6 +127,37 @@ func (o *options) addFlags(fs *pflag.FlagSet) {
 		"Run the in-process SandboxWarmPool → sandboxd pool reconcile loop (control-plane warm-capacity surface; pool-level, never per-sandbox).")
 	fs.DurationVar(&o.WarmPoolInterval, "warm-pool-sync-interval", o.WarmPoolInterval,
 		"Resync cadence for the SandboxWarmPool driver, and with it the sampling period of the warm count in pool status (0 = default 5s).")
+	fs.BoolVar(&o.E2BAPI, "enable-e2b-api", o.E2BAPI,
+		"Serve the e2b-compatible REST surface, so an unmodified e2b SDK can claim from the same warm pools (point E2B_API_URL at it).")
+	fs.StringVar(&o.E2BAddr, "e2b-bind-address", o.E2BAddr,
+		"Address the e2b-compatible surface listens on.")
+	fs.StringVar(&o.E2BNamespace, "e2b-namespace", o.E2BNamespace,
+		"Namespace e2b claims are made in; e2b has no namespace concept, so every compat claim lands here.")
+	fs.StringVar(&o.E2BDomain, "e2b-domain", o.E2BDomain,
+		"Base domain reported to the SDK, from which it derives the in-sandbox envd host. Empty leaves the SDK's own E2B_DOMAIN/E2B_SANDBOX_URL in charge.")
+	fs.StringVar(&o.E2BAPIKeyFile, "e2b-api-key-file", o.E2BAPIKeyFile,
+		"Path to a file (Secret mount) of accepted e2b API keys, one per line, presented by the SDK as X-API-KEY.")
+	fs.BoolVar(&o.E2BAllowAnonymous, "e2b-allow-anonymous", o.E2BAllowAnonymous,
+		"Serve the e2b surface with NO API key. Development only: it leaves the claim endpoint open to anyone who can reach the port.")
+}
+
+// e2bAPIKeys reads the accepted e2b API keys from the key file, one per line.
+// Blank lines and #-comments are ignored.
+func (o *options) e2bAPIKeys() ([]string, error) {
+	if o.E2BAPIKeyFile == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(o.E2BAPIKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("read e2b api key file %q: %w", o.E2BAPIKeyFile, err)
+	}
+	var keys []string
+	for _, line := range strings.Split(string(b), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			keys = append(keys, line)
+		}
+	}
+	return keys, nil
 }
 
 // resolveSandboxdToken returns the sandboxd token, reading it from the token file
@@ -191,6 +246,15 @@ func run() error {
 		}
 	}
 
+	// The e2b-compatible surface is a translation layer over the same store, on
+	// its own listener: an e2b SDK Create becomes the identical node-local claim,
+	// and what it creates stays visible to `kubectl get sandboxes`.
+	if o.E2BAPI {
+		if err := startE2BServer(ctx, o, store); err != nil {
+			return err
+		}
+	}
+
 	server, err := cfg.Complete(nil).New("cocoon-sandbox-apiserver", genericapiserver.NewEmptyDelegate())
 	if err != nil {
 		return fmt.Errorf("build generic apiserver: %w", err)
@@ -272,6 +336,52 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 	go func() {
 		if err := mgr.Start(ctx); err != nil {
 			klog.ErrorS(err, "warm-pool manager exited")
+		}
+	}()
+	return nil
+}
+
+// startE2BServer starts the e2b-compatible REST surface on its own listener and
+// stops it when ctx is cancelled. It shares the aggregated apiserver's store, so
+// there is no second source of truth: a claim made here is the same node-local
+// claim, released the same way, and listed by the same scatter-gather read.
+func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore) error {
+	keys, err := o.e2bAPIKeys()
+	if err != nil {
+		return err
+	}
+	srv, err := e2bcompat.NewServer(store, e2bcompat.Options{
+		Namespace:      o.E2BNamespace,
+		Domain:         o.E2BDomain,
+		APIKeys:        keys,
+		AllowAnonymous: o.E2BAllowAnonymous,
+		Log:            ctrl.Log.WithName("e2b"),
+	})
+	if err != nil {
+		return err
+	}
+	httpSrv := &http.Server{
+		Addr:              o.E2BAddr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: e2bReadHeaderTimeout,
+	}
+	ln, err := net.Listen("tcp", o.E2BAddr)
+	if err != nil {
+		return fmt.Errorf("listen on e2b address %q: %w", o.E2BAddr, err)
+	}
+	klog.InfoS("serving e2b-compatible API", "address", o.E2BAddr, "namespace", o.E2BNamespace,
+		"authenticated", len(keys) > 0)
+	go func() {
+		if err := httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			klog.ErrorS(err, "e2b-compatible API server exited")
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e2bShutdownTimeout)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+			klog.ErrorS(err, "e2b-compatible API server shutdown")
 		}
 	}()
 	return nil
