@@ -250,7 +250,7 @@ func run() error {
 	// its own listener: an e2b SDK Create becomes the identical node-local claim,
 	// and what it creates stays visible to `kubectl get sandboxes`.
 	if o.E2BAPI {
-		if err := startE2BServer(ctx, o, store); err != nil {
+		if err := startE2BServer(ctx, o, store, invSource); err != nil {
 			return err
 		}
 	}
@@ -345,7 +345,7 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 // stops it when ctx is cancelled. It shares the aggregated apiserver's store, so
 // there is no second source of truth: a claim made here is the same node-local
 // claim, released the same way, and listed by the same scatter-gather read.
-func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore) error {
+func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) error {
 	keys, err := o.e2bAPIKeys()
 	if err != nil {
 		return err
@@ -353,6 +353,7 @@ func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore) e
 	srv, err := e2bcompat.NewServer(store, e2bcompat.Options{
 		Namespace:      o.E2BNamespace,
 		Domain:         o.E2BDomain,
+		Inventory:      inv,
 		APIKeys:        keys,
 		AllowAnonymous: o.E2BAllowAnonymous,
 		Log:            ctrl.Log.WithName("e2b"),
