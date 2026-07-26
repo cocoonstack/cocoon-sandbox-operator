@@ -581,6 +581,58 @@ type NodeInventory struct {
 **Acceptance:** 1M sandbox *intent* costs `O(nodes)` etcd objects; `kubectl get
 sandboxes` returns the fanned-out list; per-sandbox `Get` is authoritative.
 
+### L3 follow-up: resolve a sandbox without the summary (TODO)
+
+The risk table above already names the fix — *route `Get` to the owning node
+(authoritative), not the summary* — but today nothing does. Every single-sandbox
+path resolves through the synthesized read view instead: `lifecycleREST.Create`
+(the `pause` / `resume` / `snapshot` / `fork` subresources) calls
+`SandboxStore.Get`, and the e2b surface's `lookup` calls `SandboxStore.List` and
+linear-scans it for one claim id. Both inherit the summary's two properties, and
+neither is acceptable at the scale L3 targets.
+
+**It is stale for one publish interval.** A sandbox is live on its node the
+moment `Claim` returns, but it does not appear in the read view until that node
+republishes its `NodeInventory` (default 30 s). Measured against a 20-node
+fleet: `p50` 29.0 s on the e2b surface, 28.6 s through the aggregated API. A
+lifecycle verb issued inside that window answers `404`. Callers work around it
+by polling until visible — which is what `examples/lifecycle` does — so
+"create, then immediately pause" costs half a minute of polling.
+
+**It is `O(total sandboxes)` per call.** `List` scatter-gathers every
+`NodeInventory` and materializes *every* sandbox into a `Sandbox` object before
+the caller filters for one. A materialized `Sandbox` measures 1392 B of Go heap
+(`ObjectMeta` + synthesized labels/annotations + a `Condition`), so one `pause`
+allocates ~139 MB at 100 k sandboxes and ~1.4 GB at 1 M — transient garbage, to
+find a single record. This is the binding constraint, not the staleness.
+
+Both fall out of the same omission: `Claim` already returns the node and the
+claim id — the e2b create response even hands the node back to the client as
+`clientID` — and a lifecycle verb needs nothing else. The plan keeps that
+routing information instead of re-deriving it:
+
+- **A. Claim-time index.** Record `sandboxID → (node, claimID)` when the claim
+  is made, consulted before the read view. Bound it with an LRU so memory is a
+  fixed budget rather than a function of load: measured 206 B/entry, so a
+  200 k-entry cap is ~31 MB. Steady-state occupancy is `claim rate × TTL`, far
+  below the cap — 1 M sandboxes averaging a 5-minute life is ~117 k entries.
+- **B. Authoritative fan-out on a miss.** A different replica, or an evicted
+  entry, falls back to asking the nodes directly — the authoritative route the
+  risk table already prescribes. Bounded by node count, off the read path for
+  anything older than one publish interval.
+
+Neither touches etcd. **Publishing inventory on change was considered and
+rejected:** `NodeInventory` carries one 105 B entry per live sandbox
+(measured), so a node holding 2500 of them is a 263 KB object. Re-applying that
+on a 2 s debounce costs 52.6 MB/s of large-object server-side-apply traffic
+across 400 nodes at 1 M sandboxes, against 3.5 MB/s for the current 30 s
+cadence — and it would still leave the `O(total sandboxes)` allocation in place,
+because `lookup` would go on listing everything.
+
+**Acceptance:** a lifecycle verb succeeds on a sandbox claimed milliseconds ago;
+resolving one sandbox allocates `O(1)`, not `O(total sandboxes)`; index memory
+is capped independently of fleet size.
+
 ### How this differs from Modal
 
 Modal buys throughput by leaving Kubernetes: a proprietary SDK and a proprietary
