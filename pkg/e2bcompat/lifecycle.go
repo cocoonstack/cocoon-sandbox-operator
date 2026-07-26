@@ -23,8 +23,8 @@ import (
 	"net/http"
 	"time"
 
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
 // pauseSandbox hibernates the sandbox: its memory is written out and the VM

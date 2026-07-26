@@ -29,8 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/sandboxd"
+	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 )
 
 // ErrNoNodeCapacity is the sentinel Claim returns when the node has no warm VM to

@@ -1,6 +1,6 @@
 //go:build e2e
 
-// Command e2e drives the deployed cocoon-sandbox-operator through real
+// Command e2e drives the deployed sandbox-operator through real
 // agents.x-k8s.io v1beta1 / extensions / v1alpha1 conversion scenarios against a
 // live cluster, using only the Kubernetes SDK (controller-runtime client +
 // client-go exec) — no kubectl, no mocks, no direct sandboxd.
@@ -30,10 +30,10 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	sandboxv1alpha1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1alpha1"
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	extv1alpha1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1alpha1"
-	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	sandboxv1alpha1 "github.com/cocoonstack/sandbox-operator/api/v1alpha1"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	extv1alpha1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1alpha1"
+	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
 const image = "m.daocloud.io/docker.io/library/alpine:3.20"

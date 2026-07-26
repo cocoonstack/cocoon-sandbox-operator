@@ -21,8 +21,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	cocoonsandboxv1 "github.com/cocoonstack/cocoon-sandbox-operator/api/cocoon/v1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/cocoon/sandboxd"
+	cocoonsandboxv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
+	"github.com/cocoonstack/sandbox-operator/cocoon/sandboxd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"

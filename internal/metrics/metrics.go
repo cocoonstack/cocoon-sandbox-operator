@@ -18,7 +18,7 @@ package metrics
 import (
 	"time"
 
-	"github.com/cocoonstack/cocoon-sandbox-operator/internal/version"
+	"github.com/cocoonstack/sandbox-operator/internal/version"
 	"github.com/prometheus/client_golang/prometheus"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
@@ -130,7 +130,7 @@ var (
 
 	buildVersionInfo = version.Get()
 
-	// BuildInfo exposes cocoon-sandbox-operator build metadata as a constant gauge.
+	// BuildInfo exposes sandbox-operator build metadata as a constant gauge.
 	BuildInfo = prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Name: "agent_sandbox_build_info",

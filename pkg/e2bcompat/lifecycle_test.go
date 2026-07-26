@@ -20,8 +20,8 @@ import (
 	"net/http"
 	"testing"
 
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
 // lifecycleStore records which verb the compat layer routed where, so the tests

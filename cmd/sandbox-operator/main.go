@@ -31,17 +31,17 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	cocoonsandboxv1 "github.com/cocoonstack/cocoon-sandbox-operator/api/cocoon/v1"
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	cocooncontroller "github.com/cocoonstack/cocoon-sandbox-operator/cocoon/controller"
-	"github.com/cocoonstack/cocoon-sandbox-operator/controllers"
-	extensionsv1alpha1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1alpha1"
-	extensionsv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
-	extensionscontrollers "github.com/cocoonstack/cocoon-sandbox-operator/extensions/controllers"
-	"github.com/cocoonstack/cocoon-sandbox-operator/extensions/controllers/queue"
-	asmetrics "github.com/cocoonstack/cocoon-sandbox-operator/internal/metrics"
-	"github.com/cocoonstack/cocoon-sandbox-operator/internal/version"
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/podruntime"
+	cocoonsandboxv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	cocooncontroller "github.com/cocoonstack/sandbox-operator/cocoon/controller"
+	"github.com/cocoonstack/sandbox-operator/controllers"
+	extensionsv1alpha1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1alpha1"
+	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	extensionscontrollers "github.com/cocoonstack/sandbox-operator/extensions/controllers"
+	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
+	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
+	"github.com/cocoonstack/sandbox-operator/internal/version"
+	"github.com/cocoonstack/sandbox-operator/pkg/podruntime"
 	"github.com/felixge/fgprof"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -133,7 +133,7 @@ func main() {
 	flag.Parse()
 
 	if printVersion {
-		fmt.Println(version.Print("cocoon-sandbox-operator"))
+		fmt.Println(version.Print("sandbox-operator"))
 		os.Exit(0)
 	}
 
@@ -195,7 +195,7 @@ func main() {
 		initCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 
-		instrumenter, cleanup, err = asmetrics.SetupOTel(initCtx, "cocoon-sandbox-operator")
+		instrumenter, cleanup, err = asmetrics.SetupOTel(initCtx, "sandbox-operator")
 		if err != nil {
 			setupLog.Error(err, "unable to initialize tracing")
 			os.Exit(1)
@@ -299,7 +299,7 @@ func main() {
 		HealthProbeBindAddress:  probeAddr,
 		LeaderElection:          enableLeaderElection,
 		LeaderElectionNamespace: leaderElectionNamespace,
-		LeaderElectionID:        "cocoon-sandbox-operator.agents.x-k8s.io",
+		LeaderElectionID:        "sandbox-operator.agents.x-k8s.io",
 		WebhookServer: webhook.NewServer(webhook.Options{
 			Port:    webhookPort,
 			CertDir: webhookCertDir,

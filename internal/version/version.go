@@ -24,14 +24,14 @@ import (
 )
 
 var (
-	// The version of cocoon-sandbox-operator.
+	// The version of sandbox-operator.
 	gitVersion = "unknown"
 	// Short sha1 from git, output of $(git rev-parse --short HEAD).
 	gitSHA = "unknown"
 	// Build date in ISO8601 format, output of $(date -u +'%Y-%m-%dT%H:%M:%SZ').
 	buildDate = "unknown"
 
-	// Go runtime version used to build cocoon-sandbox-operator.
+	// Go runtime version used to build sandbox-operator.
 	goVersion = runtime.Version()
 
 	// Go compiler name used to build agent-sandbox (e.g., "gc").

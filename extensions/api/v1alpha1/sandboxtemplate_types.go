@@ -15,7 +15,7 @@
 package v1alpha1
 
 import (
-	sandboxv1alpha1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1alpha1"
+	sandboxv1alpha1 "github.com/cocoonstack/sandbox-operator/api/v1alpha1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"

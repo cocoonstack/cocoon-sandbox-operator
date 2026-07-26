@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in improving cocoon-sandbox-operator!
+Thanks for your interest in improving sandbox-operator!
 
 ## Before you start
 

@@ -21,9 +21,9 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 
-	sandboxv1alpha1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1alpha1"
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	v1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	sandboxv1alpha1 "github.com/cocoonstack/sandbox-operator/api/v1alpha1"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	v1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
 const v1alpha1SandboxClaimStateAnnotation = "api.agents.x-k8s.io/v1alpha1-sandboxclaim-state"

@@ -10,7 +10,7 @@ through the `vk-cocoon` runtime.
 | | |
 |---|---|
 | Cluster | 27 virtual-kubelet (`vk-cocoon`) nodes, 384 cores / 1.5 TiB each; managed Kubernetes v1.26 |
-| Operator | `cocoon-sandbox-operator`, `--sandbox-concurrent-workers=16`, `--sandbox-warm-pool-concurrent-workers=8`, `--kube-api-qps=200` |
+| Operator | `sandbox-operator`, `--sandbox-concurrent-workers=16`, `--sandbox-warm-pool-concurrent-workers=8`, `--kube-api-qps=200` |
 | Sandbox | `agents.x-k8s.io/v1beta1` Sandbox, `runtime: vk-cocoon`, Ubuntu microVM (2 vCPU / 8 GiB, hugepage-backed on demand) |
 | Driver | `test/poolbench` — controller-runtime client; watch-driven claim timing |
 
@@ -34,7 +34,7 @@ e2b's headline "~150 ms" is a snapshot-resume start
 ([e2b.dev](https://e2b.dev), vendor-published — verify before quoting). Matching
 tiers rather than headlines:
 
-| tier | cocoon-sandbox-operator (this repo) | cocoonstack/sandbox `sandboxd` | e2b (published) |
+| tier | sandbox-operator (this repo) | cocoonstack/sandbox `sandboxd` | e2b (published) |
 |---|---|---|---|
 | **warm claim** (pre-booted) | **33 ms** p50 (measured, k8s control plane) | **0.2–0.7 ms** (node-local VM ownership transfer) | — |
 | **clone / snapshot resume** | n/a (uses cold boot) | 45–75 ms | ~150 ms |

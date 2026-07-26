@@ -1,5 +1,5 @@
 apiVersion: v2
-name: cocoon-sandbox-operator
+name: sandbox-operator
 description: Kubernetes operator for agent-sandbox APIs on Cocoon runtimes
 type: application
 version: 0.1.0
@@ -7,9 +7,9 @@ keywords:
   - agent
   - sandbox
   - kubernetes
-home: https://github.com/cocoonstack/cocoon-sandbox-operator
+home: https://github.com/cocoonstack/sandbox-operator
 sources:
-  - https://github.com/cocoonstack/cocoon-sandbox-operator
+  - https://github.com/cocoonstack/sandbox-operator
   - https://github.com/kubernetes-sigs/agent-sandbox
 maintainers:
   - name: CocoonStack

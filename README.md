@@ -1,4 +1,4 @@
-# cocoon-sandbox-operator
+# sandbox-operator
 
 A Kubernetes operator for **fast, warm-poolable agent sandboxes backed by real
 microVMs**. It implements the [`kubernetes-sigs/agent-sandbox`](https://github.com/kubernetes-sigs/agent-sandbox)
@@ -37,7 +37,7 @@ flowchart TB
     B -->|Kubernetes API| APISERVER
     APISERVER["kube-apiserver + agent-sandbox CRDs"]
 
-    subgraph op["cocoon-sandbox-operator"]
+    subgraph op["sandbox-operator"]
         SB["Sandbox controller"]
         WP["SandboxWarmPool controller"]
         CL["SandboxClaim controller"]
@@ -91,7 +91,7 @@ to vendor the types:
 
 ```go
 import (
-    sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+    sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
     "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -233,7 +233,7 @@ themselves.
 Helm:
 
 ```bash
-helm upgrade --install cocoon-sandbox-operator ./helm \
+helm upgrade --install sandbox-operator ./helm \
   --namespace cocoon-sandbox-system --create-namespace \
   --set image.tag=<version>
 ```
@@ -241,7 +241,7 @@ helm upgrade --install cocoon-sandbox-operator ./helm \
 Kustomize (replace the `ko://` image reference):
 
 ```bash
-kustomize build k8s | sed 's#ko://.*/cocoon-sandbox-operator#ghcr.io/cocoonstack/cocoon-sandbox-operator:<version>#' | kubectl apply -f -
+kustomize build k8s | sed 's#ko://.*/sandbox-operator#ghcr.io/cocoonstack/sandbox-operator:<version>#' | kubectl apply -f -
 ```
 
 The default (standard-kubelet) backend needs no special nodes. The `vk-cocoon`
@@ -715,7 +715,7 @@ intact. The one-line framing:
 > **Modal proved 1M needs a decentralized transaction plane. We show the
 > decentralized transaction plane can hide behind Kubernetes semantics.**
 
-| | Modal | cocoon-sandbox-operator |
+| | Modal | sandbox-operator |
 |---|---|---|
 | Scheduling | stateless fleet, in-memory worker state | per-pool sharded operator + Lease (L1) |
 | Create critical path | direct scheduler→worker RPC, no datastore | ownership PATCH (L1) → node-local gateway (L2) |

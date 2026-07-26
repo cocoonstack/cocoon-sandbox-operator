@@ -31,8 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	extensionsv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
-	asmetrics "github.com/cocoonstack/cocoon-sandbox-operator/internal/metrics"
+	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
 // SandboxTemplateReconciler reconciles a SandboxTemplate object.

@@ -1,6 +1,6 @@
 # Maintainers
 
-The current maintainers of cocoon-sandbox-operator:
+The current maintainers of sandbox-operator:
 
 | Name | Contact | Scope |
 |---|---|---|

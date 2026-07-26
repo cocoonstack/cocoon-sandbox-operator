@@ -1,4 +1,4 @@
-module github.com/cocoonstack/cocoon-sandbox-operator
+module github.com/cocoonstack/sandbox-operator
 
 go 1.26.5
 

@@ -4,7 +4,7 @@ namespace:
   name: cocoon-sandbox-system
 
 image:
-  repository: ghcr.io/cocoonstack/cocoon-sandbox-operator
+  repository: ghcr.io/cocoonstack/sandbox-operator
   tag: ""  # required
   pullPolicy: IfNotPresent
 
@@ -15,9 +15,9 @@ replicaCount: 1
 # autodiscovery (e.g. Datadog `ad.datadoghq.com/...`), or any platform-
 # specific pod-level annotation.
 podAnnotations: {}
-  # ad.datadoghq.com/cocoon-sandbox-operator.check_names: '["openmetrics"]'
-  # ad.datadoghq.com/cocoon-sandbox-operator.init_configs: '[{}]'
-  # ad.datadoghq.com/cocoon-sandbox-operator.instances: |
+  # ad.datadoghq.com/sandbox-operator.check_names: '["openmetrics"]'
+  # ad.datadoghq.com/sandbox-operator.init_configs: '[{}]'
+  # ad.datadoghq.com/sandbox-operator.instances: |
   #   [{"openmetrics_endpoint": "http://%%host%%:8080/metrics", "namespace": "agent_sandbox", "metrics": [".*"]}]
 
 # podLabels are added to the controller pod template, in addition to

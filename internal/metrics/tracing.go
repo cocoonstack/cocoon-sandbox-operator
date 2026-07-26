@@ -140,7 +140,7 @@ func SetupOTel(ctx context.Context, serviceName string) (Instrumenter, func(), e
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	return &otelInstrumenter{
-		tracer:     tp.Tracer("cocoon-sandbox-operator"),
+		tracer:     tp.Tracer("sandbox-operator"),
 		propagator: otel.GetTextMapPropagator(),
 		logger:     log.FromContext(ctx).WithName("tracing"),
 	}, func() { _ = tp.Shutdown(context.Background()) }, nil

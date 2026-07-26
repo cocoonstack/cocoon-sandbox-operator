@@ -7,7 +7,7 @@ CRDs, status, finalizers, warm-pool reconciliation, and sandboxd communication.
 
 The old MindOS sandbox reconcilers and this operator must **never** reconcile the
 same `sandbox.cocoonstack.io` / `agents.x-k8s.io` objects at the same time. Their
-leader-election identities differ (`cocoon-sandbox-operator.agents.x-k8s.io` here
+leader-election identities differ (`sandbox-operator.agents.x-k8s.io` here
 vs. the MindOS controller-manager ID), so Kubernetes leader election **cannot**
 prevent duplicate reconciliation across the two binaries. Double writers race on
 status, finalizers, and sandboxd claims.
@@ -30,13 +30,13 @@ brief window in which *no* controller reconciles sandbox objects is acceptable
 2. Confirm the old writer is gone: no MindOS pod is reconciling sandbox objects
    (no recent MindOS-sourced updates to `CocoonSandbox`/pool/node/template status,
    old leader lease released).
-3. **Only now enable the new writer.** Deploy `cocoon-sandbox-operator` with leader
+3. **Only now enable the new writer.** Deploy `sandbox-operator` with leader
    election enabled. It becomes the sole active writer.
 4. Verify the operator can list all eight sandbox CRDs and its conversion webhook
    is ready (`kubectl get --raw` on the webhook, CRD `caBundle` populated).
 5. Confirm existing `CocoonSandbox`, pool, node, and template objects retain their
    status and continue reconciling — and that the only controller now touching
-   their status/finalizers is `cocoon-sandbox-operator`.
+   their status/finalizers is `sandbox-operator`.
 6. Remove any obsolete MindOS CRD release only after Helm ownership metadata is
    transferred to the operator release (see "CRD and resource ownership" below).
 
@@ -53,7 +53,7 @@ in `helm/README.md`). Because Helm does not own them, they never raise the
 `invalid ownership metadata` error.
 
 The **templated** shared resources do carry Helm ownership: the install Namespace
-`cocoon-sandbox-system`, the `cocoon-sandbox-operator` ServiceAccount, ClusterRole,
+`cocoon-sandbox-system`, the `sandbox-operator` ServiceAccount, ClusterRole,
 ClusterRoleBinding, and the operator/webhook Services. If a prior MindOS install
 already created any object with one of these names (most likely the Namespace),
 the first `helm upgrade --install` aborts with
@@ -65,11 +65,11 @@ it one of these ways:
 - Pre-stamp the colliding objects before installing:
   ```
   for obj in namespace/cocoon-sandbox-system \
-             serviceaccount/cocoon-sandbox-operator \
-             clusterrole/cocoon-sandbox-operator \
-             clusterrolebinding/cocoon-sandbox-operator; do
+             serviceaccount/sandbox-operator \
+             clusterrole/sandbox-operator \
+             clusterrolebinding/sandbox-operator; do
     kubectl -n cocoon-sandbox-system annotate "$obj" \
-      meta.helm.sh/release-name=cocoon-sandbox-operator \
+      meta.helm.sh/release-name=sandbox-operator \
       meta.helm.sh/release-namespace=cocoon-sandbox-system --overwrite
     kubectl -n cocoon-sandbox-system label "$obj" \
       app.kubernetes.io/managed-by=Helm --overwrite

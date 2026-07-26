@@ -43,10 +43,10 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
-	sandboxapiserver "github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/apiserver"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
+	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
 )
 
 var (

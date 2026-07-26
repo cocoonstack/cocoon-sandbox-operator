@@ -20,7 +20,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 
-	v1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+	v1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
 const v1alpha1SandboxStateAnnotation = "api.agents.x-k8s.io/v1alpha1-sandbox-state"

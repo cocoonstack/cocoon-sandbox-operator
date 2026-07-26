@@ -1,4 +1,4 @@
-# cocoon-sandbox-operator Helm chart
+# sandbox-operator Helm chart
 
 This chart installs the operator, all upstream agent-sandbox CRDs, the Cocoon
 compatibility CRDs, RBAC, conversion webhook, and certificate management.
@@ -6,7 +6,7 @@ compatibility CRDs, RBAC, conversion webhook, and certificate management.
 ## Install
 
 ```bash
-helm upgrade --install cocoon-sandbox-operator ./helm \
+helm upgrade --install sandbox-operator ./helm \
   --namespace cocoon-sandbox-system \
   --create-namespace \
   --set image.tag=<version>
@@ -16,7 +16,7 @@ Extensions are enabled and standard kubelet is selected by default. After the
 vk-cocoon cluster is ready, it can be selected cluster-wide with:
 
 ```bash
-helm upgrade --install cocoon-sandbox-operator ./helm \
+helm upgrade --install sandbox-operator ./helm \
   --namespace cocoon-sandbox-system \
   --create-namespace \
   --set image.tag=<version> \
@@ -33,7 +33,7 @@ Apply changed CRDs before upgrading the controller:
 
 ```bash
 kubectl apply -f helm/crds/
-helm upgrade cocoon-sandbox-operator ./helm \
+helm upgrade sandbox-operator ./helm \
   --namespace cocoon-sandbox-system \
   --reuse-values \
   --set image.tag=<new-version>
@@ -45,7 +45,7 @@ Do not delete the CRDs while sandbox custom resources still exist.
 
 | Parameter | Description | Default |
 |---|---|---|
-| `image.repository` | Operator image repository | `ghcr.io/cocoonstack/cocoon-sandbox-operator` |
+| `image.repository` | Operator image repository | `ghcr.io/cocoonstack/sandbox-operator` |
 | `image.tag` | Operator image tag; required | `""` |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `replicaCount` | Operator replicas | `1` |

@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	cocoonsandboxv1 "github.com/cocoonstack/cocoon-sandbox-operator/api/cocoon/v1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/cocoon/sandboxd"
+	cocoonsandboxv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
+	"github.com/cocoonstack/sandbox-operator/cocoon/sandboxd"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"

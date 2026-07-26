@@ -15,8 +15,8 @@
 package controllers
 
 import (
-	sandboxcontrollers "github.com/cocoonstack/cocoon-sandbox-operator/controllers"
-	extensionsv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
+	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 )
 

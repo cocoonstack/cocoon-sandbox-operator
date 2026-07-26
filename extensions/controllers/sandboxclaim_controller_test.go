@@ -43,11 +43,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/cocoon-sandbox-operator/controllers"
-	extensionsv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/extensions/controllers/queue"
-	asmetrics "github.com/cocoonstack/cocoon-sandbox-operator/internal/metrics"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
+	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
+	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
 func TestSandboxClaimReconcile(t *testing.T) {

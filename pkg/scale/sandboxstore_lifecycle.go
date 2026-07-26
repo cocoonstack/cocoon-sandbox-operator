@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/sandboxd"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 )
 
 // The lifecycle verbs route to the sandbox's owning node and write nothing:

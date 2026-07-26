@@ -44,9 +44,9 @@ import (
 
 	"github.com/go-logr/logr"
 
-	cocoonv1 "github.com/cocoonstack/cocoon-sandbox-operator/api/cocoon/v1"
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
+	cocoonv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
 const (

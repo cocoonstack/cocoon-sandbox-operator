@@ -36,8 +36,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	asmetrics "github.com/cocoonstack/cocoon-sandbox-operator/internal/metrics"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
 func newFakeClient(initialObjs ...runtime.Object) client.WithWatch {

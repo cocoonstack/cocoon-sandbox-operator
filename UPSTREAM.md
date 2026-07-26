@@ -16,7 +16,7 @@ deployment baseline.
 
 Local deltas are deliberately narrow:
 
-1. The module and binary are named `cocoon-sandbox-operator`.
+1. The module and binary are named `sandbox-operator`.
 2. Extension controllers are enabled by default so every upstream API kind is
    functional after installation.
 3. A Pod mutation seam keeps standard kubelet as the rollout default and

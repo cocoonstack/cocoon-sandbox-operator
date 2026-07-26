@@ -9,24 +9,24 @@ metadata:
 kind: ServiceAccount
 apiVersion: v1
 metadata:
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
   namespace: cocoon-sandbox-system
   labels:
-    app: cocoon-sandbox-operator
+    app: sandbox-operator
 
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
 subjects:
 - kind: ServiceAccount
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
   namespace: cocoon-sandbox-system
 roleRef:
   kind: ClusterRole
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
   apiGroup: rbac.authorization.k8s.io
 
 ---
@@ -34,7 +34,7 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
   namespace: cocoon-sandbox-system
 rules:
 - apiGroups:
@@ -59,15 +59,15 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
   namespace: cocoon-sandbox-system
 subjects:
 - kind: ServiceAccount
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
   namespace: cocoon-sandbox-system
 roleRef:
   kind: Role
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
   apiGroup: rbac.authorization.k8s.io
 
 ---
@@ -75,13 +75,13 @@ roleRef:
 kind: Service
 apiVersion: v1
 metadata:
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
   namespace: cocoon-sandbox-system
   labels:
-    app: cocoon-sandbox-operator
+    app: sandbox-operator
 spec:
   selector:
-    app: cocoon-sandbox-operator
+    app: sandbox-operator
   ports:
   - name: metrics
     port: 8080
@@ -93,24 +93,24 @@ spec:
 kind: Deployment
 apiVersion: apps/v1
 metadata:
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
   namespace: cocoon-sandbox-system
   labels:
-    app: cocoon-sandbox-operator
+    app: sandbox-operator
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: cocoon-sandbox-operator
+      app: sandbox-operator
   template:
     metadata:
       labels:
-        app: cocoon-sandbox-operator
+        app: sandbox-operator
     spec:
-      serviceAccountName: cocoon-sandbox-operator
+      serviceAccountName: sandbox-operator
       containers:
-      - name: cocoon-sandbox-operator
-        image: ko://github.com/cocoonstack/cocoon-sandbox-operator/cmd/cocoon-sandbox-operator # placeholder value, replaced by deployment scripts
+      - name: sandbox-operator
+        image: ko://github.com/cocoonstack/sandbox-operator/cmd/sandbox-operator # placeholder value, replaced by deployment scripts
         args:
         - --leader-elect=true
         - --extensions=true
@@ -135,7 +135,7 @@ metadata:
   namespace: cocoon-sandbox-system
 spec:
   selector:
-    app: cocoon-sandbox-operator
+    app: sandbox-operator
   ports:
   - name: webhook
     port: 443

@@ -1,11 +1,11 @@
 SHELL := /usr/bin/env bash
 
-BINARY := bin/cocoon-sandbox-operator
-MAIN := ./cmd/cocoon-sandbox-operator
+BINARY := bin/sandbox-operator
+MAIN := ./cmd/sandbox-operator
 APISERVER_BINARY := bin/sandbox-apiserver
 APISERVER_MAIN := ./cmd/sandbox-apiserver
 APISERVER_IMG ?= ghcr.io/cocoonstack/cocoon-sandbox-apiserver:dev
-VERSION_PKG := github.com/cocoonstack/cocoon-sandbox-operator/internal/version
+VERSION_PKG := github.com/cocoonstack/sandbox-operator/internal/version
 
 GIT_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
 GIT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)

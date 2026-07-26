@@ -1,7 +1,7 @@
 # All-in-one (core + extensions) assembly for kustomize / GitOps consumers.
 #
 # Unlike `sandbox.yaml` + `extensions.yaml` (which are designed for sequential
-# `kubectl apply -f` and therefore both declare the cocoon-sandbox-operator
+# `kubectl apply -f` and therefore both declare the sandbox-operator
 # Deployment), this kustomization declares the controller exactly once and turns
 # on extensions via a patch -- so it has no duplicate resource ids and can be
 # consumed directly by kustomize, Config Sync, Argo CD, etc.
@@ -48,13 +48,13 @@ patches:
       apiVersion: apps/v1
       kind: Deployment
       metadata:
-        name: cocoon-sandbox-operator
+        name: sandbox-operator
         namespace: cocoon-sandbox-system
       spec:
         template:
           spec:
             containers:
-              - name: cocoon-sandbox-operator
+              - name: sandbox-operator
                 args:
                   - --leader-elect=true
                   - --extensions=true

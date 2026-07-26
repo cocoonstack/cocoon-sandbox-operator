@@ -24,9 +24,9 @@ import (
 	"testing"
 	"time"
 
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/cocoon-sandbox-operator/controllers"
-	extensionsv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
+	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"

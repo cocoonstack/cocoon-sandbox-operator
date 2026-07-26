@@ -47,11 +47,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	v1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	extensionsv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/extensions/controllers/queue"
-	"github.com/cocoonstack/cocoon-sandbox-operator/internal/lifecycle"
-	asmetrics "github.com/cocoonstack/cocoon-sandbox-operator/internal/metrics"
+	v1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
+	"github.com/cocoonstack/sandbox-operator/internal/lifecycle"
+	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
 const ObservabilityAnnotation = "agents.x-k8s.io/controller-first-observed-at"

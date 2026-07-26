@@ -42,11 +42,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	extv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/extensions/api/v1beta1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/e2bcompat"
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
-	sandboxapiserver "github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/apiserver"
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale/warmpool"
+	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/e2bcompat"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
+	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale/warmpool"
 )
 
 // inventoryCacheSyncTimeout bounds the startup wait for the NodeInventory

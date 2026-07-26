@@ -59,13 +59,13 @@ process details and enables block/mutex sampling.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cocoon-sandbox-operator
+  name: sandbox-operator
   namespace: cocoon-sandbox-system
 spec:
   template:
     spec:
       containers:
-        - name: cocoon-sandbox-operator
+        - name: sandbox-operator
           args:
             - --leader-elect=true
             - --extensions=true

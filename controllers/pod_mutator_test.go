@@ -23,8 +23,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	asmetrics "github.com/cocoonstack/cocoon-sandbox-operator/internal/metrics"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
 type podMutatorFunc func(context.Context, *sandboxv1beta1.Sandbox, *corev1.Pod) error

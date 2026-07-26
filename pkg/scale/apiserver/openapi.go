@@ -18,13 +18,13 @@ import (
 	openapicommon "k8s.io/kube-openapi/pkg/common"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
 // sandboxDefPrefix is the canonical Go package name openapinamer derives from
 // the Scheme for the aggregated types; the model map MUST be keyed by it so the
 // namer resolves the sandboxes resource to these definitions.
-const sandboxDefPrefix = "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1."
+const sandboxDefPrefix = "github.com/cocoonstack/sandbox-operator/api/v1beta1."
 
 // gvkExtension is the x-kubernetes-group-version-kind marker the managed-fields
 // TypeConverter (managedfields/internal.indexModels) reads to map a GVK to its

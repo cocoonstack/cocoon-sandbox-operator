@@ -24,8 +24,8 @@ import (
 	basecompatibility "k8s.io/component-base/compatibility"
 	openapicommon "k8s.io/kube-openapi/pkg/common"
 
-	sandboxv1beta1 "github.com/cocoonstack/cocoon-sandbox-operator/api/v1beta1"
-	"github.com/cocoonstack/cocoon-sandbox-operator/pkg/scale"
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
 // NewOpenAPIV3Config returns the OpenAPIV3 config the aggregated server installs
