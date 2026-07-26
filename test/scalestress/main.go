@@ -384,7 +384,7 @@ type latSamples struct {
 
 func listLatency(ctx context.Context, samples int, do func() (int, error)) latSamples {
 	var s latSamples
-	for i := 0; i < samples; i++ {
+	for i := range samples {
 		start := time.Now()
 		c, err := do()
 		d := float64(time.Since(start).Microseconds()) / 1000

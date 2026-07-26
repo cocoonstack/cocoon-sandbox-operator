@@ -11,11 +11,12 @@ You may obtain a copy of the License at
 package controller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -324,8 +325,8 @@ func (r *CocoonSandboxController) selectNode(ctx context.Context, sb *cocoonsand
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("no CocoonSandboxNode matches placement selector")
 	}
-	sort.SliceStable(matches, func(i, j int) bool {
-		return nodeScore(&matches[i], tmpl.Spec.Template, net, size) > nodeScore(&matches[j], tmpl.Spec.Template, net, size)
+	slices.SortStableFunc(matches, func(a, b cocoonsandboxv1.CocoonSandboxNode) int {
+		return cmp.Compare(nodeScore(&b, tmpl.Spec.Template, net, size), nodeScore(&a, tmpl.Spec.Template, net, size))
 	})
 	return &matches[0], nil
 }
@@ -521,7 +522,7 @@ func (r *CocoonSandboxPoolController) enqueuePoolsForNode(ctx context.Context, o
 	if err := r.Client.List(ctx, &pools, client.InNamespace(obj.GetNamespace())); err != nil {
 		return nil
 	}
-	sort.SliceStable(pools.Items, func(i, j int) bool { return pools.Items[i].Name < pools.Items[j].Name })
+	slices.SortStableFunc(pools.Items, func(a, b cocoonsandboxv1.CocoonSandboxPool) int { return cmp.Compare(a.Name, b.Name) })
 	requests := make([]reconcile.Request, 0, len(pools.Items))
 	for i := range pools.Items {
 		requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{
@@ -651,7 +652,7 @@ func (r *CocoonSandboxPoolController) updatePoolStatus(ctx context.Context, pool
 		for nodeName := range targets {
 			nodeNames = append(nodeNames, nodeName)
 		}
-		sort.Strings(nodeNames)
+		slices.Sort(nodeNames)
 		for _, nodeName := range nodeNames {
 			warm, target := observedPoolOnNode(template, net, size, nodeName, targets[nodeName], infos)
 			next.Status.ReadyReplicas += int32(warm)
@@ -690,7 +691,7 @@ func schedulableSandboxNodes(items []cocoonsandboxv1.CocoonSandboxNode) []cocoon
 		}
 		nodes = append(nodes, items[i])
 	}
-	sort.SliceStable(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
+	slices.SortStableFunc(nodes, func(a, b cocoonsandboxv1.CocoonSandboxNode) int { return cmp.Compare(a.Name, b.Name) })
 	return nodes
 }
 
@@ -749,7 +750,7 @@ func firstNodeError(nodeErrors map[string]string) (string, string) {
 	for name := range nodeErrors {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names[0], nodeErrors[names[0]]
 }
 

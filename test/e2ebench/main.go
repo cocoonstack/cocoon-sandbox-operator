@@ -291,7 +291,7 @@ func fireClaims(ctx context.Context, n, conc, timeoutSec int) (bound, createFail
 	sem := make(chan struct{}, conc)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(idx int) {

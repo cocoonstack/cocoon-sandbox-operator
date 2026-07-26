@@ -160,7 +160,7 @@ type claimWaiter interface {
 func measureClaimLatency(gw claimWaiter, iters int) []float64 {
 	ctx := context.Background()
 	lat := make([]float64, 0, iters)
-	for i := 0; i < iters; i++ {
+	for i := range iters {
 		req := scale.ClaimRequest{Namespace: ns, ClaimName: fmt.Sprintf("lat-%d", i), WarmPool: "base:24.04"}
 		start := time.Now()
 		a, err := gw.Claim(ctx, req)
@@ -182,7 +182,7 @@ func injectAndReconcileOrphans(fs *fakeSandboxd, orphans int) (int, int) {
 	ctx := context.Background()
 
 	objs := make([]ctrlclient.Object, 0, orphans)
-	for i := 0; i < orphans; i++ {
+	for i := range orphans {
 		objs = append(objs, newClaim(fmt.Sprintf("orphan-%d", i)))
 	}
 	fc := fake.NewClientBuilder().
@@ -197,7 +197,7 @@ func injectAndReconcileOrphans(fs *fakeSandboxd, orphans int) (int, int) {
 		BaseContext: ctx, Logger: logr.Discard(),
 	})
 	inv := make(sliceInventory, 0, orphans)
-	for i := 0; i < orphans; i++ {
+	for i := range orphans {
 		name := fmt.Sprintf("orphan-%d", i)
 		a, err := badGW.Claim(ctx, scale.ClaimRequest{Namespace: ns, ClaimName: name, WarmPool: "base:24.04"})
 		must(err)
@@ -212,7 +212,7 @@ func injectAndReconcileOrphans(fs *fakeSandboxd, orphans int) (int, int) {
 	must(err)
 
 	remaining := 0
-	for i := 0; i < orphans; i++ {
+	for i := range orphans {
 		cur := &extv1beta1.SandboxClaim{}
 		must(fc.Get(ctx, types.NamespacedName{Namespace: ns, Name: fmt.Sprintf("orphan-%d", i)}, cur))
 		if cur.Status.SandboxStatus.Name == "" {

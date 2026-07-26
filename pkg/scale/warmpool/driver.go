@@ -13,10 +13,11 @@
 package warmpool
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -215,7 +216,7 @@ func (d *Driver) schedulableNodes(ctx context.Context) ([]nodeView, error) {
 		}
 		views = append(views, nodeView{name: name, addr: inv.Address, warmBy: warmBy})
 	}
-	sort.Slice(views, func(i, j int) bool { return views[i].name < views[j].name })
+	slices.SortFunc(views, func(a, b nodeView) int { return cmp.Compare(a.name, b.name) })
 	return views, nil
 }
 
@@ -261,20 +262,16 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 		for key, warm := range byKey {
 			specs = append(specs, sandboxd.PoolSpec{Template: key.Template, Net: key.Net, Size: key.Size, Warm: warm})
 		}
-		sort.Slice(specs, func(a, b int) bool {
-			if specs[a].Template != specs[b].Template {
-				return specs[a].Template < specs[b].Template
-			}
-			if specs[a].Net != specs[b].Net {
-				return specs[a].Net < specs[b].Net
-			}
-			return specs[a].Size < specs[b].Size
+		slices.SortFunc(specs, func(a, b sandboxd.PoolSpec) int {
+			return cmp.Or(
+				cmp.Compare(a.Template, b.Template),
+				cmp.Compare(a.Net, b.Net),
+				cmp.Compare(a.Size, b.Size),
+			)
 		})
 		idx := i
-		wg.Add(1)
 		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			info, err := d.factory(node.addr, d.token).SetPools(ctx, specs)
 			if err != nil {
@@ -292,7 +289,7 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 			// A node whose PUT failed keeps its inventory-derived counts.
 			// Only this goroutine touches nodes[idx], so no lock is needed.
 			nodes[idx].warmBy = warmByFrom(info)
-		}()
+		})
 	}
 	wg.Wait()
 }

@@ -345,7 +345,7 @@ func claimLatency(n, conc int) map[string]any {
 	sem := make(chan struct{}, conc)
 	var wg sync.WaitGroup
 	fails := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(idx int) {

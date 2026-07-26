@@ -110,7 +110,7 @@ func main() {
 	for k := 0; k < nodes; k++ {
 		node := fmt.Sprintf("node-%d", k)
 		entries := make(sliceLiveSource, 0, perNode)
-		for i := 0; i < perNode; i++ {
+		for i := range perNode {
 			g := k*perNode + i
 			ns := namespaceName(g % numNS)
 			name := fmt.Sprintf("sb-%06d", g)

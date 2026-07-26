@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -8,7 +9,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -250,11 +251,8 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	for _, chunk := range perNode {
 		list.Items = append(list.Items, chunk...)
 	}
-	sort.Slice(list.Items, func(a, b int) bool {
-		if list.Items[a].Namespace != list.Items[b].Namespace {
-			return list.Items[a].Namespace < list.Items[b].Namespace
-		}
-		return list.Items[a].Name < list.Items[b].Name
+	slices.SortFunc(list.Items, func(a, b sandboxv1beta1.Sandbox) int {
+		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
 	return list, nil
 }
@@ -870,7 +868,7 @@ func (s *StaticInventorySource) ListNodes(_ context.Context) ([]string, error) {
 	for n := range s.inv {
 		nodes = append(nodes, n)
 	}
-	sort.Strings(nodes)
+	slices.Sort(nodes)
 	return nodes, nil
 }
 
@@ -932,7 +930,7 @@ func (s *ClientInventorySource) ListNodes(ctx context.Context) ([]string, error)
 	for i := range ul.Items {
 		nodes = append(nodes, ul.Items[i].GetName())
 	}
-	sort.Strings(nodes)
+	slices.Sort(nodes)
 	return nodes, nil
 }
 

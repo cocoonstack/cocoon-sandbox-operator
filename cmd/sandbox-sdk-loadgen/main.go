@@ -343,7 +343,7 @@ func deleteAll(ctx context.Context, cl client.Client, o *options) (listed, delet
 	prefix := o.namegen + "-"
 	work := make(chan *sandboxv1beta1.Sandbox)
 	var wg sync.WaitGroup
-	for w := 0; w < o.deleteConcurrency; w++ {
+	for range o.deleteConcurrency {
 		wg.Go(func() {
 			for sb := range work {
 				if releaseWithRetry(ctx, cl, o, sb) {

@@ -148,13 +148,13 @@ func fixture(n int) (ctrlclient.Client, queue.SandboxQueue, []*extv1beta1.Sandbo
 	objs := []ctrlclient.Object{tmpl, pool}
 	q := queue.NewSimpleSandboxQueue()
 	npn := queue.GetNamespacedWarmPoolName(ns, poolName)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		sb := warmSandbox(i, poolHash, tmplHash, poolUID)
 		objs = append(objs, sb)
 		q.Add(npn, queue.SandboxKey{Namespace: ns, Name: sb.Name})
 	}
 	claims := make([]*extv1beta1.SandboxClaim, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		claims[i] = claim(i)
 		objs = append(objs, claims[i])
 	}
