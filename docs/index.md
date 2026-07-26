@@ -83,7 +83,7 @@ to **50 000** microVMs on 20 bare-metal nodes reaches full supply in **10–15 s
 at **99 MB net RAM per microVM**, while etcd sees ~2 writes/s across the whole
 run — independent of sandbox count. Full methodology, per-round sampling and the
 memory ledger are in
-[PERFORMANCE.md](https://github.com/cocoonstack/sandbox-operator/blob/main/PERFORMANCE.md).
+[PERFORMANCE.md](https://github.com/cocoonstack/sandbox-operator/blob/master/PERFORMANCE.md).
 
 The same design has one visible cost: the read view is synthesized from
 `NodeInventory` published on a ~30 s cadence, so `list`/`get` are eventually
@@ -103,6 +103,12 @@ consistent and a just-created sandbox is briefly invisible. Callers poll.
 - [e2b-compatible API](e2b-compat.md) — serving the e2b REST surface from the
   aggregated apiserver so an unmodified e2b SDK claims from these warm pools:
   flags, endpoint mapping, and the limits worth knowing
+- [Lifecycle verbs](lifecycle.md) — pause, resume, fork and snapshot as
+  subresources, plus a runnable walk-through over both API surfaces.
+
+- [Scaling design](scaling-design.md) — how claims stay off etcd and what the
+  per-node control plane owns.
+
 - [Snapshot placement](snapshot-placement.md) — where a checkpoint lives, how a
   branch reaches it from another node (local hit, gossip + redirect, peer heal),
   why shared filesystems are ruled out, and the durability this does *not* give
