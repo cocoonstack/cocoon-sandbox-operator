@@ -220,6 +220,14 @@ It is a translation layer, not a second control plane: an e2b create is the same
 node-local claim, and the sandbox stays visible to `kubectl get sandboxes`. Flags,
 endpoint mapping, and limits in [docs/e2b-compat.md](docs/e2b-compat.md).
 
+[`examples/lifecycle/example.go`](examples/lifecycle/example.go) drives this
+surface end to end — create, get, list, metrics, snapshot, fork, pause, resume,
+timeout, keepalive, delete — asserting the status codes the SDKs rely on (409 on
+a repeated pause, 201 versus 200 on `connect`). It speaks the REST contract
+directly rather than importing an SDK, because e2b publishes JS and Python
+clients but no Go one; that exercises the wire contract, not the SDKs
+themselves.
+
 ## Install
 
 Helm:
