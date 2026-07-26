@@ -19,14 +19,18 @@ the default.
 
 ## Controller concurrency
 
-- `--sandbox-concurrent-workers` (1)
-- `--sandbox-claim-concurrent-workers` (50)
-- `--sandbox-warm-pool-concurrent-workers` (1)
+The defaults are the configuration [PERFORMANCE.md](https://github.com/cocoonstack/sandbox-operator/blob/master/PERFORMANCE.md)
+was measured with, so an out-of-box install reproduces the published numbers.
+
+- `--sandbox-concurrent-workers` (16)
+- `--sandbox-claim-concurrent-workers` (20)
+- `--sandbox-warm-pool-concurrent-workers` (8)
 - `--sandbox-template-concurrent-workers` (1)
 - `--sandbox-warm-pool-max-batch-size` (300)
 - `--enable-warm-pool-eviction` (`true`)
-- `--kube-api-qps` (-1, unlimited)
-- `--kube-api-burst` (10)
+- `--kube-api-qps` (200) — a negative value disables client-side rate limiting
+  entirely, which also makes `--kube-api-burst` meaningless
+- `--kube-api-burst` (400)
 
 ## Webhook and leader election
 
@@ -70,8 +74,8 @@ spec:
             - --leader-elect=true
             - --extensions=true
             - --default-runtime=standard
-            - --sandbox-concurrent-workers=10
-            - --sandbox-claim-concurrent-workers=100
+            - --sandbox-concurrent-workers=32
+            - --sandbox-claim-concurrent-workers=40
 ```
 
 Helm exposes the common flags under `controller.*`; use

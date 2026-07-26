@@ -41,12 +41,12 @@ controller:
   # enablePprofDebug: false
   # pprofBlockProfileRate: 1000000
   # pprofMutexProfileFraction: 10
-  # kubeApiQps: -1.0
-  # kubeApiBurst: 10
-  # sandboxConcurrentWorkers: 1
+  # kubeApiQps: 200
+  # kubeApiBurst: 400
+  # sandboxConcurrentWorkers: 16
   ##### The following are only active when controller.extensions=true.
-  # sandboxClaimConcurrentWorkers: 50
-  # sandboxWarmPoolConcurrentWorkers: 1
+  # sandboxClaimConcurrentWorkers: 20
+  # sandboxWarmPoolConcurrentWorkers: 8
   # sandboxTemplateConcurrentWorkers: 1
   # sandboxWarmPoolMaxBatchSize: 300  # max parallel sandbox create/delete batch in the SandboxWarmPool controller
   # enableWarmPoolEviction: true      # mark warm-pool-created pods as safe to evict

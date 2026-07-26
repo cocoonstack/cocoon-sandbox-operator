@@ -196,6 +196,26 @@ type NodeInventory struct {
 **Acceptance:** 1M sandbox *intent* costs `O(nodes)` etcd objects; `kubectl get
 sandboxes` returns the fanned-out list; per-sandbox `Get` is authoritative.
 
+### L3 routing: why node choice is sampled, not maximized
+
+The operator schedules off `NodeInventory`, which each node republishes on a
+5–30 s cadence. Picking the node with the highest advertised warm count would
+therefore send *every* claim in a refresh window to whichever node looked best
+in that one snapshot — draining it while its peers stay idle. The repo's own
+100-burst run showed the signature: 98/100 warm, and both misses were
+cold-provision on a single over-scheduled node.
+
+Node choice is instead power-of-two-choices: sample two candidates that
+advertise warm capacity for the requested pool and take the warmer one. That
+keeps the bias toward warm capacity while spreading a burst across the fleet,
+and a stale pick still costs at most one gossip redirect inside sandboxd, so
+correctness is unchanged.
+
+The watch path makes the same trade in the other direction. Re-deriving the
+fleet view is `O(nodes × sandboxes)` — 40 ms at 200 nodes and 50k sandboxes —
+so a watch with nothing to report stretches its poll up to 8× the base interval
+and snaps back to it on the first observed change.
+
 ### L3 follow-up: resolve a sandbox without the summary (TODO)
 
 The risk table above already names the fix — *route `Get` to the owning node
