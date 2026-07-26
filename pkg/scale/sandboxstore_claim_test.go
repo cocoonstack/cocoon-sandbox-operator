@@ -14,16 +14,14 @@ import (
 
 var _ SandboxdClient = (*recordingClient)(nil)
 
-func TestStoreClaim_PicksMostWarmNodeAndRoutes(t *testing.T) {
+func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 	src := NewStaticInventorySource()
-	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
 	src.Put(poolInv("n2", "10.0.0.2:7777", PoolCapacity{Template: "img", Warm: 4, Target: 5}))
 	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb-abc", Token: "sbtok", OwnerAddr: "10.0.0.2:9000"}}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("uniform-token", f.factory()))
 
 	a, err := store.Claim(context.Background(), "ns", "s1", PoolKey{Template: "img"})
 	require.NoError(t, err)
-	// Most-warm-first picks n2, and the assignment carries the sandboxd id + address.
 	assert.Equal(t, "n2", a.Node)
 	assert.Equal(t, "sb-abc", a.SandboxName)
 	assert.Equal(t, "10.0.0.2:9000", a.Address)
@@ -102,6 +100,45 @@ func TestStoreClaimRelease_FailClosedWithoutRouting(t *testing.T) {
 	assert.False(t, IsNoWarmCapacity(err), "unconfigured routing is a config error, not no-capacity")
 
 	require.Error(t, store.Release(context.Background(), "n1", "sb-1"))
+}
+
+func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
+	src := NewStaticInventorySource()
+	for _, n := range []struct {
+		node string
+		warm int
+	}{{"n1", 4}, {"n2", 4}, {"n3", 4}, {"n4", 4}} {
+		src.Put(poolInv(n.node, n.node+":7777", PoolCapacity{Template: "img", Warm: n.warm, Target: 5}))
+	}
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()))
+
+	picked := map[string]int{}
+	for range 200 {
+		node, _, err := store.pickWarmNode(context.Background(), PoolKey{Template: "img"})
+		require.NoError(t, err)
+		picked[node]++
+	}
+	// Deterministic max-first would put all 200 on one node. Equal warmth means
+	// power-of-two sampling must reach every node.
+	assert.Len(t, picked, 4, "burst funneled onto a subset: %v", picked)
+}
+
+func TestPickWarmNodePrefersTheWarmerSample(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("cold", "cold:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
+	src.Put(poolInv("warm", "warm:7777", PoolCapacity{Template: "img", Warm: 100, Target: 200}))
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()))
+
+	warmPicks := 0
+	for range 200 {
+		node, _, err := store.pickWarmNode(context.Background(), PoolKey{Template: "img"})
+		require.NoError(t, err)
+		if node == "warm" {
+			warmPicks++
+		}
+	}
+	// Two samples with replacement pick the cold node only when both land on it.
+	assert.Greater(t, warmPicks, 130, "sampling lost its bias toward warm capacity")
 }
 
 // poolInv builds a NodeInventory advertising a sandboxd address and pool capacities.

@@ -5172,6 +5172,59 @@ func TestReconcile_TracingNormalization(t *testing.T) {
 	require.Equal(t, "unknown", mt.capturedAttrs[sandboxv1beta1.CreatedByLabel], "created-by label must be normalized in span attributes")
 }
 
+func TestStageAnnotationsElidesItsWriteAfterAnotherClaimWrite(t *testing.T) {
+	scheme := newScheme(t)
+	claim := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "default", UID: "c-uid"},
+	}
+	patches := 0
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(claim).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				patches++
+				return c.Patch(ctx, obj, patch, opts...)
+			},
+		}).
+		Build()
+	r := &SandboxClaimReconciler{Client: fakeClient, Scheme: scheme, Tracer: asmetrics.NewNoOp()}
+
+	live := &extensionsv1beta1.SandboxClaim{}
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, live))
+
+	flush := r.stageAnnotations(t.Context(), live)
+	require.NotEmpty(t, live.Annotations[asmetrics.ObservabilityAnnotation], "annotation must be staged in memory")
+
+	// Stand in for adoption's full-object Update: it persists the staged
+	// annotations and advances the resourceVersion.
+	require.NoError(t, fakeClient.Update(t.Context(), live))
+	require.NoError(t, flush())
+	require.Zero(t, patches, "flush wrote again after another claim write already carried the annotations")
+
+	stored := &extensionsv1beta1.SandboxClaim{}
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, stored))
+	require.NotEmpty(t, stored.Annotations[asmetrics.ObservabilityAnnotation])
+}
+
+func TestStageAnnotationsWritesWhenNothingElseTouchedTheClaim(t *testing.T) {
+	scheme := newScheme(t)
+	claim := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "default", UID: "c-uid"},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(claim).Build()
+	r := &SandboxClaimReconciler{Client: fakeClient, Scheme: scheme, Tracer: asmetrics.NewNoOp()}
+
+	live := &extensionsv1beta1.SandboxClaim{}
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, live))
+	require.NoError(t, r.stageAnnotations(t.Context(), live)())
+
+	stored := &extensionsv1beta1.SandboxClaim{}
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, stored))
+	require.NotEmpty(t, stored.Annotations[asmetrics.ObservabilityAnnotation],
+		"a pass with no other claim write must still persist the observability annotation")
+}
+
 func newScheme(t *testing.T) *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {

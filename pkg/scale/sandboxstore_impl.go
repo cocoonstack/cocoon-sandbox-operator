@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"math/rand/v2"
 	"net"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -47,6 +49,14 @@ const (
 	// by k8s name would target the wrong claim). This is the single definition of
 	// the key; apiserver.ClaimIDAnnotation aliases it so both write it identically.
 	ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+
+	// Connection pooling for the node-local claim path. Idle conns per host are
+	// sized to the per-node claim fan-out so a burst reuses connections instead
+	// of handshaking; the timeout bounds a wedged sandboxd.
+	sandboxdRequestTimeout      = 10 * time.Second
+	sandboxdMaxIdleConns        = 256
+	sandboxdMaxIdleConnsPerHost = 32
+	sandboxdIdleConnTimeout     = 90 * time.Second
 )
 
 // NodeInventoryGVK is the GroupVersionKind of the O(nodes) intent object the
@@ -81,6 +91,13 @@ type InventorySource interface {
 	// NodeInventory returns one node's authoritative inventory. A partitioned or
 	// not-yet-published node returns an error, which List logs and skips.
 	NodeInventory(ctx context.Context, node string) (*NodeInventory, error)
+}
+
+// warmCandidate is one node advertising warm capacity for a requested pool.
+type warmCandidate struct {
+	node string
+	addr string
+	warm int
 }
 
 // StoreOption configures a scatterGatherStore.
@@ -122,12 +139,23 @@ func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
 // sandboxd client per node advertise address (a bare "host:port" is given the
 // http scheme; an address that already carries a scheme is used verbatim).
 func NewSandboxdClientFactory() SandboxdClientFactory {
+	// One client for the whole fleet: a per-call client would fall back to
+	// http.DefaultTransport, whose MaxIdleConnsPerHost of 2 forces a fresh TCP
+	// handshake on every concurrent claim past the second to the same node.
+	hc := &http.Client{
+		Timeout: sandboxdRequestTimeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        sandboxdMaxIdleConns,
+			MaxIdleConnsPerHost: sandboxdMaxIdleConnsPerHost,
+			IdleConnTimeout:     sandboxdIdleConnTimeout,
+		},
+	}
 	return func(addr, token string) SandboxdClient {
 		base := addr
 		if !strings.Contains(base, "://") {
 			base = "http://" + base
 		}
-		return sandboxd.New(base, token)
+		return sandboxd.New(base, token, sandboxd.WithHTTPClient(hc))
 	}
 }
 
@@ -322,11 +350,26 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 // advertised address is skipped (there is nowhere to route a claim). Returns
 // ErrNoWarmCapacity when no node has Warm>0 for the pool.
 func (s *scatterGatherStore) pickWarmNode(ctx context.Context, pool PoolKey) (node, addr string, err error) {
+	candidates, err := s.warmCandidates(ctx, pool)
+	if err != nil {
+		return "", "", err
+	}
+	if len(candidates) == 0 {
+		return "", "", ErrNoWarmCapacity
+	}
+	best := pickPowerOfTwo(candidates)
+	return best.node, best.addr, nil
+}
+
+// warmCandidates lists every node advertising warm capacity for pool. A node whose
+// inventory is unavailable is skipped, not fatal: the fleet stays claimable while
+// one node is partitioned.
+func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
 	nodes, err := s.src.ListNodes(ctx)
 	if err != nil {
-		return "", "", fmt.Errorf("scale: enumerate node inventories: %w", err)
+		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
 	}
-	bestWarm := 0
+	var out []warmCandidate
 	for _, n := range nodes {
 		inv, err := s.src.NodeInventory(ctx, n)
 		if err != nil {
@@ -338,16 +381,28 @@ func (s *scatterGatherStore) pickWarmNode(ctx context.Context, pool PoolKey) (no
 			continue
 		}
 		for i := range inv.Pools {
-			pc := inv.Pools[i]
-			if pc.Warm > bestWarm && poolCapacityMatches(pc, pool) {
-				bestWarm, node, addr = pc.Warm, n, inv.Address
+			if pc := inv.Pools[i]; pc.Warm > 0 && poolCapacityMatches(pc, pool) {
+				out = append(out, warmCandidate{node: n, addr: inv.Address, warm: pc.Warm})
 			}
 		}
 	}
-	if node == "" {
-		return "", "", ErrNoWarmCapacity
+	return out, nil
+}
+
+// pickPowerOfTwo samples two candidates and keeps the warmer one. Node inventory
+// is 5-30s stale, so always taking the global maximum funnels an entire burst onto
+// whichever node looked best in that snapshot; sampling spreads the burst while
+// still biasing toward warm capacity. A stale pick costs one gossip redirect.
+func pickPowerOfTwo(candidates []warmCandidate) warmCandidate {
+	if len(candidates) == 1 {
+		return candidates[0]
 	}
-	return node, addr, nil
+	a := candidates[rand.IntN(len(candidates))]
+	b := candidates[rand.IntN(len(candidates))]
+	if b.warm > a.warm {
+		return b
+	}
+	return a
 }
 
 // poolCapacityMatches reports whether a node's advertised pool capacity serves the

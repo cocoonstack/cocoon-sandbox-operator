@@ -219,10 +219,9 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Initialize trace ID and observation time for active resources missing them.
-	if err := r.initializeAnnotations(ctx, claim); err != nil {
-		return ctrl.Result{}, err
-	}
+	// Staged, not written: on the warm path the adoption Update carries these
+	// annotations, so the claim costs three apiserver writes instead of four.
+	flushAnnotations := r.stageAnnotations(ctx, claim)
 
 	originalClaimStatus := claim.Status.DeepCopy()
 
@@ -277,6 +276,12 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	} else {
 		// Ensure Sandbox exists and is configured.
 		sandbox, reconcileErr = r.reconcileActive(ctx, claim)
+	}
+
+	// Every path below this point only touches status, so one flush here covers
+	// the passes where no adoption write happened.
+	if err := flushAnnotations(); err != nil {
+		return ctrl.Result{}, errors.Join(reconcileErr, err)
 	}
 
 	// Update Status & Events
@@ -359,29 +364,38 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return result, reconcileErr
 }
 
-// initializeAnnotations initializes trace ID and observation time for active resources missing them.
-func (r *SandboxClaimReconciler) initializeAnnotations(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) error {
+// stageAnnotations records the observability and trace annotations on claim in
+// memory and returns the writer that persists them. Any full-object write to the
+// claim earlier in the pass — adoption's Update — already carries them, which the
+// returned writer detects and skips.
+func (r *SandboxClaimReconciler) stageAnnotations(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) func() error {
 	traceContext := r.Tracer.GetTraceContext(ctx)
-	needObservabilityPatch := claim.Annotations[asmetrics.ObservabilityAnnotation] == ""
-	needTraceContextPatch := traceContext != "" && (claim.Annotations[asmetrics.TraceContextAnnotation] == "")
-
-	if needObservabilityPatch || needTraceContextPatch {
-		patch := client.MergeFrom(claim.DeepCopy())
-		if claim.Annotations == nil {
-			claim.Annotations = make(map[string]string)
-		}
-		if needObservabilityPatch {
-			timestamp := r.getOrRecordObservedTime(claim)
-			claim.Annotations[asmetrics.ObservabilityAnnotation] = timestamp.Format(time.RFC3339Nano)
-		}
-		if needTraceContextPatch {
-			claim.Annotations[asmetrics.TraceContextAnnotation] = traceContext
-		}
-		if err := r.Patch(ctx, claim, patch); err != nil {
-			return err
-		}
+	needObservability := claim.Annotations[asmetrics.ObservabilityAnnotation] == ""
+	needTraceContext := traceContext != "" && claim.Annotations[asmetrics.TraceContextAnnotation] == ""
+	if !needObservability && !needTraceContext {
+		return func() error { return nil }
 	}
-	return nil
+
+	before := claim.DeepCopy()
+	if claim.Annotations == nil {
+		claim.Annotations = make(map[string]string)
+	}
+	if needObservability {
+		claim.Annotations[asmetrics.ObservabilityAnnotation] = r.getOrRecordObservedTime(claim).Format(time.RFC3339Nano)
+	}
+	if needTraceContext {
+		claim.Annotations[asmetrics.TraceContextAnnotation] = traceContext
+	}
+
+	staged := claim.ResourceVersion
+	return func() error {
+		// A metadata write this pass advanced the resourceVersion and carried the
+		// staged annotations with it. Status writes happen only after this runs.
+		if claim.ResourceVersion != staged {
+			return nil
+		}
+		return r.Patch(ctx, claim, client.MergeFrom(before))
+	}
 }
 
 // checkExpiration calculates if the claim is expired and how much time is left.

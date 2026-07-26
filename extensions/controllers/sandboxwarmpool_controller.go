@@ -70,6 +70,10 @@ type SandboxWarmPoolReconciler struct {
 	// (claiming the very warm VMs the pool is meant to hold). The zero value keeps
 	// the legacy CR-management behavior, so existing deployments are unaffected.
 	DisableSandboxCRManagement bool
+	// Tracer stamps the creating trace onto each pool Sandbox so the Sandbox
+	// controller does not have to back-patch it on first reconcile — that patch
+	// costs one apiserver write per Sandbox, i.e. a full batch per pool refill.
+	Tracer asmetrics.Instrumenter
 }
 
 //+kubebuilder:rbac:groups=extensions.agents.x-k8s.io,resources=sandboxwarmpools,verbs=get;list;watch;create;update;patch;delete
@@ -202,7 +206,7 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 		sandboxesToCreate := min(desiredReplicas-currentReplicas, maxBatchSize)
 		logger.Info("Creating new pool sandboxes", "count", sandboxesToCreate)
 
-		sandboxCR, err := r.buildSandboxCR(warmPool, poolNameHash, template, currentPodTemplateHash, currentSandboxBlueprintHash)
+		sandboxCR, err := r.buildSandboxCR(ctx, warmPool, poolNameHash, template, currentPodTemplateHash, currentSandboxBlueprintHash)
 		if err != nil {
 			logger.Error(err, "Failed to build sandbox CR blueprint")
 			allErrors = errors.Join(allErrors, err)
@@ -415,6 +419,7 @@ func (r *SandboxWarmPoolReconciler) fetchTemplateAndHash(ctx context.Context, wa
 
 // buildSandboxCR constructs the base Sandbox CR (with pod template and volume claim templates) for the warm pool.
 func (r *SandboxWarmPoolReconciler) buildSandboxCR(
+	ctx context.Context,
 	warmPool *extensionsv1beta1.SandboxWarmPool,
 	poolNameHash string,
 	template *extensionsv1beta1.SandboxTemplate,
@@ -430,9 +435,13 @@ func (r *SandboxWarmPoolReconciler) buildSandboxCR(
 		sandboxv1beta1.CreatedByLabel:                        "controller",
 	}
 
-	// Build annotations for the Sandbox CR
 	sandboxAnnotations := map[string]string{
 		sandboxv1beta1.SandboxTemplateRefAnnotation: warmPool.Spec.TemplateRef.Name,
+	}
+	if r.Tracer != nil {
+		if tc := r.Tracer.GetTraceContext(ctx); tc != "" {
+			sandboxAnnotations[asmetrics.TraceContextAnnotation] = tc
+		}
 	}
 
 	sandbox := &sandboxv1beta1.Sandbox{

@@ -125,11 +125,11 @@ func (o *options) bindFlags() {
 	flag.IntVar(&o.pprofMutexProfileFraction, "pprof-mutex-profile-fraction", 10,
 		"Mutex contention sampling rate for /debug/pprof/mutex when --enable-pprof-debug is set. "+
 			"<=0 disables; 1 samples all events; N>1 samples ~1/N events (e.g. 10 ~= 1/10, 100 ~= 1/100).")
-	flag.Float64Var(&o.kubeAPIQPS, "kube-api-qps", -1.0, "Client-side QPS limit for the Kubernetes API client (default: -1, no client-side rate limiting)")
-	flag.IntVar(&o.kubeAPIBurst, "kube-api-burst", 10, "The maximum burst for client-side throttling of the Kubernetes API client.")
-	flag.IntVar(&o.sandboxWorkers, "sandbox-concurrent-workers", 1, "Max concurrent reconciles for the Sandbox controller")
-	flag.IntVar(&o.claimWorkers, "sandbox-claim-concurrent-workers", 50, "Max concurrent reconciles for the SandboxClaim controller")
-	flag.IntVar(&o.warmPoolWorkers, "sandbox-warm-pool-concurrent-workers", 1, "Max concurrent reconciles for the SandboxWarmPool controller")
+	flag.Float64Var(&o.kubeAPIQPS, "kube-api-qps", 200, "Client-side QPS limit for the Kubernetes API client; a negative value disables client-side rate limiting entirely, which also makes --kube-api-burst meaningless.")
+	flag.IntVar(&o.kubeAPIBurst, "kube-api-burst", 400, "Burst for client-side throttling of the Kubernetes API client. Ignored when --kube-api-qps is negative.")
+	flag.IntVar(&o.sandboxWorkers, "sandbox-concurrent-workers", 16, "Max concurrent reconciles for the Sandbox controller")
+	flag.IntVar(&o.claimWorkers, "sandbox-claim-concurrent-workers", 20, "Max concurrent reconciles for the SandboxClaim controller")
+	flag.IntVar(&o.warmPoolWorkers, "sandbox-warm-pool-concurrent-workers", 8, "Max concurrent reconciles for the SandboxWarmPool controller")
 	flag.IntVar(&o.templateWorkers, "sandbox-template-concurrent-workers", 1, "Max concurrent reconciles for the SandboxTemplate controller")
 	flag.IntVar(&o.warmPoolMaxBatchSize, "sandbox-warm-pool-max-batch-size", 300, "Max batch size for parallel sandbox creation and deletion in SandboxWarmPool controller. Default is 300.")
 	flag.BoolVar(&o.enableWarmPoolEviction, "enable-warm-pool-eviction", true, "Mark pods created by a warm pool as ready-to-evict by default.")
@@ -407,6 +407,7 @@ func (o *options) setupExtensionControllers(mgr ctrl.Manager, instrumenter asmet
 		MaxBatchSize:               o.warmPoolMaxBatchSize,
 		EnableWarmPoolEviction:     o.enableWarmPoolEviction,
 		DisableSandboxCRManagement: o.warmPoolDisableCRManage,
+		Tracer:                     instrumenter,
 	}).SetupWithManager(mgr, o.warmPoolWorkers); err != nil {
 		return fmt.Errorf("controller SandboxWarmPool: %w", err)
 	}
