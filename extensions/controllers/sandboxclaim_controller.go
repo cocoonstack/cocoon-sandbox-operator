@@ -388,9 +388,9 @@ func soonerRequeue(pending, proposed time.Duration) time.Duration {
 }
 
 // stageAnnotations records the observability and trace annotations on claim in
-// memory and returns the writer that persists them. Any full-object write to the
-// claim earlier in the pass — adoption's Update — already carries them, which the
-// returned writer detects and skips.
+// memory and returns the writer that persists them. Adoption writes the whole
+// claim, so on the warm path its Update carries them and the writer costs
+// nothing; every other pass pays one metadata patch, as before.
 func (r *SandboxClaimReconciler) stageAnnotations(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) func() error {
 	traceContext := r.Tracer.GetTraceContext(ctx)
 	needObservability := claim.Annotations[asmetrics.ObservabilityAnnotation] == ""
@@ -410,15 +410,37 @@ func (r *SandboxClaimReconciler) stageAnnotations(ctx context.Context, claim *ex
 		claim.Annotations[asmetrics.TraceContextAnnotation] = traceContext
 	}
 
-	staged := claim.ResourceVersion
+	staged := maps.Clone(claim.Annotations)
+	startRV := claim.ResourceVersion
 	return func() error {
-		// A metadata write this pass advanced the resourceVersion and carried the
-		// staged annotations with it. Status writes happen only after this runs.
-		if claim.ResourceVersion != staged {
+		// Every write decodes the server's copy back into claim, so a partial
+		// patch by another step (legacy-label migration, stale-reference clearing)
+		// strips the staged values even though it advanced the resourceVersion.
+		// Only "values survived AND something wrote" proves a full-object write
+		// carried them; anything else still needs this patch.
+		if claim.ResourceVersion != startRV && stagedAnnotationsSurvived(claim, staged) {
 			return nil
 		}
-		return r.Patch(ctx, claim, client.MergeFrom(before))
+		restage := claim.DeepCopy()
+		for k, v := range staged {
+			if restage.Annotations == nil {
+				restage.Annotations = make(map[string]string)
+			}
+			restage.Annotations[k] = v
+		}
+		return r.Patch(ctx, restage, client.MergeFrom(before))
 	}
+}
+
+// stagedAnnotationsSurvived reports whether every staged annotation is still on
+// the claim after the writes this pass made.
+func stagedAnnotationsSurvived(claim *extensionsv1beta1.SandboxClaim, staged map[string]string) bool {
+	for _, k := range []string{asmetrics.ObservabilityAnnotation, asmetrics.TraceContextAnnotation} {
+		if want, ok := staged[k]; ok && claim.Annotations[k] != want {
+			return false
+		}
+	}
+	return true
 }
 
 // syncAdoptedSandboxMetadata brings a found or adopted Sandbox's pod template in

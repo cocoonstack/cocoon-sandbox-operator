@@ -5261,6 +5261,36 @@ func TestExpiredClaimStillPersistsItsObservabilityAnnotation(t *testing.T) {
 		"the expired path returned before flushing, so the staged annotation was lost")
 }
 
+func TestStagedAnnotationsSurviveAPartialClaimPatch(t *testing.T) {
+	// A partial patch (legacy-label migration, stale-reference clearing) advances
+	// the resourceVersion but its MergeFrom base was taken after staging, so its
+	// body carries only its own change. Treating any RV bump as "already written"
+	// would drop the observability annotation for this pass.
+	scheme := newScheme(t)
+	claim := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "c", Namespace: "default", UID: "c-uid",
+			Labels: map[string]string{extensionsv1beta1.DeprecatedAssignedSandboxNameLabel: "sb-legacy"},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(claim).Build()
+	r := &SandboxClaimReconciler{Client: fakeClient, Scheme: scheme, Tracer: asmetrics.NewNoOp()}
+
+	live := &extensionsv1beta1.SandboxClaim{}
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, live))
+
+	flush := r.stageAnnotations(t.Context(), live)
+	require.NoError(t, r.migrateLegacyAssignedSandboxLabel(t.Context(), live, "sb-legacy"))
+	require.NoError(t, flush())
+
+	stored := &extensionsv1beta1.SandboxClaim{}
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, stored))
+	require.NotEmpty(t, stored.Annotations[asmetrics.ObservabilityAnnotation],
+		"a partial patch bumped the resourceVersion and the staged annotation was dropped")
+	require.Equal(t, "sb-legacy", stored.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation],
+		"the migration's own change must survive too")
+}
+
 func newScheme(t *testing.T) *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
