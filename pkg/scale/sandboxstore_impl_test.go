@@ -244,6 +244,35 @@ func TestNodeInventory_DeepCopyIsIndependent(t *testing.T) {
 	assert.Equal(t, "n1", clone.Node)
 }
 
+func TestWatchStillDeliversPromptlyAfterBackingOff(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(inv("n1", entry("sb-1", "Running")))
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithWatchPollInterval(10*time.Millisecond))
+
+	w, err := store.Watch(t.Context(), ListOptions{})
+	require.NoError(t, err)
+	defer w.Stop()
+
+	ev := <-w.ResultChan()
+	require.Equal(t, watch.Added, ev.Type)
+
+	// Let the quiet loop stretch its interval to the cap, then change the fleet.
+	time.Sleep(200 * time.Millisecond)
+	src.Put(inv("n1", entry("sb-1", "Running"), entry("sb-2", "Running")))
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-w.ResultChan():
+			if ev.Type == watch.Added {
+				return
+			}
+		case <-deadline:
+			t.Fatal("a change after the backoff was never delivered")
+		}
+	}
+}
+
 func inv(node string, entries ...InventoryEntry) *NodeInventory {
 	return &NodeInventory{
 		ObjectMeta: metav1.ObjectMeta{Name: node},

@@ -57,6 +57,9 @@ const (
 	sandboxdMaxIdleConns        = 256
 	sandboxdMaxIdleConnsPerHost = 32
 	sandboxdIdleConnTimeout     = 90 * time.Second
+
+	// watchIdleBackoffFactor caps how far a quiet watch stretches its poll.
+	watchIdleBackoffFactor = 8
 )
 
 // NodeInventoryGVK is the GroupVersionKind of the O(nodes) intent object the
@@ -464,20 +467,26 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 		}
 	}
 
-	ticker := time.NewTicker(s.watchPoll)
-	defer ticker.Stop()
+	// Re-deriving the fleet view is O(nodes x sandboxes) — 40ms at 200 nodes and
+	// 50k sandboxes — so a quiet watch backs off instead of paying that every
+	// tick. Any observed change drops straight back to the base interval.
+	interval := s.watchPoll
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-w.done:
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			list, err := s.List(ctx, opts)
 			if err != nil {
 				s.log.Error(err, "watch poll list failed")
+				timer.Reset(interval)
 				continue
 			}
+			changed := false
 			cur := make(map[string]*sandboxv1beta1.Sandbox, len(list.Items))
 			for i := range list.Items {
 				sb := list.Items[i].DeepCopy()
@@ -486,10 +495,12 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 				prev, ok := known[k]
 				switch {
 				case !ok:
+					changed = true
 					if !emit(watch.Added, sb) {
 						return
 					}
 				case prev.ResourceVersion != sb.ResourceVersion:
+					changed = true
 					if !emit(watch.Modified, sb) {
 						return
 					}
@@ -497,12 +508,20 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 			}
 			for k, prev := range known {
 				if _, ok := cur[k]; !ok {
+					changed = true
 					if !emit(watch.Deleted, prev) {
 						return
 					}
 				}
 			}
 			known = cur
+
+			if changed {
+				interval = s.watchPoll
+			} else {
+				interval = min(interval*2, s.watchPoll*watchIdleBackoffFactor)
+			}
+			timer.Reset(interval)
 		}
 	}
 }
