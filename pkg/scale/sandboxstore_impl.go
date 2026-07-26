@@ -397,7 +397,9 @@ func pickPowerOfTwo(candidates []warmCandidate) warmCandidate {
 	if len(candidates) == 1 {
 		return candidates[0]
 	}
+	//nolint:gosec // load spreading, not a security decision
 	a := candidates[rand.IntN(len(candidates))]
+	//nolint:gosec // load spreading, not a security decision
 	b := candidates[rand.IntN(len(candidates))]
 	if b.warm > a.warm {
 		return b

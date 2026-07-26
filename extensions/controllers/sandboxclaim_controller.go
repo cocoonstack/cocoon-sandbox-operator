@@ -286,7 +286,7 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Update Status & Events
 	r.computeAndSetStatus(claim, sandbox, reconcileErr, claimExpired)
-	postExpiration, postTimeLeft := r.checkExpiration(claim)
+	postExpiration, _ := r.checkExpiration(claim)
 	if postExpiration && !hasClaimExpiredCondition(claim.Status.Conditions) {
 		meta.SetStatusCondition(&claim.Status.Conditions, r.computeReadyCondition(claim, sandbox, reconcileErr, true))
 		if updateErr := r.updateStatus(ctx, originalClaimStatus, claim); updateErr != nil {
@@ -308,60 +308,66 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	r.recordCreationLatencyMetric(ctx, claim, originalClaimStatus, sandbox)
 
-	// Determine Result
+	result, deferred := r.resultFor(ctx, claim, reconcileErr, claimExpired)
+	if deferred {
+		return result, nil
+	}
+	logger.V(1).Info("End of Reconcile loop SandboxClaim", "result", result, "error", reconcileErr, "request", req.NamespacedName)
+	return result, reconcileErr
+}
+
+// resultFor turns the reconcile outcome into a requeue decision. The bool reports
+// that the error is deliberately swallowed: a missing dependency, an adoption
+// waiting on cache convergence, or a user-configuration error that must not drive
+// the workqueue's exponential backoff.
+func (r *SandboxClaimReconciler) resultFor(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, reconcileErr error, claimExpired bool) (ctrl.Result, bool) {
+	logger := log.FromContext(ctx)
+	postExpiration, postTimeLeft := r.checkExpiration(claim)
+
 	var result ctrl.Result
 	if !claimExpired {
-		if postExpiration {
+		switch {
+		case postExpiration:
 			result = ctrl.Result{RequeueAfter: immediateRequeueDelay}
-		} else if postTimeLeft > 0 {
+		case postTimeLeft > 0:
 			result = ctrl.Result{RequeueAfter: postTimeLeft}
 		}
 	}
 
-	// Requeue if dependency is missing, but don't return error to avoid log spam
+	// A dependency that has not been created yet is normal during rollout, not a
+	// failure to back off from.
+	// TODO: This 1-minute requeue creates a latency regression vs an immediate watch
+	// trigger. Consider a lightweight SandboxTemplate -> claims map watch.
 	if errors.Is(reconcileErr, ErrWarmPoolNotFound) || errors.Is(reconcileErr, ErrTemplateNotFound) {
-		if errors.Is(reconcileErr, ErrWarmPoolNotFound) {
-			logger.V(1).Info("SandboxWarmPool not found yet, will retry", "warmPool", claim.Spec.WarmPoolRef.Name, "error", reconcileErr)
-		} else {
-			logger.V(1).Info("SandboxTemplate of the warmpool not found yet, will retry", "warmPool", claim.Spec.WarmPoolRef.Name, "error", reconcileErr)
-		}
-
-		// TODO: This 1-minute requeue creates a latency regression vs an immediate watch trigger.
-		// Consider adding a lightweight SandboxTemplate -> claims map watch to reconcile promptly.
-		requeueDelay := 1 * time.Minute
-		if result.RequeueAfter > 0 && result.RequeueAfter < requeueDelay {
-			requeueDelay = result.RequeueAfter
-		}
-		return ctrl.Result{RequeueAfter: requeueDelay}, nil
+		logger.V(1).Info("Dependency not found yet, will retry", "warmPool", claim.Spec.WarmPoolRef.Name, "error", reconcileErr)
+		return ctrl.Result{RequeueAfter: soonerRequeue(result.RequeueAfter, time.Minute)}, true
 	}
 
-	// Adoption was just triggered for a warm-pool sandbox. The sandbox is now patched
-	// to us, but the informer cache may still show the warm-pool owner. Requeue
-	// with a bounded delay to let the cache converge, WITHOUT returning an
-	// error: returning an error would route through the exponential failure rate
-	// limiter (and, under bursts, the shared 10qps bucket limiter), and because this
-	// same retry recurs on each pass until the cache catches up the backoff compounds
-	// (5ms*(2^k-1)) and adoption tail latency balloons (#1107). The nil error lets the
-	// workqueue Forget the key, resetting the failure counter. Status is intentionally
-	// not finalized with the sandbox on this pass (sandbox is nil here), preserving the
-	// duplicate-adoption protection during cache lag.
+	// Adoption patched the sandbox to us but the informer cache may still show the
+	// warm-pool owner. Requeue without an error: an error routes through the
+	// exponential failure rate limiter, and because this same retry recurs each pass
+	// until the cache catches up the backoff compounds (#1107). A nil error lets the
+	// workqueue Forget the key. Status is intentionally not finalized on this pass,
+	// preserving the duplicate-adoption protection during cache lag.
 	if errors.Is(reconcileErr, errAdoptionTriggeredRetry) {
 		logger.V(4).Info("Adoption triggered; requeueing to let cache converge", "claim", claim.Name, "error", reconcileErr)
-		requeueDelay := adoptionCacheLagRequeueDelay
-		if result.RequeueAfter > 0 && result.RequeueAfter < requeueDelay {
-			requeueDelay = result.RequeueAfter
-		}
-		return ctrl.Result{RequeueAfter: requeueDelay}, nil
+		return ctrl.Result{RequeueAfter: soonerRequeue(result.RequeueAfter, adoptionCacheLagRequeueDelay)}, true
 	}
 
-	// Suppress user configuration and validation errors to avoid crash loops
 	if shouldSuppressError(reconcileErr) {
-		logger.V(1).Info("Sandboxclaim suppressed error(s) encountered", "error", reconcileErr, "request", req.NamespacedName)
-		return result, nil
+		logger.V(1).Info("Sandboxclaim suppressed error(s) encountered", "error", reconcileErr, "claim", claim.Name)
+		return result, true
 	}
+	return result, false
+}
 
-	logger.V(1).Info("End of Reconcile loop SandboxClaim", "result", result, "error", reconcileErr, "request", req.NamespacedName)
-	return result, reconcileErr
+// soonerRequeue returns the earlier of a pending requeue and a proposed delay,
+// treating a zero pending requeue as "none scheduled".
+func soonerRequeue(pending, proposed time.Duration) time.Duration {
+	if pending > 0 && pending < proposed {
+		return pending
+	}
+	return proposed
 }
 
 // stageAnnotations records the observability and trace annotations on claim in
@@ -398,6 +404,77 @@ func (r *SandboxClaimReconciler) stageAnnotations(ctx context.Context, claim *ex
 	}
 }
 
+// syncAdoptedSandboxMetadata brings a found or adopted Sandbox's pod template in
+// line with the claim. The template is best-effort: without it there is nothing to
+// merge, unless the claim carries metadata that must be propagated.
+func (r *SandboxClaimReconciler) syncAdoptedSandboxMetadata(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, sandbox *v1beta1.Sandbox) error {
+	logger := log.FromContext(ctx)
+	logger.V(1).Info("Fast path: sandbox found or adopted, reconciling network policy", "claim", claim.Name)
+
+	template, templateErr := r.getTemplate(ctx, claim)
+	if templateErr != nil {
+		logger.Error(templateErr, "failed to get template of the warmpool for network policy reconciliation (non-fatal)", "claim", claim.Name, "warmPool", claim.Spec.WarmPoolRef.Name)
+		// Metadata to propagate with no template to merge it into would silently
+		// break the "no overrides" rule, so fail instead.
+		if len(claim.Spec.AdditionalPodMetadata.Labels) > 0 || len(claim.Spec.AdditionalPodMetadata.Annotations) > 0 {
+			return fmt.Errorf("failed to get template for metadata propagation: %w", templateErr)
+		}
+	}
+	if template == nil {
+		return nil
+	}
+
+	patch := client.MergeFrom(sandbox.DeepCopy())
+	var mergedMeta v1beta1.PodMetadata
+	template.Spec.PodTemplate.ObjectMeta.DeepCopyInto(&mergedMeta)
+	if mergedMeta.Labels == nil {
+		mergedMeta.Labels = make(map[string]string)
+	}
+	templateHash := SandboxTemplateRefHash(template.Name)
+	createdBy := claim.Labels[v1beta1.CreatedByLabel]
+	mergedMeta.Labels[extensionsv1beta1.SandboxIDLabel] = string(claim.UID)
+	mergedMeta.Labels[sandboxTemplateRefHash] = templateHash
+	// A claim without the label must clear it, so a warm sandbox never keeps a
+	// stale created-by from whoever held it before.
+	setOrDeleteLabel(mergedMeta.Labels, v1beta1.CreatedByLabel, createdBy)
+
+	if err := r.mergePodMetadata(&mergedMeta, &claim.Spec.AdditionalPodMetadata); err != nil {
+		return err
+	}
+
+	needsUpdate := !equality.Semantic.DeepEqual(&mergedMeta, &sandbox.Spec.PodTemplate.ObjectMeta)
+	if sandbox.Labels == nil {
+		sandbox.Labels = make(map[string]string)
+	}
+	needsUpdate = setOrDeleteLabel(sandbox.Labels, sandboxTemplateRefHash, templateHash) || needsUpdate
+	needsUpdate = setOrDeleteLabel(sandbox.Labels, v1beta1.CreatedByLabel, createdBy) || needsUpdate
+	if !needsUpdate {
+		return nil
+	}
+
+	logger.V(1).Info("Updating sandbox metadata to match claim", "claim", claim.Name, "sandbox", sandbox.Name)
+	sandbox.Spec.PodTemplate.ObjectMeta = mergedMeta
+	if err := r.Patch(ctx, sandbox, patch); err != nil {
+		return fmt.Errorf("failed to patch sandbox metadata for claim %q: %w", claim.Name, err)
+	}
+	return nil
+}
+
+// setOrDeleteLabel forces labels[key] to want, removing the entry when want is
+// empty. It reports whether labels changed.
+func setOrDeleteLabel(labels map[string]string, key, want string) bool {
+	if want == "" {
+		_, existed := labels[key]
+		delete(labels, key)
+		return existed
+	}
+	if labels[key] == want {
+		return false
+	}
+	labels[key] = want
+	return true
+}
+
 // checkExpiration calculates if the claim is expired and how much time is left.
 func (r *SandboxClaimReconciler) checkExpiration(claim *extensionsv1beta1.SandboxClaim) (bool, time.Duration) {
 	if claim.Spec.Lifecycle == nil {
@@ -425,76 +502,7 @@ func (r *SandboxClaimReconciler) reconcileActive(ctx context.Context, claim *ext
 		return nil, err
 	}
 	if sandbox != nil {
-		// Found or adopted. Reconcile network policy (best effort, non blocking).
-		logger.V(1).Info("Fast path: sandbox found or adopted, reconciling network policy", "claim", claim.Name)
-		template, templateErr := r.getTemplate(ctx, claim)
-		if templateErr != nil {
-			logger.Error(templateErr, "failed to get template of the warmpool for network policy reconciliation (non-fatal)", "claim", claim.Name, "warmPool", claim.Spec.WarmPoolRef.Name)
-
-			// If we can't get the template but we have metadata to propagate, we should fail
-			// to ensure consistency and enforce the "No Overrides" rule.
-			if len(claim.Spec.AdditionalPodMetadata.Labels) > 0 || len(claim.Spec.AdditionalPodMetadata.Annotations) > 0 {
-				return nil, fmt.Errorf("failed to get template for metadata propagation: %w", templateErr)
-			}
-		}
-
-		if template != nil {
-			patch := client.MergeFrom(sandbox.DeepCopy())
-			// Check if metadata needs update
-			var mergedMeta v1beta1.PodMetadata
-			template.Spec.PodTemplate.ObjectMeta.DeepCopyInto(&mergedMeta)
-
-			// Preserve system-injected labels
-			if mergedMeta.Labels == nil {
-				mergedMeta.Labels = make(map[string]string)
-			}
-			templateHash := SandboxTemplateRefHash(template.Name)
-			mergedMeta.Labels[extensionsv1beta1.SandboxIDLabel] = string(claim.UID)
-			mergedMeta.Labels[sandboxTemplateRefHash] = templateHash
-			// Sync the created-by label to the Pod template. If the claim does not have it,
-			// we remove it to ensure consistency with cold starts and prevent stale label values.
-			if val, ok := claim.Labels[v1beta1.CreatedByLabel]; ok && val != "" {
-				mergedMeta.Labels[v1beta1.CreatedByLabel] = val
-			} else {
-				delete(mergedMeta.Labels, v1beta1.CreatedByLabel)
-			}
-
-			if err := r.mergePodMetadata(&mergedMeta, &claim.Spec.AdditionalPodMetadata); err != nil {
-				return nil, err
-			}
-
-			needsUpdate := !equality.Semantic.DeepEqual(&mergedMeta, &sandbox.Spec.PodTemplate.ObjectMeta)
-			if sandbox.Labels[sandboxTemplateRefHash] != templateHash {
-				if sandbox.Labels == nil {
-					sandbox.Labels = make(map[string]string)
-				}
-				sandbox.Labels[sandboxTemplateRefHash] = templateHash
-				needsUpdate = true
-			}
-			if val, ok := claim.Labels[v1beta1.CreatedByLabel]; ok && val != "" {
-				if sandbox.Labels[v1beta1.CreatedByLabel] != val {
-					if sandbox.Labels == nil {
-						sandbox.Labels = make(map[string]string)
-					}
-					sandbox.Labels[v1beta1.CreatedByLabel] = val
-					needsUpdate = true
-				}
-			} else {
-				if _, exists := sandbox.Labels[v1beta1.CreatedByLabel]; exists {
-					delete(sandbox.Labels, v1beta1.CreatedByLabel)
-					needsUpdate = true
-				}
-			}
-
-			if needsUpdate {
-				logger.V(1).Info("Updating sandbox metadata to match claim", "claim", claim.Name, "sandbox", sandbox.Name)
-				sandbox.Spec.PodTemplate.ObjectMeta = mergedMeta
-				if updateErr := r.Patch(ctx, sandbox, patch); updateErr != nil {
-					return sandbox, fmt.Errorf("failed to patch sandbox metadata for claim %q: %w", claim.Name, updateErr)
-				}
-			}
-		}
-		return sandbox, nil
+		return sandbox, r.syncAdoptedSandboxMetadata(ctx, claim, sandbox)
 	}
 
 	// Cold path: no existing sandbox or warm pool candidate.
@@ -1315,72 +1323,8 @@ func (r *SandboxClaimReconciler) createSandbox(ctx context.Context, claim *exten
 		return nil, err
 	}
 
-	// Inject environment variables from the SandboxClaim
-	if len(claim.Spec.Env) > 0 {
-		if template.Spec.EnvVarsInjectionPolicy != extensionsv1beta1.EnvVarsInjectionPolicyAllowed && template.Spec.EnvVarsInjectionPolicy != extensionsv1beta1.EnvVarsInjectionPolicyOverrides {
-			err := fmt.Errorf("%w: environment variable injection is not allowed by the template policy", ErrEnvVarsInjectionRejected)
-			logger.Error(err, "Environment variable injection rejected", "claimName", claim.Name)
-			return nil, err
-		}
-
-		// Group envs by container name for efficient lookup.
-		envsByContainer := make(map[string][]extensionsv1beta1.EnvVar)
-		defaultEnvs := []extensionsv1beta1.EnvVar{}
-		for _, env := range claim.Spec.Env {
-			if env.ContainerName == "" {
-				defaultEnvs = append(defaultEnvs, env)
-			} else {
-				envsByContainer[env.ContainerName] = append(envsByContainer[env.ContainerName], env)
-			}
-		}
-
-		// Validate that all targeted containers exist.
-		allContainerNames := make(map[string]struct{})
-		for _, c := range sandbox.Spec.PodTemplate.Spec.InitContainers {
-			allContainerNames[c.Name] = struct{}{}
-		}
-		for _, c := range sandbox.Spec.PodTemplate.Spec.Containers {
-			allContainerNames[c.Name] = struct{}{}
-		}
-		for containerName := range envsByContainer {
-			if _, ok := allContainerNames[containerName]; !ok {
-				err := fmt.Errorf("target container %q not found in template", containerName)
-				// To provide a more helpful error, we find which env var caused it.
-				for _, e := range envsByContainer[containerName] {
-					err = fmt.Errorf("target container %q not found in template for environment variable %q", containerName, e.Name)
-					break
-				}
-				logger.Error(err, "Environment variable injection rejected: container not found", "claimName", claim.Name)
-				return nil, err
-			}
-		}
-
-		// Inject into init containers
-		for i := range sandbox.Spec.PodTemplate.Spec.InitContainers {
-			container := &sandbox.Spec.PodTemplate.Spec.InitContainers[i]
-			if envs, ok := envsByContainer[container.Name]; ok {
-				if err := r.injectEnvs(logger, container, envs, template.Spec.EnvVarsInjectionPolicy, claim.Name); err != nil {
-					return nil, err
-				}
-			}
-		}
-
-		// Inject into regular containers
-		for i := range sandbox.Spec.PodTemplate.Spec.Containers {
-			container := &sandbox.Spec.PodTemplate.Spec.Containers[i]
-			var envsToInject []extensionsv1beta1.EnvVar
-			if envs, ok := envsByContainer[container.Name]; ok {
-				envsToInject = append(envsToInject, envs...)
-			}
-			if i == 0 { // Default envs go to the first main container
-				envsToInject = append(envsToInject, defaultEnvs...)
-			}
-			if len(envsToInject) > 0 {
-				if err := r.injectEnvs(logger, container, envsToInject, template.Spec.EnvVarsInjectionPolicy, claim.Name); err != nil {
-					return nil, err
-				}
-			}
-		}
+	if err := r.injectClaimEnv(logger, claim, template, &sandbox.Spec.PodTemplate.Spec); err != nil {
+		return nil, err
 	}
 
 	// Apply secure defaults to the sandbox pod spec
@@ -1407,6 +1351,69 @@ func (r *SandboxClaimReconciler) createSandbox(ctx context.Context, claim *exten
 	asmetrics.RecordSandboxClaimCreation(claim.Namespace, template.Name, asmetrics.LaunchTypeCold, claim.Spec.WarmPoolRef.Name, "not_ready", claim.Labels[v1beta1.CreatedByLabel])
 
 	return sandbox, nil
+}
+
+// injectClaimEnv applies the claim's environment variables to the pod spec. An
+// unnamed container targets the first main container; a named one that the
+// template does not declare is rejected rather than silently dropped.
+func (r *SandboxClaimReconciler) injectClaimEnv(logger logr.Logger, claim *extensionsv1beta1.SandboxClaim, template *extensionsv1beta1.SandboxTemplate, spec *corev1.PodSpec) error {
+	if len(claim.Spec.Env) == 0 {
+		return nil
+	}
+	policy := template.Spec.EnvVarsInjectionPolicy
+	if policy != extensionsv1beta1.EnvVarsInjectionPolicyAllowed && policy != extensionsv1beta1.EnvVarsInjectionPolicyOverrides {
+		err := fmt.Errorf("%w: environment variable injection is not allowed by the template policy", ErrEnvVarsInjectionRejected)
+		logger.Error(err, "Environment variable injection rejected", "claimName", claim.Name)
+		return err
+	}
+
+	envsByContainer := make(map[string][]extensionsv1beta1.EnvVar)
+	var defaultEnvs []extensionsv1beta1.EnvVar
+	for _, env := range claim.Spec.Env {
+		if env.ContainerName == "" {
+			defaultEnvs = append(defaultEnvs, env)
+			continue
+		}
+		envsByContainer[env.ContainerName] = append(envsByContainer[env.ContainerName], env)
+	}
+
+	declared := make(map[string]struct{}, len(spec.InitContainers)+len(spec.Containers))
+	for _, c := range slices.Concat(spec.InitContainers, spec.Containers) {
+		declared[c.Name] = struct{}{}
+	}
+	for name, envs := range envsByContainer {
+		if _, ok := declared[name]; ok {
+			continue
+		}
+		err := fmt.Errorf("target container %q not found in template", name)
+		if len(envs) > 0 {
+			err = fmt.Errorf("target container %q not found in template for environment variable %q", name, envs[0].Name)
+		}
+		logger.Error(err, "Environment variable injection rejected: container not found", "claimName", claim.Name)
+		return err
+	}
+
+	for i := range spec.InitContainers {
+		container := &spec.InitContainers[i]
+		if envs := envsByContainer[container.Name]; len(envs) > 0 {
+			if err := r.injectEnvs(logger, container, envs, policy, claim.Name); err != nil {
+				return err
+			}
+		}
+	}
+	for i := range spec.Containers {
+		container := &spec.Containers[i]
+		envs := envsByContainer[container.Name]
+		if i == 0 {
+			envs = slices.Concat(envs, defaultEnvs)
+		}
+		if len(envs) > 0 {
+			if err := r.injectEnvs(logger, container, envs, policy, claim.Name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func mergeVolumeClaimTemplates(
@@ -1507,176 +1514,206 @@ func (r *SandboxClaimReconciler) getOrCreateSandbox(ctx context.Context, claim *
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("Executing getOrCreateSandbox", "claim", claim.Name)
 
-	// Check if a previously adopted sandbox is recorded in claim status
-	if statusName := claim.Status.SandboxStatus.Name; statusName != "" {
-		logger.V(1).Info("Checking status for sandbox name", "claim.Status.SandboxStatus.Name", statusName, "claim", claim.Name)
-		sandbox := &v1beta1.Sandbox{}
-		if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: statusName}, sandbox); err == nil {
-			if metav1.IsControlledBy(sandbox, claim) {
-				logger.V(4).Info("Found existing adopted sandbox from status", "claim.Status.SandboxStatus.Name", statusName, "claim", claim.Name)
-				r.triggeredAdoptions.Delete(types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace})
-				launchType := v1beta1.SandboxLaunchTypeCold
-				if claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation] == statusName ||
-					claim.Labels[extensionsv1beta1.DeprecatedAssignedSandboxNameLabel] == statusName ||
-					statusName != claim.Name {
-					launchType = v1beta1.SandboxLaunchTypeWarm
-				}
-				if err := r.initializeSandboxLaunchTypeLabel(ctx, sandbox, launchType); err != nil {
-					return nil, fmt.Errorf("failed to initialize launch type label on sandbox %q: %w", sandbox.Name, err)
-				}
-				return sandbox, nil
-			}
-		} else if !k8errors.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to get sandbox %q from status: %w", statusName, err)
+	for _, resolve := range []func(context.Context, *extensionsv1beta1.SandboxClaim) (*v1beta1.Sandbox, error){
+		r.sandboxFromStatus,
+		r.sandboxFromClaimMetadata,
+		r.sandboxByClaimName,
+	} {
+		sandbox, err := resolve(ctx, claim)
+		if err != nil || sandbox != nil {
+			return sandbox, err
 		}
 	}
 
-	// Check if a previously adopted sandbox is recorded in claim annotations or legacy labels
-	var sbName string
-	var fromLabel bool
-	if claim.Annotations != nil {
-		sbName = claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation]
+	// Custom configuration cannot be served from the warm pool, so skip the queue
+	// entirely and let the caller cold-start.
+	if len(claim.Spec.Env) > 0 || len(claim.Spec.VolumeClaimTemplates) > 0 {
+		logger.Info("Bypassing warm pool adoption because custom configuration is provided (env or volume claim templates)", "claim", claim.Name)
+		return nil, nil
 	}
-	if sbName == "" && claim.Labels != nil {
-		sbName = claim.Labels[extensionsv1beta1.DeprecatedAssignedSandboxNameLabel]
-		if sbName != "" {
-			fromLabel = true
+	return r.adoptSandboxFromCandidates(ctx, claim)
+}
+
+// sandboxFromStatus returns the Sandbox recorded in claim status, when this claim
+// still controls it. A nil Sandbox and a nil error mean "not resolved here".
+func (r *SandboxClaimReconciler) sandboxFromStatus(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*v1beta1.Sandbox, error) {
+	statusName := claim.Status.SandboxStatus.Name
+	if statusName == "" {
+		return nil, nil
+	}
+	logger := log.FromContext(ctx)
+	logger.V(1).Info("Checking status for sandbox name", "claim.Status.SandboxStatus.Name", statusName, "claim", claim.Name)
+
+	sandbox := &v1beta1.Sandbox{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: statusName}, sandbox); err != nil {
+		if k8errors.IsNotFound(err) {
+			return nil, nil
 		}
+		return nil, fmt.Errorf("failed to get sandbox %q from status: %w", statusName, err)
+	}
+	if !metav1.IsControlledBy(sandbox, claim) {
+		return nil, nil
 	}
 
-	if sbName != "" {
-		logger.V(1).Info("Checking assigned sandbox name", "sandboxName", sbName, "fromLabel", fromLabel, "claim", claim.Name)
-		sandbox := &v1beta1.Sandbox{}
-		if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: sbName}, sandbox); err == nil {
-			if metav1.IsControlledBy(sandbox, claim) {
-				logger.V(4).Info("Found existing adopted sandbox", "sandbox", sbName, "claim", claim.Name)
-				r.triggeredAdoptions.Delete(types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace})
-				if fromLabel {
-					if err := r.migrateLegacyAssignedSandboxLabel(ctx, claim, sbName); err != nil {
-						logger.Error(err, "Failed to migrate legacy sandbox label to annotation (non-fatal)", "claim", claim.Name)
-					} else {
-						logger.Info("Successfully migrated legacy sandbox label to annotation", "claim", claim.Name)
-					}
-				}
-				if err := r.initializeSandboxLaunchTypeLabel(ctx, sandbox, v1beta1.SandboxLaunchTypeWarm); err != nil {
-					return nil, fmt.Errorf("failed to initialize launch type label on sandbox %q: %w", sandbox.Name, err)
-				}
-				return sandbox, nil
-			}
+	logger.V(4).Info("Found existing adopted sandbox from status", "claim.Status.SandboxStatus.Name", statusName, "claim", claim.Name)
+	r.triggeredAdoptions.Delete(types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace})
+	launchType := v1beta1.SandboxLaunchTypeCold
+	if claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation] == statusName ||
+		claim.Labels[extensionsv1beta1.DeprecatedAssignedSandboxNameLabel] == statusName ||
+		statusName != claim.Name {
+		launchType = v1beta1.SandboxLaunchTypeWarm
+	}
+	if err := r.initializeSandboxLaunchTypeLabel(ctx, sandbox, launchType); err != nil {
+		return nil, fmt.Errorf("failed to initialize launch type label on sandbox %q: %w", sandbox.Name, err)
+	}
+	return sandbox, nil
+}
 
-			controllerRef := metav1.GetControllerOf(sandbox)
-			if controllerRef != nil && controllerRef.Kind == warmPoolKind {
-				// Still in warm pool. Try to complete adoption!
-				logger.Info("Sandbox found in claim metadata still in warm pool, trying to complete adoption", "sandbox", sbName, "claim", claim.Name)
-				if err := verifySandboxCandidate(sandbox, claim); err != nil {
-					logger.Info("Sandbox recorded in claim metadata cannot be adopted, removing stale reference", "sandboxName", sbName, "fromLabel", fromLabel, "claim", claim.Name, "reason", err.Error())
-					patch := client.MergeFrom(claim.DeepCopy())
-					if fromLabel {
-						delete(claim.Labels, extensionsv1beta1.DeprecatedAssignedSandboxNameLabel)
-					} else {
-						delete(claim.Annotations, extensionsv1beta1.AssignedSandboxNameAnnotation)
-					}
-					if err := r.Patch(ctx, claim, patch); err != nil {
-						return nil, fmt.Errorf("failed to remove invalid sandbox reference: %w", err)
-					}
-				} else {
-					// If we already sent the adoption patch for this exact claim+sandbox,
-					// the cache just hasn't converged yet — keep waiting via the bounded
-					// requeue without re-sending the (idempotent but redundant) patch.
-					adoptionKey := types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace}
-					if prev, ok := r.triggeredAdoptions.Load(adoptionKey); ok && prev.uid == claim.UID && prev.sandbox == sbName {
-						logger.V(4).Info("Adoption already triggered, waiting for cache to converge", "sandbox", sbName, "claim", claim.Name)
-						return nil, fmt.Errorf("%w: sandbox %s", errAdoptionTriggeredRetry, sbName)
-					}
-					if err := r.completeAdoption(ctx, claim, sandbox); err != nil {
-						if k8errors.IsNotFound(err) || k8errors.IsConflict(err) {
-							logger.V(4).Info("Failed to complete adoption (conflict/notfound), falling through", "sandbox", sbName, "claim", claim.Name)
-						} else {
-							return nil, fmt.Errorf("failed to complete adoption of %q: %w", sbName, err)
-						}
-					} else {
-						r.triggeredAdoptions.Store(adoptionKey, triggeredAdoptionEntry{uid: claim.UID, sandbox: sbName})
-						if fromLabel {
-							if err := r.migrateLegacyAssignedSandboxLabel(ctx, claim, sbName); err != nil {
-								logger.Error(err, "Failed to migrate legacy sandbox label to annotation during adoption completion", "claim", claim.Name)
-							} else {
-								logger.Info("Successfully migrated legacy sandbox label to annotation during adoption completion", "claim", claim.Name)
-							}
-						}
-						// Adoption was completed in-place (completeAdoption patched our controllerRef
-						// and the Warm label). Signal a retry so a later pass observes the sandbox as
-						// controlled by us once the cache converges. Returned as a sentinel so
-						// Reconcile requeues immediately with a bounded delay rather than routing
-						// through the exponential failure rate limiter (#1107).
-						logger.Info("Triggered adoption completion for sandbox, requeueing", "sandbox", sbName, "claim", claim.Name)
-						return nil, fmt.Errorf("%w: sandbox %s", errAdoptionTriggeredRetry, sbName)
-					}
-				}
-			}
-			logger.V(4).Info("Sandbox recorded in claim metadata belongs to another claim, falling through", "sandbox", sbName, "claim", claim.Name)
-		} else if k8errors.IsNotFound(err) {
-			logger.Info("Sandbox recorded in claim metadata not found, removing stale reference", "sandboxName", sbName, "claim", claim.Name)
-			patch := client.MergeFrom(claim.DeepCopy())
-			if fromLabel {
-				delete(claim.Labels, extensionsv1beta1.DeprecatedAssignedSandboxNameLabel)
-			} else {
-				delete(claim.Annotations, extensionsv1beta1.AssignedSandboxNameAnnotation)
-			}
-			if err := r.Patch(ctx, claim, patch); err != nil {
-				return nil, fmt.Errorf("failed to remove stale sandbox reference from claim metadata: %w", err)
-			}
-			logger.Info("Successfully removed stale sandbox reference from claim metadata", "sandbox", sbName, "claim", claim.Name)
-		} else {
+// sandboxFromClaimMetadata resolves the assigned-sandbox annotation (or the legacy
+// label it replaced). A Sandbox still owned by the warm pool means an adoption is
+// half-finished, which this completes.
+func (r *SandboxClaimReconciler) sandboxFromClaimMetadata(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*v1beta1.Sandbox, error) {
+	sbName, fromLabel := assignedSandboxName(claim)
+	if sbName == "" {
+		return nil, nil
+	}
+	logger := log.FromContext(ctx)
+	logger.V(1).Info("Checking assigned sandbox name", "sandboxName", sbName, "fromLabel", fromLabel, "claim", claim.Name)
+
+	sandbox := &v1beta1.Sandbox{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: sbName}, sandbox); err != nil {
+		if !k8errors.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to get sandbox %q for sandbox name lookup: %w", sbName, err)
 		}
+		logger.Info("Sandbox recorded in claim metadata not found, removing stale reference", "sandboxName", sbName, "claim", claim.Name)
+		if err := r.clearAssignedSandboxName(ctx, claim, fromLabel); err != nil {
+			return nil, fmt.Errorf("failed to remove stale sandbox reference from claim metadata: %w", err)
+		}
+		logger.Info("Successfully removed stale sandbox reference from claim metadata", "sandbox", sbName, "claim", claim.Name)
+		return nil, nil
 	}
 
-	// Try name-based lookup (sandbox created by createSandbox uses claim.Name)
-	logger.V(1).Info("Trying name-based lookup for sandbox", "claim", claim.Name)
-	sandbox := &v1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: claim.Namespace,
-			Name:      claim.Name,
-		},
-	}
-	if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), sandbox); err != nil {
-		sandbox = nil
-		if !k8errors.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to get sandbox %q: %w", claim.Name, err)
-		}
-	}
-
-	if sandbox != nil {
-		logger.V(4).Info("sandbox already exists, skipping update", "name", sandbox.Name)
-		if !metav1.IsControlledBy(sandbox, claim) {
-			err := fmt.Errorf("sandbox %q is not controlled by claim %q. Please use a different claim name or delete the sandbox manually", sandbox.Name, claim.Name)
-			logger.Error(err, "Sandbox controller mismatch")
-			return nil, err
-		}
-		if err := r.initializeSandboxLaunchTypeLabel(ctx, sandbox, v1beta1.SandboxLaunchTypeCold); err != nil {
+	if metav1.IsControlledBy(sandbox, claim) {
+		logger.V(4).Info("Found existing adopted sandbox", "sandbox", sbName, "claim", claim.Name)
+		r.triggeredAdoptions.Delete(types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace})
+		r.migrateLegacyLabelIfNeeded(ctx, claim, sbName, fromLabel, "")
+		if err := r.initializeSandboxLaunchTypeLabel(ctx, sandbox, v1beta1.SandboxLaunchTypeWarm); err != nil {
 			return nil, fmt.Errorf("failed to initialize launch type label on sandbox %q: %w", sandbox.Name, err)
 		}
 		return sandbox, nil
 	}
 
-	// Implicit Cold Start Detection (Bypassing the Queue):
-	// If len(claim.Spec.Env) > 0 or len(claim.Spec.VolumeClaimTemplates) > 0, the controller immediately bypasses the warm pool queue.
-	if len(claim.Spec.Env) > 0 || len(claim.Spec.VolumeClaimTemplates) > 0 {
-		logger.Info("Bypassing warm pool adoption because custom configuration is provided (env or volume claim templates)", "claim", claim.Name)
-		return nil, nil
+	if ref := metav1.GetControllerOf(sandbox); ref != nil && ref.Kind == warmPoolKind {
+		return nil, r.completePendingAdoption(ctx, claim, sandbox, sbName, fromLabel)
+	}
+	logger.V(4).Info("Sandbox recorded in claim metadata belongs to another claim, falling through", "sandbox", sbName, "claim", claim.Name)
+	return nil, nil
+}
+
+// completePendingAdoption finishes an adoption the claim already recorded. It never
+// returns a Sandbox: the caller must requeue so a later pass observes the adopted
+// Sandbox once the informer cache converges.
+func (r *SandboxClaimReconciler) completePendingAdoption(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, sandbox *v1beta1.Sandbox, sbName string, fromLabel bool) error {
+	logger := log.FromContext(ctx)
+	logger.Info("Sandbox found in claim metadata still in warm pool, trying to complete adoption", "sandbox", sbName, "claim", claim.Name)
+
+	if err := verifySandboxCandidate(sandbox, claim); err != nil {
+		logger.Info("Sandbox recorded in claim metadata cannot be adopted, removing stale reference", "sandboxName", sbName, "fromLabel", fromLabel, "claim", claim.Name, "reason", err.Error())
+		if err := r.clearAssignedSandboxName(ctx, claim, fromLabel); err != nil {
+			return fmt.Errorf("failed to remove invalid sandbox reference: %w", err)
+		}
+		return nil
 	}
 
-	// Go to the custom queue instead of standard r.List()
-	adopted, err := r.adoptSandboxFromCandidates(ctx, claim)
-	if err != nil {
+	// The adoption patch is idempotent, but re-sending it while the cache lags adds
+	// nothing; wait out the bounded requeue instead.
+	adoptionKey := types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace}
+	if prev, ok := r.triggeredAdoptions.Load(adoptionKey); ok && prev.uid == claim.UID && prev.sandbox == sbName {
+		logger.V(4).Info("Adoption already triggered, waiting for cache to converge", "sandbox", sbName, "claim", claim.Name)
+		return fmt.Errorf("%w: sandbox %s", errAdoptionTriggeredRetry, sbName)
+	}
+
+	if err := r.completeAdoption(ctx, claim, sandbox); err != nil {
+		if !k8errors.IsNotFound(err) && !k8errors.IsConflict(err) {
+			return fmt.Errorf("failed to complete adoption of %q: %w", sbName, err)
+		}
+		logger.V(4).Info("Failed to complete adoption (conflict/notfound), falling through", "sandbox", sbName, "claim", claim.Name)
+		return nil
+	}
+
+	r.triggeredAdoptions.Store(adoptionKey, triggeredAdoptionEntry{uid: claim.UID, sandbox: sbName})
+	r.migrateLegacyLabelIfNeeded(ctx, claim, sbName, fromLabel, " during adoption completion")
+	// completeAdoption patched our controllerRef and the Warm label. Requeue via the
+	// sentinel so this does not route through the exponential failure rate limiter,
+	// whose compounding backoff ballooned adoption tail latency (#1107).
+	logger.Info("Triggered adoption completion for sandbox, requeueing", "sandbox", sbName, "claim", claim.Name)
+	return fmt.Errorf("%w: sandbox %s", errAdoptionTriggeredRetry, sbName)
+}
+
+// sandboxByClaimName finds the Sandbox that createSandbox would have made, which
+// carries the claim's own name.
+func (r *SandboxClaimReconciler) sandboxByClaimName(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*v1beta1.Sandbox, error) {
+	logger := log.FromContext(ctx)
+	logger.V(1).Info("Trying name-based lookup for sandbox", "claim", claim.Name)
+
+	sandbox := &v1beta1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{Namespace: claim.Namespace, Name: claim.Name},
+	}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), sandbox); err != nil {
+		if k8errors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get sandbox %q: %w", claim.Name, err)
+	}
+
+	logger.V(4).Info("sandbox already exists, skipping update", "name", sandbox.Name)
+	if !metav1.IsControlledBy(sandbox, claim) {
+		err := fmt.Errorf("sandbox %q is not controlled by claim %q. Please use a different claim name or delete the sandbox manually", sandbox.Name, claim.Name)
+		logger.Error(err, "Sandbox controller mismatch")
 		return nil, err
 	}
-	if adopted != nil {
-		return adopted, nil
+	if err := r.initializeSandboxLaunchTypeLabel(ctx, sandbox, v1beta1.SandboxLaunchTypeCold); err != nil {
+		return nil, fmt.Errorf("failed to initialize launch type label on sandbox %q: %w", sandbox.Name, err)
 	}
+	return sandbox, nil
+}
 
-	// No warm pool sandbox available; caller decides whether to create
-	return nil, nil
+// assignedSandboxName reads the assigned-sandbox annotation, falling back to the
+// legacy label and reporting which one carried it.
+func assignedSandboxName(claim *extensionsv1beta1.SandboxClaim) (name string, fromLabel bool) {
+	if name = claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation]; name != "" {
+		return name, false
+	}
+	if name = claim.Labels[extensionsv1beta1.DeprecatedAssignedSandboxNameLabel]; name != "" {
+		return name, true
+	}
+	return "", false
+}
+
+// clearAssignedSandboxName drops a claim's reference to a Sandbox that no longer
+// exists or can no longer be adopted.
+func (r *SandboxClaimReconciler) clearAssignedSandboxName(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, fromLabel bool) error {
+	patch := client.MergeFrom(claim.DeepCopy())
+	if fromLabel {
+		delete(claim.Labels, extensionsv1beta1.DeprecatedAssignedSandboxNameLabel)
+	} else {
+		delete(claim.Annotations, extensionsv1beta1.AssignedSandboxNameAnnotation)
+	}
+	return r.Patch(ctx, claim, patch)
+}
+
+// migrateLegacyLabelIfNeeded moves a legacy assigned-sandbox label onto the
+// annotation. A failure is logged, never fatal: the claim is already resolved.
+func (r *SandboxClaimReconciler) migrateLegacyLabelIfNeeded(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, sbName string, fromLabel bool, phase string) {
+	if !fromLabel {
+		return
+	}
+	logger := log.FromContext(ctx)
+	if err := r.migrateLegacyAssignedSandboxLabel(ctx, claim, sbName); err != nil {
+		logger.Error(err, "Failed to migrate legacy sandbox label to annotation"+phase, "claim", claim.Name)
+		return
+	}
+	logger.Info("Successfully migrated legacy sandbox label to annotation"+phase, "claim", claim.Name)
 }
 
 func (r *SandboxClaimReconciler) initializeSandboxLaunchTypeLabel(ctx context.Context, sandbox *v1beta1.Sandbox, launchType string) error {
