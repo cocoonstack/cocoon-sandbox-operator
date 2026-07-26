@@ -618,11 +618,11 @@ func (r *SandboxWarmPoolReconciler) comparePodSpecs(template *extensionsv1beta1.
 // Making this comparison order-independent without also sorting the templates in computeSandboxBlueprintHash
 // would cause reordered warm sandboxes to fail the hash label check on every reconcile.
 func (r *SandboxWarmPoolReconciler) compareVolumeClaimTemplates(template *extensionsv1beta1.SandboxTemplate, actualVCTs []sandboxv1beta1.PersistentVolumeClaimTemplate) bool {
-	if len(template.Spec.SandboxBlueprint.VolumeClaimTemplates) != len(actualVCTs) {
+	if len(template.Spec.VolumeClaimTemplates) != len(actualVCTs) {
 		return false
 	}
 
-	for i, tmplVCT := range template.Spec.SandboxBlueprint.VolumeClaimTemplates {
+	for i, tmplVCT := range template.Spec.VolumeClaimTemplates {
 		actualVCT := actualVCTs[i]
 		if tmplVCT.Name != actualVCT.Name || !equality.Semantic.DeepEqual(tmplVCT.Spec, actualVCT.Spec) {
 			return false

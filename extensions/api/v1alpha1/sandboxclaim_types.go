@@ -15,9 +15,10 @@
 package v1alpha1
 
 import (
-	sandboxv1alpha1 "github.com/cocoonstack/sandbox-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	sandboxv1alpha1 "github.com/cocoonstack/sandbox-operator/api/v1alpha1"
 )
 
 const (
@@ -25,6 +26,7 @@ const (
 	ClaimExpiredReason = "ClaimExpired"
 
 	// DeprecatedAssignedSandboxNameLabel is the legacy label key applied to the claim to identify the adopted Sandbox name.
+	//
 	// Deprecated: Use AssignedSandboxNameAnnotation instead.
 	DeprecatedAssignedSandboxNameLabel = "agents.x-k8s.io/sandbox-name"
 

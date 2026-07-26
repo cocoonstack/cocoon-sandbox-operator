@@ -185,20 +185,20 @@ func main() {
 	// and leaked ~19k claims. Exactly --total (or, in cycle mode, at most
 	// --target live per cycle with a delete phase in between), or nothing.
 	if o.concurrency <= 0 {
-		fatal("--concurrency must be > 0 (got %d)", o.concurrency)
+		fatalf("--concurrency must be > 0 (got %d)", o.concurrency)
 	}
 	if o.waveSize > 0 {
 		if o.target <= 0 {
-			fatal("--target is required and must be > 0 in cycle mode (got %d)", o.target)
+			fatalf("--target is required and must be > 0 in cycle mode (got %d)", o.target)
 		}
 		if o.deleteConcurrency <= 0 {
-			fatal("--delete-concurrency must be > 0 (got %d)", o.deleteConcurrency)
+			fatalf("--delete-concurrency must be > 0 (got %d)", o.deleteConcurrency)
 		}
 		// Claims must persist until the cycle's delete phase.
 		o.cleanup = false
 	} else {
 		if o.total <= 0 {
-			fatal("--total is required and must be > 0 (got %d): this loadgen issues exactly --total creates and refuses to run unbounded", o.total)
+			fatalf("--total is required and must be > 0 (got %d): this loadgen issues exactly --total creates and refuses to run unbounded", o.total)
 		}
 		if o.concurrency > o.total {
 			o.concurrency = o.total
@@ -216,7 +216,7 @@ func main() {
 
 	cfg, err := config.GetConfig()
 	if err != nil {
-		fatal("load kubeconfig: %v", err)
+		fatalf("load kubeconfig: %v", err)
 	}
 	// Raise client-side throttling well above the default 5 QPS so the loadgen,
 	// not client-go's rate limiter, sets the offered load.
@@ -225,7 +225,7 @@ func main() {
 
 	cl, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
-		fatal("build client: %v", err)
+		fatalf("build client: %v", err)
 	}
 
 	// Shared silkd data-plane client. The entry addr is unused for exec (Attach
@@ -233,7 +233,7 @@ func main() {
 	// it carries matters for the relayed silkd dial.
 	sdkClient, err = sdk.Connect("127.0.0.1:7777")
 	if err != nil {
-		fatal("build sdk client: %v", err)
+		fatalf("build sdk client: %v", err)
 	}
 
 	// Serve metrics for the whole run (and after the bounded run finishes) so
@@ -243,7 +243,7 @@ func main() {
 		mux.Handle("/metrics", promhttp.Handler())
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 		if err := http.ListenAndServe(o.metricsAddr, mux); err != nil { //nolint:gosec // internal metrics endpoint
-			fatal("metrics server: %v", err)
+			fatalf("metrics server: %v", err)
 		}
 	}()
 
@@ -278,7 +278,7 @@ func main() {
 }
 
 // runCycles drives create-in-waves -> delete-all cycles until the context is
-// cancelled (or after one cycle with --loop=false). Sandbox names use a
+// canceled (or after one cycle with --loop=false). Sandbox names use a
 // process-lifetime sequence so a cycle never collides with an undeleted
 // leftover from a previous one.
 func runCycles(ctx context.Context, cl client.Client, o *options) {
@@ -288,10 +288,7 @@ func runCycles(ctx context.Context, cl client.Client, o *options) {
 		fmt.Printf("cycle %d: create phase (target=%d wave=%d concurrency=%d)\n", cycle, o.target, o.waveSize, o.concurrency)
 		issued := 0
 		for issued < o.target && ctx.Err() == nil {
-			n := o.target - issued
-			if n > o.waveSize {
-				n = o.waveSize
-			}
+			n := min(o.target-issued, o.waveSize)
 			phaseGauge.Set(1)
 			s := createBatch(ctx, cl, o, &nameSeq, n)
 			issued += int(s.issued)
@@ -323,9 +320,7 @@ func createBatch(ctx context.Context, cl client.Client, o *options, seq *int64, 
 	start := time.Now()
 	var wg sync.WaitGroup
 	for w := 0; w < o.concurrency; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				if ctx.Err() != nil {
 					return
@@ -343,7 +338,7 @@ func createBatch(ctx context.Context, cl client.Client, o *options, seq *int64, 
 					sleepCtx(ctx, o.interval)
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	s.issued = min64(atomic.LoadInt64(&issued), int64(n))
@@ -365,9 +360,7 @@ func deleteAll(ctx context.Context, cl client.Client, o *options) (listed, delet
 	work := make(chan *sandboxv1beta1.Sandbox)
 	var wg sync.WaitGroup
 	for w := 0; w < o.deleteConcurrency; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for sb := range work {
 				if releaseWithRetry(ctx, cl, o, sb) {
 					atomic.AddInt64(&deleted, 1)
@@ -375,7 +368,7 @@ func deleteAll(ctx context.Context, cl client.Client, o *options) (listed, delet
 					atomic.AddInt64(&leaked, 1)
 				}
 			}
-		}()
+		})
 	}
 	for i := range list.Items {
 		sb := &list.Items[i]
@@ -420,10 +413,8 @@ func run(ctx context.Context, cl client.Client, o *options) runSummary {
 	var issued int64
 	start := time.Now()
 	var wg sync.WaitGroup
-	for w := 0; w < o.concurrency; w++ {
-		wg.Add(1)
-		go func(worker int) {
-			defer wg.Done()
+	for range o.concurrency {
+		wg.Go(func() {
 			for {
 				if ctx.Err() != nil {
 					return
@@ -454,7 +445,7 @@ func run(ctx context.Context, cl client.Client, o *options) runSummary {
 					}
 				}
 			}
-		}(w)
+		})
 	}
 	wg.Wait()
 	s.issued = min64(atomic.LoadInt64(&issued), int64(o.total))
@@ -479,7 +470,7 @@ func createOne(ctx context.Context, cl client.Client, o *options, name string) (
 	if err != nil {
 		reason := classify(err)
 		createFailed.WithLabelValues(reason).Inc()
-		logSampled(reason, "create %s/%s failed: %v", o.namespace, name, err)
+		logSampledf(reason, "create %s/%s failed: %v", o.namespace, name, err)
 		return nil, err
 	}
 	createSeconds.Observe(elapsed)
@@ -500,11 +491,11 @@ func createOne(ctx context.Context, cl client.Client, o *options, name string) (
 			execsTotal.Inc()
 		} else {
 			execFailed.Inc()
-			logSampled("exec", "exec %s/%s (addr=%s id=%s) failed: %v out=%q", o.namespace, name, addr, id, xerr, out)
+			logSampledf("exec", "exec %s/%s (addr=%s id=%s) failed: %v out=%q", o.namespace, name, addr, id, xerr, out)
 		}
 	} else {
 		execFailed.Inc()
-		logSampled("exec", "exec %s/%s: missing addr/id/token annotations (addr=%q id=%q tok?=%v)", o.namespace, name, addr, id, tok != "")
+		logSampledf("exec", "exec %s/%s: missing addr/id/token annotations (addr=%q id=%q tok?=%v)", o.namespace, name, addr, id, tok != "")
 	}
 	return sb, nil
 }
@@ -530,7 +521,7 @@ func releaseWithRetry(ctx context.Context, cl client.Client, o *options, sb *san
 			// Read view lag — retry until the object appears.
 			deleteRetries.Inc()
 		default:
-			logSampled("delete", "delete %s/%s failed (attempt %d): %v", sb.Namespace, sb.Name, attempt, err)
+			logSampledf("delete", "delete %s/%s failed (attempt %d): %v", sb.Namespace, sb.Name, attempt, err)
 		}
 		if ctx.Err() != nil || time.Now().After(deadline) {
 			leakedTotal.Inc()
@@ -590,7 +581,7 @@ func classify(err error) string {
 	}
 }
 
-func logSampled(key, format string, args ...interface{}) {
+func logSampledf(key, format string, args ...any) {
 	logMu.Lock()
 	defer logMu.Unlock()
 	if time.Since(lastLog[key]) < 5*time.Second {
@@ -607,7 +598,7 @@ func min64(a, b int64) int64 {
 	return b
 }
 
-func fatal(format string, args ...interface{}) {
+func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "sandbox-sdk-loadgen: "+format+"\n", args...)
 	os.Exit(1)
 }

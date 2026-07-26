@@ -19,8 +19,6 @@ import (
 	"strings"
 	"time"
 
-	cocoonsandboxv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
-	"github.com/cocoonstack/sandbox-operator/cocoon/sandboxd"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -36,6 +34,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	cocoonsandboxv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
+	"github.com/cocoonstack/sandbox-operator/cocoon/sandboxd"
 )
 
 const (
@@ -698,10 +699,7 @@ func distributeWarmTargets(replicas int32, nodes []cocoonsandboxv1.CocoonSandbox
 	if len(nodes) == 0 {
 		return targets
 	}
-	total := int(replicas)
-	if total < 0 {
-		total = 0
-	}
+	total := max(int(replicas), 0)
 	base := total / len(nodes)
 	remainder := total % len(nodes)
 	for i := range nodes {

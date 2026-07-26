@@ -60,7 +60,13 @@ const (
 )
 
 // Scheme registers the types sandbox controllers need on their client.
-var Scheme = runtime.NewScheme()
+var Scheme = func() *runtime.Scheme {
+	s := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(s))
+	utilruntime.Must(sandboxv1alpha1.AddToScheme(s))
+	utilruntime.Must(sandboxv1beta1.AddToScheme(s))
+	return s
+}()
 
 // resourceOwnership represents the ownership state of a Kubernetes resource relative to a Sandbox.
 type resourceOwnership int
@@ -78,6 +84,11 @@ func checkOwnership(obj client.Object, sandbox *sandboxv1beta1.Sandbox) (resourc
 		return resourceOwnedBySandbox, controllerRef
 	}
 	return resourceOwnedByOther, controllerRef
+}
+
+// isAdoptable reports whether obj carries the warm-pool adoptable label.
+func isAdoptable(obj client.Object) bool {
+	return obj.GetLabels()[sandboxv1beta1.SandboxAdoptableLabel] == "true"
 }
 
 // resolvePodName returns the name of the pod associated with the given Sandbox.
@@ -108,12 +119,6 @@ func MergeVolumeClaimVolumes(existing []corev1.Volume, pvcVolumes []corev1.Volum
 		}
 	}
 	return append(filtered, pvcVolumes...)
-}
-
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(Scheme))
-	utilruntime.Must(sandboxv1alpha1.AddToScheme(Scheme))
-	utilruntime.Must(sandboxv1beta1.AddToScheme(Scheme))
 }
 
 // SandboxReconciler reconciles a Sandbox object.
@@ -465,7 +470,7 @@ func (r *SandboxReconciler) updateStatus(ctx context.Context, oldStatus *sandbox
 // GetNumericHash generates a raw FNV-1a hash value.
 func GetNumericHash(input string) uint32 {
 	h := fnv.New32a()
-	h.Write([]byte(input))
+	_, _ = h.Write([]byte(input))
 	return h.Sum32()
 }
 
@@ -590,7 +595,7 @@ func (r *SandboxReconciler) reconcileService(ctx context.Context, sandbox *sandb
 			return nil, nil
 		}
 		// desired is true + unowned service — adopt
-		isAdoptablePool := service.Labels != nil && service.Labels[sandboxv1beta1.SandboxAdoptableLabel] == "true"
+		isAdoptablePool := isAdoptable(service)
 		hasTrackingLabel := service.Labels != nil && service.Labels[sandboxLabel] == nameHash
 		if !isAdoptablePool && !hasTrackingLabel {
 			logger.V(4).Info("Refusing to adopt unowned service: missing pool authorization label or sandbox tracking label",
@@ -813,7 +818,7 @@ func (r *SandboxReconciler) reconcilePod(ctx context.Context, sandbox *sandboxv1
 				pod.Name, controllerRef.Kind, controllerRef.Name, controllerRef.UID, sandbox.Name)
 
 		case resourceUnowned:
-			isAdoptablePool := pod.Labels != nil && pod.Labels[sandboxv1beta1.SandboxAdoptableLabel] == "true"
+			isAdoptablePool := isAdoptable(pod)
 			hasTrackingLabel := pod.Labels != nil && pod.Labels[sandboxLabel] == nameHash
 			if !isAdoptablePool && !hasTrackingLabel {
 				logger.V(4).Info("Refusing to adopt unowned pod: missing pool authorization label or sandbox tracking label",
@@ -1163,7 +1168,7 @@ func (r *SandboxReconciler) reconcilePVCs(ctx context.Context, sandbox *sandboxv
 					pvcName, controllerRef.Kind, controllerRef.Name, controllerRef.UID, sandbox.Name)
 
 			case resourceUnowned:
-				isAdoptablePool := pvc.Labels != nil && pvc.Labels[sandboxv1beta1.SandboxAdoptableLabel] == "true"
+				isAdoptablePool := isAdoptable(pvc)
 				hasTrackingLabel := pvc.Labels != nil && pvc.Labels[sandboxLabel] == nameHash
 				if !isAdoptablePool && !hasTrackingLabel {
 					logger.V(4).Info("Refusing to adopt unowned PVC: missing pool authorization label or sandbox tracking label",

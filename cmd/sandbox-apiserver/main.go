@@ -138,7 +138,7 @@ func (o *options) e2bAPIKeys() ([]string, error) {
 		return nil, fmt.Errorf("read e2b api key file %q: %w", o.E2BAPIKeyFile, err)
 	}
 	var keys []string
-	for _, line := range strings.Split(string(b), "\n") {
+	for line := range strings.SplitSeq(string(b), "\n") {
 		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
 			keys = append(keys, line)
 		}
@@ -328,7 +328,7 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 }
 
 // startE2BServer starts the e2b-compatible REST surface on its own listener and
-// stops it when ctx is cancelled. It shares the aggregated apiserver's store, so
+// stops it when ctx is canceled. It shares the aggregated apiserver's store, so
 // there is no second source of truth: a claim made here is the same node-local
 // claim, released the same way, and listed by the same scatter-gather read.
 func startE2BServer(ctx context.Context, o *options, store scale.SandboxStore, inv scale.InventorySource) error {

@@ -578,8 +578,8 @@ func resourceVersionFor(ns, name string, e InventoryEntry) string {
 }
 
 func splitNamespacedName(s string) (namespace, name string) {
-	if idx := strings.IndexByte(s, '/'); idx >= 0 {
-		return s[:idx], s[idx+1:]
+	if before, after, ok := strings.Cut(s, "/"); ok {
+		return before, after
 	}
 	return metav1.NamespaceDefault, s
 }
@@ -679,7 +679,7 @@ func (p *NodeInventoryPublisher) Publish(ctx context.Context) (int, error) {
 	return len(entries), nil
 }
 
-// PublishPeriodically runs Publish on interval until ctx is cancelled. Publish
+// PublishPeriodically runs Publish on interval until ctx is canceled. Publish
 // failures are logged, not fatal — the next tick rebuilds from live state.
 func (p *NodeInventoryPublisher) PublishPeriodically(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)

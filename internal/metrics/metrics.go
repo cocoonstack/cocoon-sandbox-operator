@@ -18,9 +18,10 @@ package metrics
 import (
 	"time"
 
-	"github.com/cocoonstack/sandbox-operator/internal/version"
 	"github.com/prometheus/client_golang/prometheus"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+
+	"github.com/cocoonstack/sandbox-operator/internal/version"
 )
 
 const (
@@ -149,14 +150,18 @@ var (
 )
 
 // Init registers custom metrics with the global controller-runtime registry.
-func init() {
-	metrics.Registry.MustRegister(ClaimStartupLatency)
-	metrics.Registry.MustRegister(ClaimControllerStartupLatency)
-	metrics.Registry.MustRegister(SandboxCreationLatency)
-	metrics.Registry.MustRegister(SandboxClaimCreationTotal)
-	metrics.Registry.MustRegister(WarmPoolSandboxCreatedTotal)
-	metrics.Registry.MustRegister(BuildInfo)
-}
+// Registration is tied to package variable initialization so no caller can observe an unregistered collector.
+var _ = func() bool {
+	metrics.Registry.MustRegister(
+		ClaimStartupLatency,
+		ClaimControllerStartupLatency,
+		SandboxCreationLatency,
+		SandboxClaimCreationTotal,
+		WarmPoolSandboxCreatedTotal,
+		BuildInfo,
+	)
+	return true
+}()
 
 // IncWarmPoolSandboxCreated counts one Sandbox created by the warm-pool controller.
 func IncWarmPoolSandboxCreated(namespace, warmPoolName string) {
@@ -187,7 +192,7 @@ func NormalizeCreatedBy(createdBy string) string {
 	case "go-client", "python-client", "controller", "loadgen":
 		return createdBy
 	default:
-		return "unknown"
+		return LaunchTypeUnknown
 	}
 }
 

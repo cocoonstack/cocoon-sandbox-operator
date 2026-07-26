@@ -154,8 +154,7 @@ func TestScatterGatherWatch_EmitsAddModifyDelete(t *testing.T) {
 	src.Put(inv("n1", entry("ns/s1", "Pending")))
 	store := NewScatterGatherStore(src, WithWatchPollInterval(10*time.Millisecond))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	w, err := store.Watch(ctx, ListOptions{})
 	require.NoError(t, err)
 	defer w.Stop()
@@ -177,10 +176,10 @@ func TestScatterGather_ObjectCountIsPoolsPlusNodes(t *testing.T) {
 	ctx := context.Background()
 	src := NewStaticInventorySource()
 
-	for k := 0; k < nodes; k++ {
+	for k := range nodes {
 		node := fmt.Sprintf("n%d", k)
 		entries := make(sliceLive, 0, perNode)
-		for i := 0; i < perNode; i++ {
+		for i := range perNode {
 			entries = append(entries, entry(fmt.Sprintf("ns/s-%d-%d", k, i), "Running"))
 		}
 		pub := NewNodeInventoryPublisher(node, entries, src, logr.Discard())

@@ -64,7 +64,6 @@ type otelInstrumenter struct {
 
 // StartSpan starts a span, potentially continuing one extracted from resource annotations.
 func (o *otelInstrumenter) StartSpan(ctx context.Context, obj metav1.Object, spanName string, attrs map[string]string) (context.Context, func()) {
-
 	// 1. Extract Parent Context from annotations if present.
 	if obj != nil && obj.GetAnnotations() != nil {
 		if tc, ok := obj.GetAnnotations()[TraceContextAnnotation]; ok && tc != "" {

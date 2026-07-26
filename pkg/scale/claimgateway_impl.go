@@ -245,10 +245,8 @@ func (g *nodeClaimGateway) Release(ctx context.Context, a Assignment) error {
 func (g *nodeClaimGateway) Wait() { g.wg.Wait() }
 
 func (g *nodeClaimGateway) enqueueRecord(ns, name string, a Assignment) {
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
-		// Detach from the request context (which may be cancelled once Claim
+	g.wg.Go(func() {
+		// Detach from the request context (which may be canceled once Claim
 		// returns) but stay bounded by the gateway lifetime context and a timeout.
 		rctx, cancel := context.WithTimeout(g.baseCtx, g.recordTimeout)
 		defer cancel()
@@ -256,7 +254,7 @@ func (g *nodeClaimGateway) enqueueRecord(ns, name string, a Assignment) {
 			g.log.Error(err, "async RecordBound failed; orphan binding left for OrphanReconciler",
 				"namespace", ns, "claim", name, "sandbox", a.SandboxName)
 		}
-	}()
+	})
 }
 
 // specFor derives a sandboxd ClaimSpec from the request, letting the Selector

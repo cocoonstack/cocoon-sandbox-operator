@@ -21,8 +21,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	cocoonsandboxv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
-	"github.com/cocoonstack/sandbox-operator/cocoon/sandboxd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -35,6 +33,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	cocoonsandboxv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
+	"github.com/cocoonstack/sandbox-operator/cocoon/sandboxd"
 )
 
 func TestCocoonSandboxReconcileDoesNotReclaimReadySandbox(t *testing.T) {

@@ -21,13 +21,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cocoonstack/sandbox-operator/internal/version"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
+	"github.com/cocoonstack/sandbox-operator/internal/version"
 )
 
 func TestClaimLatencyRecording(t *testing.T) {

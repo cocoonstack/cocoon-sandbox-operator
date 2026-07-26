@@ -70,7 +70,7 @@ type Options struct {
 	// APIKeys, when non-empty, is the set of accepted X-API-KEY values. Empty
 	// disables authentication and is refused unless AllowAnonymous is set, so a
 	// misconfigured deployment cannot silently serve an open claim endpoint.
-	APIKeys []string
+	APIKeys []string //nolint:gosec // the field holds API keys by design
 	// AllowAnonymous permits serving with no API key (local development).
 	AllowAnonymous bool
 	// SizeClass pins the warm-pool size axis for compat claims (default

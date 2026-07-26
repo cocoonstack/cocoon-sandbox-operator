@@ -18,36 +18,36 @@ import (
 
 var (
 	// Scheme knows the served sandboxes types and how to convert them.
-	Scheme = runtime.NewScheme()
+	Scheme = func() *runtime.Scheme {
+		s := runtime.NewScheme()
+		utilruntime.Must(sandboxv1beta1.AddToScheme(s))
+		// Register the served types under the internal version too, as an identity
+		// version: sandboxes is a virtual, read-only resource with no distinct
+		// storage schema, so the external v1beta1 type is also its own internal
+		// type. This lets the request pipeline round-trip without hand-written
+		// conversions while keeping v1beta1 the served, prioritized version.
+		internalGV := schema.GroupVersion{Group: sandboxv1beta1.GroupVersion.Group, Version: runtime.APIVersionInternal}
+		s.AddKnownTypes(internalGV, &sandboxv1beta1.Sandbox{}, &sandboxv1beta1.SandboxList{})
+		// The action subresources' request/response bodies round-trip through the
+		// same pipeline, so they need the identity internal version too.
+		s.AddKnownTypes(internalGV,
+			&sandboxv1beta1.SandboxPauseOptions{},
+			&sandboxv1beta1.SandboxResumeOptions{},
+			&sandboxv1beta1.SandboxForkOptions{},
+			&sandboxv1beta1.SandboxForkResult{},
+			&sandboxv1beta1.SandboxSnapshotOptions{},
+			&sandboxv1beta1.SandboxSnapshotResult{},
+		)
+		metav1.AddToGroupVersion(s, sandboxv1beta1.GroupVersion)
+		// The common request/response meta types (ListOptions, GetOptions, Status,
+		// WatchEvent, ...) live at the "v1" options version the request pipeline
+		// decodes against (APIGroupInfo.OptionsExternalVersion defaults to v1).
+		metav1.AddToGroupVersion(s, schema.GroupVersion{Version: "v1"})
+		utilruntime.Must(s.SetVersionPriority(sandboxv1beta1.GroupVersion))
+		return s
+	}()
 	// Codecs is the serializer for the aggregated group.
 	Codecs = serializer.NewCodecFactory(Scheme)
 	// ParameterCodec decodes list/get query parameters.
 	ParameterCodec = runtime.NewParameterCodec(Scheme)
 )
-
-func init() {
-	utilruntime.Must(sandboxv1beta1.AddToScheme(Scheme))
-	// Register the served types under the internal version too, as an identity
-	// version: sandboxes is a virtual, read-only resource with no distinct
-	// storage schema, so the external v1beta1 type is also its own internal
-	// type. This lets the request pipeline round-trip without hand-written
-	// conversions while keeping v1beta1 the served, prioritized version.
-	internalGV := schema.GroupVersion{Group: sandboxv1beta1.GroupVersion.Group, Version: runtime.APIVersionInternal}
-	Scheme.AddKnownTypes(internalGV, &sandboxv1beta1.Sandbox{}, &sandboxv1beta1.SandboxList{})
-	// The action subresources' request/response bodies round-trip through the
-	// same pipeline, so they need the identity internal version too.
-	Scheme.AddKnownTypes(internalGV,
-		&sandboxv1beta1.SandboxPauseOptions{},
-		&sandboxv1beta1.SandboxResumeOptions{},
-		&sandboxv1beta1.SandboxForkOptions{},
-		&sandboxv1beta1.SandboxForkResult{},
-		&sandboxv1beta1.SandboxSnapshotOptions{},
-		&sandboxv1beta1.SandboxSnapshotResult{},
-	)
-	metav1.AddToGroupVersion(Scheme, sandboxv1beta1.GroupVersion)
-	// The common request/response meta types (ListOptions, GetOptions, Status,
-	// WatchEvent, ...) live at the "v1" options version the request pipeline
-	// decodes against (APIGroupInfo.OptionsExternalVersion defaults to v1).
-	metav1.AddToGroupVersion(Scheme, schema.GroupVersion{Version: "v1"})
-	utilruntime.Must(Scheme.SetVersionPriority(sandboxv1beta1.GroupVersion))
-}

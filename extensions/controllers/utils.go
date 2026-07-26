@@ -15,9 +15,10 @@
 package controllers
 
 import (
+	corev1 "k8s.io/api/core/v1"
+
 	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // ApplySandboxSecureDefaults applies the controller's "Secure by Default" logic to a PodSpec.

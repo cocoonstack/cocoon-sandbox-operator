@@ -54,7 +54,7 @@ type ClaimRequest struct {
 type ClaimResponse struct {
 	ID        string    `json:"id,omitempty"`
 	Token     string    `json:"token,omitempty"`
-	Deadline  time.Time `json:"deadline,omitempty"`
+	Deadline  time.Time `json:"deadline,omitzero"`
 	OwnerAddr string    `json:"owner_addr,omitempty"`
 	Redirect  []string  `json:"redirect,omitempty"`
 }

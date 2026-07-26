@@ -55,6 +55,9 @@ import (
 )
 
 const (
+	claimKind    = "SandboxClaim"
+	warmPoolKind = "SandboxWarmPool"
+
 	ObservabilityAnnotation = "agents.x-k8s.io/controller-first-observed-at"
 
 	immediateRequeueDelay = time.Millisecond
@@ -955,7 +958,6 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 
 			return true, nil
 		}()
-
 		if err != nil {
 			return nil, err
 		}
@@ -1135,11 +1137,8 @@ func (r *SandboxClaimReconciler) validateAdditionalPodMetadata(claimMeta *v1beta
 			if !allowed {
 				return fmt.Errorf("label domain %q is not in the allowlist", domain)
 			}
-		} else {
-			// For annotations, we use the blocklist
-			if isRestrictedDomain(domain) {
-				return fmt.Errorf("restricted system domain: %q is not allowed in AdditionalPodMetadata", key)
-			}
+		} else if isRestrictedDomain(domain) {
+			return fmt.Errorf("restricted system domain: %q is not allowed in AdditionalPodMetadata", key)
 		}
 
 		// Validate label values (annotations have less restrictions)
@@ -1552,7 +1551,7 @@ func (r *SandboxClaimReconciler) getOrCreateSandbox(ctx context.Context, claim *
 			}
 
 			controllerRef := metav1.GetControllerOf(sandbox)
-			if controllerRef != nil && controllerRef.Kind == "SandboxWarmPool" {
+			if controllerRef != nil && controllerRef.Kind == warmPoolKind {
 				// Still in warm pool. Try to complete adoption!
 				logger.Info("Sandbox found in claim metadata still in warm pool, trying to complete adoption", "sandbox", sbName, "claim", claim.Name)
 				if err := verifySandboxCandidate(sandbox, claim); err != nil {
@@ -1828,7 +1827,7 @@ func (r *SandboxClaimReconciler) cleanupLegacyNetworkPolicy(ctx context.Context,
 		// Verify this policy was actually created by this controller
 		// before deleting it. We check if the SandboxClaim is the controller.
 		controllerRef := metav1.GetControllerOf(existingNP)
-		isControlledByClaim := controllerRef != nil && controllerRef.UID == claim.UID && controllerRef.Kind == "SandboxClaim"
+		isControlledByClaim := controllerRef != nil && controllerRef.UID == claim.UID && controllerRef.Kind == claimKind
 
 		if !isControlledByClaim {
 			// A user manually created a policy with our reserved name. We should not delete it, but log a warning so it can be resolved.
@@ -2046,7 +2045,7 @@ func isAdoptable(candidate *v1beta1.Sandbox) error {
 	if controllerRef == nil {
 		return fmt.Errorf("sandbox %s/%s is unowned and cannot be safely adopted", candidate.Namespace, candidate.Name)
 	}
-	if controllerRef.APIVersion != extensionsv1beta1.GroupVersion.String() || controllerRef.Kind != "SandboxWarmPool" {
+	if controllerRef.APIVersion != extensionsv1beta1.GroupVersion.String() || controllerRef.Kind != warmPoolKind {
 		return fmt.Errorf("sandbox %s/%s is not managed by warm pool. Controller: %v", candidate.Namespace, candidate.Name, controllerRef)
 	}
 	return nil
@@ -2081,8 +2080,10 @@ type warmPoolEventHandler struct {
 
 func (h *warmPoolEventHandler) Create(_ context.Context, _ event.CreateEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 }
+
 func (h *warmPoolEventHandler) Update(_ context.Context, _ event.UpdateEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 }
+
 func (h *warmPoolEventHandler) Generic(_ context.Context, _ event.GenericEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 }
 
@@ -2101,11 +2102,11 @@ func (h *warmPoolEventHandler) Delete(ctx context.Context, e event.DeleteEvent, 
 }
 
 func getWarmPoolName(obj metav1.Object) string {
-	if ctrl := metav1.GetControllerOf(obj); ctrl != nil && ctrl.Kind == "SandboxWarmPool" {
+	if ctrl := metav1.GetControllerOf(obj); ctrl != nil && ctrl.Kind == warmPoolKind {
 		return ctrl.Name
 	}
 	for _, ref := range obj.GetOwnerReferences() {
-		if ref.Kind == "SandboxWarmPool" {
+		if ref.Kind == warmPoolKind {
 			return ref.Name
 		}
 	}

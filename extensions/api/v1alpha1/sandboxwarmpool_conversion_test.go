@@ -18,8 +18,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	v1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	v1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
 func TestSandboxWarmPoolConversion(t *testing.T) {

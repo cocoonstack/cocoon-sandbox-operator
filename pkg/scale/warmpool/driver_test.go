@@ -9,7 +9,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -286,7 +285,7 @@ func warmPool(name string, replicas int32) *extv1beta1.SandboxWarmPool {
 	return &extv1beta1.SandboxWarmPool{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name},
 		Spec: extv1beta1.SandboxWarmPoolSpec{
-			Replicas:    ptr.To(replicas),
+			Replicas:    new(replicas),
 			TemplateRef: extv1beta1.SandboxTemplateRef{Name: "tpl"},
 		},
 	}
@@ -306,7 +305,7 @@ func template() *extv1beta1.SandboxTemplate {
 }
 
 func putNodes(inv *scale.StaticInventorySource, n int) {
-	for i := 0; i < n; i++ {
+	for i := range n {
 		name := string(rune('a' + i))
 		inv.Put(&scale.NodeInventory{
 			ObjectMeta: metav1.ObjectMeta{Name: name},

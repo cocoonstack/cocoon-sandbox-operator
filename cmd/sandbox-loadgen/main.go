@@ -22,8 +22,6 @@ import (
 	"syscall"
 	"time"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -36,6 +34,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
 const (
@@ -111,7 +112,7 @@ func main() {
 	logf.SetLogger(zap.New(zap.UseDevMode(false)))
 	log := logf.Log.WithName("sandbox-loadgen")
 
-	// pre-initialise the failure series so panels render 0 instead of "No data".
+	// pre-initialize the failure series so panels render 0 instead of "No data".
 	for _, r := range []string{"create", "timeout", "delete"} {
 		claimFailed.WithLabelValues(r).Add(0)
 	}
@@ -134,7 +135,8 @@ func main() {
 		mux.Handle("/metrics", promhttp.Handler())
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 		log.Info("serving metrics", "addr", o.metricsAddr)
-		if err := http.ListenAndServe(o.metricsAddr, mux); err != nil {
+		srv := &http.Server{Addr: o.metricsAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+		if err := srv.ListenAndServe(); err != nil {
 			log.Error(err, "metrics server exited")
 		}
 	}()
@@ -145,7 +147,7 @@ func main() {
 	lg := &loadgen{cl: cl, o: o, log: log}
 	if err := lg.setup(ctx); err != nil {
 		log.Error(err, "setup template/warmpool")
-		os.Exit(1)
+		os.Exit(1) //nolint:gocritic // startup failure: the process dies before the deferred cleanup matters
 	}
 	go lg.poolPollLoop(ctx)
 	lg.waitPoolWarm(ctx)
@@ -174,16 +176,16 @@ func (l *loadgen) setup(ctx context.Context) error {
 	tpl.SetNamespace(l.o.namespace)
 	tpl.SetName(templateName)
 	tpl.SetLabels(map[string]string{sandboxv1beta1.CreatedByLabel: l.o.createdBy})
-	tpl.Object["spec"] = map[string]interface{}{
-		"podTemplate": map[string]interface{}{
-			"metadata": map[string]interface{}{
-				"annotations": map[string]interface{}{runtimeAnnotation: "sandboxd"},
-				"labels":      map[string]interface{}{"app": "loadgen-warm"},
+	tpl.Object["spec"] = map[string]any{
+		"podTemplate": map[string]any{
+			"metadata": map[string]any{
+				"annotations": map[string]any{runtimeAnnotation: "sandboxd"},
+				"labels":      map[string]any{"app": "loadgen-warm"},
 			},
-			"spec": map[string]interface{}{
-				"containers": []interface{}{map[string]interface{}{
+			"spec": map[string]any{
+				"containers": []any{map[string]any{
 					"name": "main", "image": l.o.image,
-					"resources": map[string]interface{}{"requests": map[string]interface{}{"cpu": "50m", "memory": "64Mi"}},
+					"resources": map[string]any{"requests": map[string]any{"cpu": "50m", "memory": "64Mi"}},
 				}},
 			},
 		},
@@ -197,9 +199,9 @@ func (l *loadgen) setup(ctx context.Context) error {
 	pool.SetNamespace(l.o.namespace)
 	pool.SetName(warmPoolName)
 	pool.SetLabels(map[string]string{sandboxv1beta1.CreatedByLabel: l.o.createdBy})
-	pool.Object["spec"] = map[string]interface{}{
+	pool.Object["spec"] = map[string]any{
 		"replicas":           int64(l.o.replicas),
-		"sandboxTemplateRef": map[string]interface{}{"name": templateName},
+		"sandboxTemplateRef": map[string]any{"name": templateName},
 	}
 	if err := l.cl.Create(ctx, pool); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("create warmpool: %w", err)
@@ -230,19 +232,14 @@ func (l *loadgen) waitPoolWarm(ctx context.Context) {
 // A shared atomic counter hands out claim indices so exactly --total claims are
 // issued regardless of worker count.
 func (l *loadgen) claimLoop(ctx context.Context) {
-	workers := l.o.concurrency
-	if workers < 1 {
-		workers = 1
-	}
+	workers := max(l.o.concurrency, 1)
 	var issued atomic.Int64
 	var served atomic.Int64
 	start := time.Now()
 
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			for {
 				if ctx.Err() != nil {
 					return
@@ -261,7 +258,7 @@ func (l *loadgen) claimLoop(ctx context.Context) {
 					}
 				}
 			}
-		}()
+		})
 	}
 
 	if l.o.total > 0 {
@@ -270,7 +267,7 @@ func (l *loadgen) claimLoop(ctx context.Context) {
 			"claims", served.Load(), "concurrency", workers, "elapsed", time.Since(start).String())
 		return
 	}
-	// unbounded run: block until the context is cancelled, then drain.
+	// unbounded run: block until the context is canceled, then drain.
 	<-ctx.Done()
 	wg.Wait()
 }
@@ -287,8 +284,8 @@ func (l *loadgen) claimOnce(ctx context.Context, name string) {
 	claim.SetName(name)
 	claim.SetLabels(map[string]string{sandboxv1beta1.CreatedByLabel: l.o.createdBy})
 	claim.SetAnnotations(map[string]string{observedAtAnnotation: time.Now().UTC().Format(time.RFC3339Nano)})
-	claim.Object["spec"] = map[string]interface{}{
-		"warmPoolRef": map[string]interface{}{"name": warmPoolName},
+	claim.Object["spec"] = map[string]any{
+		"warmPoolRef": map[string]any{"name": warmPoolName},
 	}
 
 	start := time.Now()
@@ -364,7 +361,7 @@ func isReady(u *unstructured.Unstructured) bool {
 		return false
 	}
 	for _, c := range conds {
-		m, ok := c.(map[string]interface{})
+		m, ok := c.(map[string]any)
 		if !ok {
 			continue
 		}

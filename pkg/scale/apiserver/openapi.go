@@ -19,8 +19,8 @@ const sandboxDefPrefix = "github.com/cocoonstack/sandbox-operator/api/v1beta1."
 // managedFields" error on every write. This is the whole reason this file exists.
 func gvkExtension(kind string) spec.Extensions {
 	return spec.Extensions{
-		"x-kubernetes-group-version-kind": []interface{}{
-			map[string]interface{}{
+		"x-kubernetes-group-version-kind": []any{
+			map[string]any{
 				"group":   sandboxv1beta1.GroupVersion.Group,
 				"version": sandboxv1beta1.GroupVersion.Version,
 				"kind":    kind,

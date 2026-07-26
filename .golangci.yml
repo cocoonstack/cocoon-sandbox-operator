@@ -1,35 +1,95 @@
 version: "2"
 
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
 linters:
+  default: none
   enable:
+    - asciicheck
+    - bodyclose
+    - dogsled
     - errcheck
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - goprintffuncname
+    - gosec
     - govet
     - ineffassign
     - misspell
-    - nilnesserr
+    - modernize
+    - nakedret
+    - nestif
+    - revive
     - staticcheck
-    - testifylint
     - unconvert
+    - unparam
+    - unused
   settings:
+    gocritic:
+      disabled-checks:
+        - captLocal
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    revive:
+      rules:
+        - name: exported
+          disabled: true
     misspell:
+      locale: US
       # rest.Creater is the upstream k8s.io/apiserver interface name.
       ignore-rules:
         - creater
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    gocyclo:
+      min-complexity: 30
+    nakedret:
+      max-func-lines: 30
+    nestif:
+      min-complexity: 5
   exclusions:
-    generated: lax
-    presets:
-      - comments
-      - common-false-positives
-      - legacy
-      - std-error-handling
+    generated: strict
+    paths:
+      - vendor
+      - mocks
+      - dist
     rules:
-      - linters:
-          - staticcheck
-        text: QF1008
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+          - goconst
+          - gocyclo
+      # kubebuilder API packages register their types through SchemeBuilder in init.
+      - path: (api|extensions/api)/.*\.go
+        linters:
+          - gochecknoinits
+      # Every int32 conversion here narrows a Kubernetes replica/pool count, a slice
+      # length, or an HTTP status code — none can reach 2^31.
+      - linters: [gosec]
+        text: "G115"
+      # Request targets come from NodeInventory advertise addresses, which only the
+      # cluster's own nodes publish; they are not caller-supplied URLs.
+      - linters: [gosec]
+        text: "G704"
+      # The renamed sandbox-template-hash and assigned-sandbox-name keys are still
+      # read, cleared and dual-written so objects from older operators keep working.
+      - linters: [staticcheck]
+        text: "SA1019: \\w*v1beta1.Deprecated(SandboxPodTemplateHash|AssignedSandboxName)Label"
 
 formatters:
   enable:
-    - gofmt
+    - gofumpt
     - goimports
-  exclusions:
-    generated: lax
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/cocoonstack/

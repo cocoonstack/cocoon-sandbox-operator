@@ -62,6 +62,7 @@ const (
 	// SandboxLaunchTypeWarm indicates the Sandbox was pre-provisioned by or adopted from a SandboxWarmPool.
 	SandboxLaunchTypeWarm = "warm"
 	// DeprecatedSandboxPodTemplateHashLabel is the label used to track the pod template hash.
+	//
 	// Deprecated: Use SandboxTemplateHashLabel instead.
 	DeprecatedSandboxPodTemplateHashLabel = "agents.x-k8s.io/sandbox-pod-template-hash"
 	// SandboxTemplateHashLabel is the label used to track the blueprint hash.

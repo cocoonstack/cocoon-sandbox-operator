@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -53,11 +54,12 @@ import (
 func TestSandboxClaimReconcile(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}},
+				},
+			}},
 		},
 	}
 
@@ -66,38 +68,39 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			Name:      "test-template-with-np",
 			Namespace: "default",
 		},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "test-container",
+							Image: "test-image",
+							Ports: []corev1.ContainerPort{{ContainerPort: 8080}},
+						},
+					},
+				},
+			}}, NetworkPolicy: &extensionsv1beta1.NetworkPolicySpec{
+				Ingress: []networkingv1.NetworkPolicyIngressRule{
 					{
-						Name:  "test-container",
-						Image: "test-image",
-						Ports: []corev1.ContainerPort{{ContainerPort: 8080}},
-					},
-				},
-			},
-		}}, NetworkPolicy: &extensionsv1beta1.NetworkPolicySpec{
-			Ingress: []networkingv1.NetworkPolicyIngressRule{
-				{
-					From: []networkingv1.NetworkPolicyPeer{
-						{
-							NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"ns-role": "ingress"}},
-							PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ingress"}},
+						From: []networkingv1.NetworkPolicyPeer{
+							{
+								NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"ns-role": "ingress"}},
+								PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": "ingress"}},
+							},
 						},
 					},
 				},
-			},
 
-			Egress: []networkingv1.NetworkPolicyEgressRule{
-				{
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "metrics"}},
+				Egress: []networkingv1.NetworkPolicyEgressRule{
+					{
+						To: []networkingv1.NetworkPolicyPeer{
+							{
+								PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "metrics"}},
+							},
 						},
 					},
 				},
 			},
-		},
 		},
 	}
 
@@ -121,14 +124,15 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			Name: "test-claim", Namespace: "default",
 			Annotations: map[string]string{sandboxv1beta1.SandboxTemplateRefAnnotation: "test-template"},
 		},
-		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			ObjectMeta: sandboxv1beta1.PodMetadata{
-				Labels: map[string]string{
-					sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+		Spec: sandboxv1beta1.SandboxSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				ObjectMeta: sandboxv1beta1.PodMetadata{
+					Labels: map[string]string{
+						sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+					},
 				},
-			},
-			Spec: template.Spec.PodTemplate.Spec,
-		}},
+				Spec: template.Spec.PodTemplate.Spec,
+			}},
 		},
 	}
 
@@ -140,14 +144,15 @@ func TestSandboxClaimReconcile(t *testing.T) {
 				APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: "test-claim", UID: "claim-uid", Controller: new(true),
 			}},
 		},
-		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			ObjectMeta: sandboxv1beta1.PodMetadata{
-				Labels: map[string]string{
-					sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+		Spec: sandboxv1beta1.SandboxSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				ObjectMeta: sandboxv1beta1.PodMetadata{
+					Labels: map[string]string{
+						sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+					},
 				},
-			},
-			Spec: template.Spec.PodTemplate.Spec,
-		}},
+				Spec: template.Spec.PodTemplate.Spec,
+			}},
 		},
 	}
 
@@ -161,9 +166,10 @@ func TestSandboxClaimReconcile(t *testing.T) {
 
 	templateWithAutomount := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "automount-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{AutomountServiceAccountToken: new(true), Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}}},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{AutomountServiceAccountToken: new(true), Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}}},
+			}},
 		},
 	}
 
@@ -179,11 +185,12 @@ func TestSandboxClaimReconcile(t *testing.T) {
 
 	templateWithEnv := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template-env", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "test-container", Image: "test-image", Env: []corev1.EnvVar{{Name: "EXISTING_VAR", Value: "template-value"}}}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "test-container", Image: "test-image", Env: []corev1.EnvVar{{Name: "EXISTING_VAR", Value: "template-value"}}}},
+				},
+			}},
 		},
 	}
 
@@ -335,14 +342,15 @@ func TestSandboxClaimReconcile(t *testing.T) {
 
 	templateMultiContainer := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template-multi-container", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "app-container", Image: "app-image"},
-					{Name: "sidecar-container", Image: "sidecar-image"},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "app-container", Image: "app-image"},
+						{Name: "sidecar-container", Image: "sidecar-image"},
+					},
 				},
-			},
-		}}, EnvVarsInjectionPolicy: extensionsv1beta1.EnvVarsInjectionPolicyOverrides,
+			}}, EnvVarsInjectionPolicy: extensionsv1beta1.EnvVarsInjectionPolicyOverrides,
 		},
 	}
 
@@ -373,12 +381,13 @@ func TestSandboxClaimReconcile(t *testing.T) {
 
 	templateWithInitContainer := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template-init-container", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				InitContainers: []corev1.Container{{Name: "init-setup", Image: "init-image"}},
-				Containers:     []corev1.Container{{Name: "app-container", Image: "app-image"}},
-			},
-		}}, EnvVarsInjectionPolicy: extensionsv1beta1.EnvVarsInjectionPolicyOverrides,
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{Name: "init-setup", Image: "init-image"}},
+					Containers:     []corev1.Container{{Name: "app-container", Image: "app-image"}},
+				},
+			}}, EnvVarsInjectionPolicy: extensionsv1beta1.EnvVarsInjectionPolicyOverrides,
 		},
 	}
 
@@ -1076,7 +1085,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 				claimToUse = claim // Fallback for older tests
 			}
 
-			allObjects := append(tc.existingObjects, claimToUse)
+			allObjects := append(slices.Clone(tc.existingObjects), claimToUse)
 			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(allObjects...).WithStatusSubresource(claimToUse).Build()
 
 			reconciler := &SandboxClaimReconciler{
@@ -1796,24 +1805,27 @@ func TestCreateSandboxPropagatesVolumeClaimTemplates(t *testing.T) {
 
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "vct-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "app", Image: "test"}},
-			},
-		},
-			VolumeClaimTemplates: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{
-					EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"},
-					Spec: corev1.PersistentVolumeClaimSpec{
-						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-						Resources: corev1.VolumeResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceStorage: resource.MustParse("1Gi"),
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
+				PodTemplate: sandboxv1beta1.PodTemplate{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{Name: "app", Image: "test"}},
+					},
+				},
+				VolumeClaimTemplates: []sandboxv1beta1.PersistentVolumeClaimTemplate{
+					{
+						EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"},
+						Spec: corev1.PersistentVolumeClaimSpec{
+							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+							Resources: corev1.VolumeResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceStorage: resource.MustParse("1Gi"),
+								},
 							},
 						},
 					},
 				},
-			}},
+			},
 		},
 	}
 
@@ -1861,16 +1873,17 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 			Name:      "test-template",
 			Namespace: "default",
 		},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:  "test-container",
-						Image: "test-image",
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "test-container",
+							Image: "test-image",
+						},
 					},
 				},
-			},
-		}},
+			}},
 		},
 	}
 
@@ -1920,21 +1933,22 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 					},
 				},
 			},
-			Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-				ObjectMeta: sandboxv1beta1.PodMetadata{
-					Annotations: map[string]string{
-						warmPoolEvictionAnnotation: "true",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "test-image",
+			Spec: sandboxv1beta1.SandboxSpec{
+				SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+					ObjectMeta: sandboxv1beta1.PodMetadata{
+						Annotations: map[string]string{
+							warmPoolEvictionAnnotation: "true",
 						},
 					},
-				},
-			}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning,
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "test-container",
+								Image: "test-image",
+							},
+						},
+					},
+				}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning,
 			},
 			Status: sandboxv1beta1.SandboxStatus{
 				Conditions: []metav1.Condition{
@@ -1967,16 +1981,17 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 					},
 				},
 			},
-			Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "test-image",
+			Spec: sandboxv1beta1.SandboxSpec{
+				SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "test-container",
+								Image: "test-image",
+							},
 						},
 					},
-				},
-			}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning,
+				}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning,
 			},
 		}
 	}
@@ -2301,7 +2316,6 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 
 			ctx := context.Background()
 			_, err := reconciler.Reconcile(ctx, req)
-
 			if err != nil {
 				t.Fatalf("reconcile failed: %v", err)
 			}
@@ -2463,11 +2477,12 @@ func TestSandboxClaimNoReAdoption(t *testing.T) {
 
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "c", Image: "img"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "c", Image: "img"}},
+				},
+			}},
 		},
 	}
 
@@ -2725,11 +2740,12 @@ func TestRecordCreationLatencyMetric(t *testing.T) {
 func TestSandboxClaimCreationMetric(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}},
+				},
+			}},
 		},
 	}
 
@@ -3318,7 +3334,6 @@ func TestSandboxClaimReconcileCleanup(t *testing.T) {
 			wantEntries: 0,
 		},
 		{
-
 			// Simulates an update for already ready claim.
 			// The reconciler must correctly clean up the observed time entries.
 			name: "post-Ready UpdateFunc re-creates entry that is then cleaned on next reconcile",
@@ -3478,11 +3493,12 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "c", Image: "img"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "c", Image: "img"}},
+				},
+			}},
 		},
 	}
 
@@ -3509,13 +3525,14 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 				Controller: ptr.To(true), // nolint:modernize
 			}},
 		},
-		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			ObjectMeta: sandboxv1beta1.PodMetadata{
-				Labels: map[string]string{
-					extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
+		Spec: sandboxv1beta1.SandboxSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				ObjectMeta: sandboxv1beta1.PodMetadata{
+					Labels: map[string]string{
+						extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
+					},
 				},
-			},
-		}},
+			}},
 		},
 	}
 
@@ -3681,11 +3698,12 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "c", Image: "img"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "c", Image: "img"}},
+				},
+			}},
 		},
 	}
 
@@ -3712,13 +3730,14 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 				Controller: ptr.To(true), // nolint:modernize
 			}},
 		},
-		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			ObjectMeta: sandboxv1beta1.PodMetadata{
-				Labels: map[string]string{
-					extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
+		Spec: sandboxv1beta1.SandboxSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				ObjectMeta: sandboxv1beta1.PodMetadata{
+					Labels: map[string]string{
+						extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
+					},
 				},
-			},
-		}},
+			}},
 		},
 	}
 
@@ -3822,11 +3841,12 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "c", Image: "img"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "c", Image: "img"}},
+				},
+			}},
 		},
 	}
 
@@ -3853,13 +3873,14 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 				Controller: ptr.To(true), // nolint:modernize
 			}},
 		},
-		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			ObjectMeta: sandboxv1beta1.PodMetadata{
-				Labels: map[string]string{
-					extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
+		Spec: sandboxv1beta1.SandboxSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				ObjectMeta: sandboxv1beta1.PodMetadata{
+					Labels: map[string]string{
+						extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
+					},
 				},
-			},
-		}},
+			}},
 		},
 	}
 
@@ -3941,11 +3962,12 @@ func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "c", Image: "img"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "c", Image: "img"}},
+				},
+			}},
 		},
 	}
 
@@ -4079,11 +4101,12 @@ func TestSandboxClaimPreventsAdoptionFromWrongWarmPool(t *testing.T) {
 
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "correct-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "c", Image: "img"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "c", Image: "img"}},
+				},
+			}},
 		},
 	}
 
@@ -4180,11 +4203,12 @@ func TestSandboxClaimRecoveryWhenTemplateCreated(t *testing.T) {
 			Name:      templateName,
 			Namespace: "default",
 		},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}},
+				},
+			}},
 		},
 	}
 
@@ -4325,11 +4349,12 @@ func TestSandboxClaimLegacyLabelMigration(t *testing.T) {
 
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "c", Image: "img"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "c", Image: "img"}},
+				},
+			}},
 		},
 	}
 
@@ -4354,13 +4379,14 @@ func TestSandboxClaimLegacyLabelMigration(t *testing.T) {
 				Controller: ptr.To(true), // nolint:modernize
 			}},
 		},
-		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			ObjectMeta: sandboxv1beta1.PodMetadata{
-				Labels: map[string]string{
-					extensionsv1beta1.SandboxIDLabel: "claim-uid-legacy",
+		Spec: sandboxv1beta1.SandboxSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				ObjectMeta: sandboxv1beta1.PodMetadata{
+					Labels: map[string]string{
+						extensionsv1beta1.SandboxIDLabel: "claim-uid-legacy",
+					},
 				},
-			},
-		}},
+			}},
 		},
 	}
 
@@ -4480,11 +4506,12 @@ func TestSandboxClaimAdoptionStrategy(t *testing.T) {
 					},
 				},
 			},
-			Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}},
-				},
-			}},
+			Spec: sandboxv1beta1.SandboxSpec{
+				SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}},
+					},
+				}},
 			},
 			Status: sandboxv1beta1.SandboxStatus{
 				NodeName: nodeName,
@@ -4632,24 +4659,27 @@ func TestSandboxClaimAdoptionStrategy(t *testing.T) {
 func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "vct-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "app", Image: "test"}},
-			},
-		},
-			VolumeClaimTemplates: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{
-					EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"},
-					Spec: corev1.PersistentVolumeClaimSpec{
-						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-						Resources: corev1.VolumeResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceStorage: resource.MustParse("1Gi"),
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
+				PodTemplate: sandboxv1beta1.PodTemplate{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{Name: "app", Image: "test"}},
+					},
+				},
+				VolumeClaimTemplates: []sandboxv1beta1.PersistentVolumeClaimTemplate{
+					{
+						EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"},
+						Spec: corev1.PersistentVolumeClaimSpec{
+							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+							Resources: corev1.VolumeResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceStorage: resource.MustParse("1Gi"),
+								},
 							},
 						},
 					},
 				},
-			}},
+			},
 		},
 	}
 
@@ -4762,9 +4792,10 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 							Controller: ptr.To(true), // nolint:modernize
 						}},
 					},
-					Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-						Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "test"}}},
-					}},
+					Spec: sandboxv1beta1.SandboxSpec{
+						SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+							Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "test"}}},
+						}},
 					},
 					Status: sandboxv1beta1.SandboxStatus{
 						Conditions: []metav1.Condition{{
@@ -4837,11 +4868,12 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{Name: "vct-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "app", Image: "test"}},
-			},
-		}},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "app", Image: "test"}},
+				},
+			}},
 		},
 	}
 

@@ -83,12 +83,12 @@ func TestEveryServedTypeHasAnOpenAPIModel(t *testing.T) {
 			t.Errorf("%s has no x-kubernetes-group-version-kind; the managed-fields TypeConverter cannot map it", kind)
 			continue
 		}
-		entries, ok := gvks.([]interface{})
+		entries, ok := gvks.([]any)
 		if !ok || len(entries) != 1 {
 			t.Errorf("%s gvk extension = %v, want exactly one entry", kind, gvks)
 			continue
 		}
-		m, _ := entries[0].(map[string]interface{})
+		m, _ := entries[0].(map[string]any)
 		if m["kind"] != kind {
 			t.Errorf("%s declares kind %v, want %s", kind, m["kind"], kind)
 		}

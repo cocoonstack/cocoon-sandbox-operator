@@ -5,9 +5,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// NetDefault is the pool network mode used when none is annotated: the hardened,
-// NIC-less Firecracker lane.
-const NetDefault = "none"
+const (
+	SizeClassSmall  = "small"
+	SizeClassMedium = "medium"
+	SizeClassLarge  = "large"
+
+	// NetDefault is the mode used when none is annotated: the NIC-less Firecracker lane.
+	NetDefault = "none"
+)
 
 // Coarse, documented t-shirt-size thresholds mapping a container's CPU/memory
 // request (falling back to its limit) onto the warm pool size classes.
@@ -41,7 +46,7 @@ func PoolKeyFor(containers []corev1.Container, net string) PoolKey {
 // neither is set. Thresholds: >4 CPU or >8Gi -> large; >1 CPU or >2Gi -> medium.
 func SizeClassForContainers(containers []corev1.Container) string {
 	if len(containers) == 0 {
-		return "small"
+		return SizeClassSmall
 	}
 	res := containers[0].Resources
 	cpu := res.Requests.Cpu()
@@ -54,10 +59,10 @@ func SizeClassForContainers(containers []corev1.Container) string {
 	}
 	switch {
 	case cpu.Cmp(sizeCPULarge) > 0 || mem.Cmp(sizeMemLarge) > 0:
-		return "large"
+		return SizeClassLarge
 	case cpu.Cmp(sizeCPUMedium) > 0 || mem.Cmp(sizeMemMedium) > 0:
-		return "medium"
+		return SizeClassMedium
 	default:
-		return "small"
+		return SizeClassSmall
 	}
 }

@@ -18,9 +18,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	v1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	v1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
 func TestSandboxConversion(t *testing.T) {
@@ -158,8 +159,8 @@ func TestSandboxConversion(t *testing.T) {
 			if dst.Spec.VolumeClaimTemplates[0].Name != "workspace" {
 				t.Errorf("expected VolumeClaimTemplate name %q, got %q", "workspace", dst.Spec.VolumeClaimTemplates[0].Name)
 			}
-			if dst.Spec.Lifecycle.ShutdownPolicy == nil || string(*dst.Spec.Lifecycle.ShutdownPolicy) != string(ShutdownPolicyDelete) {
-				t.Errorf("expected ShutdownPolicy %q, got %v", ShutdownPolicyDelete, dst.Spec.Lifecycle.ShutdownPolicy)
+			if dst.Spec.ShutdownPolicy == nil || string(*dst.Spec.ShutdownPolicy) != string(ShutdownPolicyDelete) {
+				t.Errorf("expected ShutdownPolicy %q, got %v", ShutdownPolicyDelete, dst.Spec.ShutdownPolicy)
 			}
 
 			// Convert back to Spoke (v1alpha1)
@@ -196,7 +197,7 @@ func TestSandboxConversion(t *testing.T) {
 				t.Errorf("roundtrip VolumeClaimTemplates mismatch")
 			}
 
-			if roundTrip.Spec.Lifecycle.ShutdownPolicy == nil || *roundTrip.Spec.Lifecycle.ShutdownPolicy != *src.Spec.Lifecycle.ShutdownPolicy {
+			if roundTrip.Spec.ShutdownPolicy == nil || *roundTrip.Spec.ShutdownPolicy != *src.Spec.ShutdownPolicy {
 				t.Errorf("roundtrip ShutdownPolicy mismatch")
 			}
 		})

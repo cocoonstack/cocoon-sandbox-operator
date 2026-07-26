@@ -29,7 +29,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -89,7 +88,7 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 					Kind:       "SandboxWarmPool",
 					Name:       "pool",
 					UID:        warmPoolUID,
-					Controller: ptr.To(true),
+					Controller: new(true),
 				}},
 			},
 			Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
@@ -111,7 +110,7 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 
 	testQueue := queue.NewSimpleSandboxQueue()
 	npn := queue.GetNamespacedWarmPoolName("default", "pool")
-	for i := 0; i < warmCount; i++ {
+	for i := range warmCount {
 		sb := warmSandbox(fmt.Sprintf("warm-%02d", i))
 		builder = builder.WithObjects(sb)
 		testQueue.Add(npn, queue.SandboxKey{Namespace: "default", Name: sb.Name})
@@ -148,7 +147,7 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 		go func(name string) {
 			defer wg.Done()
 			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: name, Namespace: "default"}}
-			for pass := 0; pass < 10; pass++ {
+			for range 10 {
 				if _, err := reconciler.Reconcile(ctx, req); err != nil {
 					continue // transient optimistic-concurrency conflict: retry
 				}

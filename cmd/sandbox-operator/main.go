@@ -31,6 +31,18 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/felixge/fgprof"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
 	cocoonsandboxv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	cocooncontroller "github.com/cocoonstack/sandbox-operator/cocoon/controller"
@@ -42,408 +54,392 @@ import (
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 	"github.com/cocoonstack/sandbox-operator/internal/version"
 	"github.com/cocoonstack/sandbox-operator/pkg/podruntime"
-	"github.com/felixge/fgprof"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	//+kubebuilder:scaffold:imports
 )
 
-var (
-	setupLog = ctrl.Log.WithName("setup")
-)
+var setupLog = ctrl.Log.WithName("setup")
 
-func main() {
-	var metricsAddr string
-	var enableLeaderElection bool
-	var leaderElectionNamespace string
-	var probeAddr string
-	var extensions bool
-	var clusterDomain string
-	var enableTracing bool
-	var enablePprof bool
-	var enablePprofDebug bool
-	var pprofBlockProfileRate int
-	var pprofMutexProfileFraction int
-	var kubeAPIQPS float64
-	var kubeAPIBurst int
-	var sandboxConcurrentWorkers int
-	var sandboxClaimConcurrentWorkers int
-	var sandboxWarmPoolConcurrentWorkers int
-	var sandboxTemplateConcurrentWorkers int
-	var sandboxWarmPoolMaxBatchSize int
-	var enableWarmPoolEviction bool
-	var sandboxWarmPoolDisableCRManagement bool
-	var printVersion bool
-	var webhookPort int
-	var webhookCertDir string
-	var webhookServiceName string
-	var webhookNamespace string
-	var manageWebhookCerts bool
-	var defaultRuntime string
+// options holds every operator flag. It is one struct so main stays a
+// sequence of named phases rather than a 400-line body.
+type options struct {
+	metricsAddr             string
+	probeAddr               string
+	clusterDomain           string
+	defaultRuntime          string
+	leaderElectionNamespace string
+	enableLeaderElection    bool
+	extensions              bool
+	printVersion            bool
 
-	flag.BoolVar(&printVersion, "version", false, "Print version information and exit.")
-	flag.IntVar(&webhookPort, "webhook-port", 9443, "The port the webhook server binds to.")
-	flag.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs", "The directory that contains the certificates.")
-	flag.StringVar(&webhookServiceName, "webhook-service-name", "cocoon-sandbox-webhook-service", "The name of the webhook service.")
-	flag.StringVar(&webhookNamespace, "webhook-namespace", "cocoon-sandbox-system", "The namespace of the webhook service.")
-	flag.BoolVar(&manageWebhookCerts, "manage-webhook-certs", true, "Manage webhook serving certs and patch CRD conversion caBundles on startup. Set to false when certs and CRD/webhook configuration are managed externally (e.g., GKE Dynamic Certificate Delivery).")
-	flag.StringVar(&clusterDomain, "cluster-domain", "cluster.local", "Kubernetes cluster domain for service FQDN generation")
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", true,
+	webhookPort        int
+	webhookCertDir     string
+	webhookServiceName string
+	webhookNamespace   string
+	manageWebhookCerts bool
+
+	enableTracing             bool
+	enablePprof               bool
+	enablePprofDebug          bool
+	pprofBlockProfileRate     int
+	pprofMutexProfileFraction int
+
+	kubeAPIQPS   float64
+	kubeAPIBurst int
+
+	sandboxWorkers          int
+	claimWorkers            int
+	warmPoolWorkers         int
+	templateWorkers         int
+	warmPoolMaxBatchSize    int
+	enableWarmPoolEviction  bool
+	warmPoolDisableCRManage bool
+
+	zap zap.Options
+}
+
+func (o *options) bindFlags() {
+	flag.BoolVar(&o.printVersion, "version", false, "Print version information and exit.")
+	flag.IntVar(&o.webhookPort, "webhook-port", 9443, "The port the webhook server binds to.")
+	flag.StringVar(&o.webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs", "The directory that contains the certificates.")
+	flag.StringVar(&o.webhookServiceName, "webhook-service-name", "cocoon-sandbox-webhook-service", "The name of the webhook service.")
+	flag.StringVar(&o.webhookNamespace, "webhook-namespace", "cocoon-sandbox-system", "The namespace of the webhook service.")
+	flag.BoolVar(&o.manageWebhookCerts, "manage-webhook-certs", true, "Manage webhook serving certs and patch CRD conversion caBundles on startup. Set to false when certs and CRD/webhook configuration are managed externally (e.g., GKE Dynamic Certificate Delivery).")
+	flag.StringVar(&o.clusterDomain, "cluster-domain", "cluster.local", "Kubernetes cluster domain for service FQDN generation")
+	flag.StringVar(&o.metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
+	flag.StringVar(&o.probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	flag.BoolVar(&o.enableLeaderElection, "leader-elect", true,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.StringVar(&leaderElectionNamespace, "leader-election-namespace", "", "The namespace in which the leader election resource will be created.")
-	flag.BoolVar(&extensions, "extensions", true, "Enable SandboxTemplate, SandboxWarmPool, and SandboxClaim controllers.")
-	flag.StringVar(&defaultRuntime, "default-runtime", podruntime.DefaultMode, "Default Pod runtime: standard, vk-cocoon, or sandboxd. sandboxd routes sandbox Pods to the vk-sandbox hot-pool virtual node. Set the Pod runtime annotation to override; an explicit runtimeClassName selects standard kubelet.")
-	flag.BoolVar(&enableTracing, "enable-tracing", false, "Enable OpenTelemetry tracing via OTLP.")
-	flag.BoolVar(&enablePprof, "enable-pprof", false,
+	flag.StringVar(&o.leaderElectionNamespace, "leader-election-namespace", "", "The namespace in which the leader election resource will be created.")
+	flag.BoolVar(&o.extensions, "extensions", true, "Enable SandboxTemplate, SandboxWarmPool, and SandboxClaim controllers.")
+	flag.StringVar(&o.defaultRuntime, "default-runtime", podruntime.DefaultMode, "Default Pod runtime: standard, vk-cocoon, or sandboxd. sandboxd routes sandbox Pods to the vk-sandbox hot-pool virtual node. Set the Pod runtime annotation to override; an explicit runtimeClassName selects standard kubelet.")
+	flag.BoolVar(&o.enableTracing, "enable-tracing", false, "Enable OpenTelemetry tracing via OTLP.")
+	flag.BoolVar(&o.enablePprof, "enable-pprof", false,
 		"Enable CPU profiling endpoint (/debug/pprof/profile) on the metrics server.")
-	flag.BoolVar(&enablePprofDebug, "enable-pprof-debug", false,
+	flag.BoolVar(&o.enablePprofDebug, "enable-pprof-debug", false,
 		"Enable all pprof endpoints including sensitive ones (cmdline, symbol, heap, goroutine, etc). "+
 			"Implies --enable-pprof. WARNING: May expose sensitive information and comes with performance overhead.")
-	flag.IntVar(&pprofBlockProfileRate, "pprof-block-profile-rate", 1000000,
+	flag.IntVar(&o.pprofBlockProfileRate, "pprof-block-profile-rate", 1000000,
 		"Block profile sampling rate for /debug/pprof/block when --enable-pprof-debug is set. "+
 			"<=0 disables; 1 samples all blocking events; >=2 sets the rate in nanoseconds (e.g. 1000000 ~= 1ms).")
-	flag.IntVar(&pprofMutexProfileFraction, "pprof-mutex-profile-fraction", 10,
+	flag.IntVar(&o.pprofMutexProfileFraction, "pprof-mutex-profile-fraction", 10,
 		"Mutex contention sampling rate for /debug/pprof/mutex when --enable-pprof-debug is set. "+
 			"<=0 disables; 1 samples all events; N>1 samples ~1/N events (e.g. 10 ~= 1/10, 100 ~= 1/100).")
-	flag.Float64Var(&kubeAPIQPS, "kube-api-qps", -1.0, "Client-side QPS limit for the Kubernetes API client (default: -1, no client-side rate limiting)")
-	flag.IntVar(&kubeAPIBurst, "kube-api-burst", 10, "The maximum burst for client-side throttling of the Kubernetes API client.")
-	flag.IntVar(&sandboxConcurrentWorkers, "sandbox-concurrent-workers", 1, "Max concurrent reconciles for the Sandbox controller")
-	flag.IntVar(&sandboxClaimConcurrentWorkers, "sandbox-claim-concurrent-workers", 50, "Max concurrent reconciles for the SandboxClaim controller")
-	flag.IntVar(&sandboxWarmPoolConcurrentWorkers, "sandbox-warm-pool-concurrent-workers", 1, "Max concurrent reconciles for the SandboxWarmPool controller")
-	flag.IntVar(&sandboxTemplateConcurrentWorkers, "sandbox-template-concurrent-workers", 1, "Max concurrent reconciles for the SandboxTemplate controller")
-	flag.IntVar(&sandboxWarmPoolMaxBatchSize, "sandbox-warm-pool-max-batch-size", 300, "Max batch size for parallel sandbox creation and deletion in SandboxWarmPool controller. Default is 300.")
-	flag.BoolVar(&enableWarmPoolEviction, "enable-warm-pool-eviction", true, "Mark pods created by a warm pool as ready-to-evict by default.")
-	flag.BoolVar(&sandboxWarmPoolDisableCRManagement, "sandbox-warm-pool-disable-cr-management", false,
+	flag.Float64Var(&o.kubeAPIQPS, "kube-api-qps", -1.0, "Client-side QPS limit for the Kubernetes API client (default: -1, no client-side rate limiting)")
+	flag.IntVar(&o.kubeAPIBurst, "kube-api-burst", 10, "The maximum burst for client-side throttling of the Kubernetes API client.")
+	flag.IntVar(&o.sandboxWorkers, "sandbox-concurrent-workers", 1, "Max concurrent reconciles for the Sandbox controller")
+	flag.IntVar(&o.claimWorkers, "sandbox-claim-concurrent-workers", 50, "Max concurrent reconciles for the SandboxClaim controller")
+	flag.IntVar(&o.warmPoolWorkers, "sandbox-warm-pool-concurrent-workers", 1, "Max concurrent reconciles for the SandboxWarmPool controller")
+	flag.IntVar(&o.templateWorkers, "sandbox-template-concurrent-workers", 1, "Max concurrent reconciles for the SandboxTemplate controller")
+	flag.IntVar(&o.warmPoolMaxBatchSize, "sandbox-warm-pool-max-batch-size", 300, "Max batch size for parallel sandbox creation and deletion in SandboxWarmPool controller. Default is 300.")
+	flag.BoolVar(&o.enableWarmPoolEviction, "enable-warm-pool-eviction", true, "Mark pods created by a warm pool as ready-to-evict by default.")
+	flag.BoolVar(&o.warmPoolDisableCRManage, "sandbox-warm-pool-disable-cr-management", false,
 		"Disable per-CR Sandbox create/delete in the SandboxWarmPool controller (status-only). "+
 			"Use with the L3 writable-aggregation design, where warm capacity is driven per-node by sandboxd "+
 			"and CR-based replenishment would fight the aggregated node-local claim path.")
-	opts := zap.Options{
-		Development: false,
+	o.zap.BindFlags(flag.CommandLine)
+}
+
+func (o *options) validate() error {
+	if o.sandboxWorkers <= 0 || o.claimWorkers <= 0 || o.warmPoolWorkers <= 0 {
+		return fmt.Errorf("concurrent workers must be greater than 0")
 	}
-	opts.BindFlags(flag.CommandLine)
+	if o.warmPoolMaxBatchSize <= 0 {
+		return fmt.Errorf("sandbox-warm-pool-max-batch-size must be greater than 0")
+	}
+	if o.kubeAPIBurst <= 0 {
+		return fmt.Errorf("kube-api-burst must be greater than 0")
+	}
+	return nil
+}
+
+func (o *options) totalWorkers() int {
+	return o.sandboxWorkers + o.claimWorkers + o.warmPoolWorkers + o.templateWorkers
+}
+
+func main() {
+	var o options
+	o.bindFlags()
 	flag.Parse()
 
-	if printVersion {
+	if o.printVersion {
 		fmt.Println(version.Print("sandbox-operator"))
-		os.Exit(0)
+		return
 	}
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&o.zap)))
+	if err := o.run(); err != nil {
+		setupLog.Error(err, "sandbox-operator exited")
+		os.Exit(1)
+	}
+}
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-	podMutator, err := podruntime.NewMutator(defaultRuntime)
+func (o *options) run() error {
+	if err := o.validate(); err != nil {
+		return err
+	}
+	podMutator, err := podruntime.NewMutator(o.defaultRuntime)
 	if err != nil {
-		setupLog.Error(err, "invalid runtime configuration")
-		os.Exit(1)
+		return fmt.Errorf("invalid runtime configuration: %w", err)
 	}
-
-	setupLog.Info("Concurrency settings",
-		"sandbox", sandboxConcurrentWorkers,
-		"sandboxClaim", sandboxClaimConcurrentWorkers,
-		"sandboxWarmPool", sandboxWarmPoolConcurrentWorkers,
-		"sandboxTemplate", sandboxTemplateConcurrentWorkers,
-		"sandboxWarmPoolMaxBatchSize", sandboxWarmPoolMaxBatchSize,
-	)
-
-	// Validation checks for concurrency flags
-	if sandboxConcurrentWorkers <= 0 || sandboxClaimConcurrentWorkers <= 0 || sandboxWarmPoolConcurrentWorkers <= 0 {
-		setupLog.Error(nil, "concurrent workers must be greater than 0")
-		os.Exit(1)
-	}
-	// Validation checks for sandboxWarmPoolMaxBatchSize (maximum batch size for sandbox creation and deletion in SandboxWarmPool controller)
-	if sandboxWarmPoolMaxBatchSize <= 0 {
-		setupLog.Error(nil, "sandbox-warm-pool-max-batch-size must be greater than 0")
-		os.Exit(1)
-	}
-	// A logical maximum (too much will create unnecessary load on the API server)
-	totalWorkers := sandboxConcurrentWorkers + sandboxClaimConcurrentWorkers + sandboxWarmPoolConcurrentWorkers + sandboxTemplateConcurrentWorkers
-	if totalWorkers > 1000 {
-		setupLog.Info("Warning: total concurrent workers exceeds 1000, which could lead to resource exhaustion", "total", totalWorkers)
-	}
-
-	if kubeAPIBurst <= 0 {
-		setupLog.Error(nil, "kube-api-burst must be greater than 0")
-		os.Exit(1)
-	}
-	// Warning if the total number of workers exceeds the kube API burst limit
-	if kubeAPIQPS > 0 && totalWorkers > kubeAPIBurst {
-		setupLog.Info("Warning: Total concurrent workers exceeds the kube API burst limit. Workers may experience client-side throttling.",
-			"totalWorkers", totalWorkers,
-			"kubeAPIBurst", kubeAPIBurst,
-		)
-	}
-
-	if enableLeaderElection && leaderElectionNamespace == "" {
-		setupLog.V(1).Info("leader election is enabled (--leader-elect=true), but --leader-election-namespace is empty; attempting auto-detection")
-	}
+	o.logSettings()
 
 	ctx := ctrl.SetupSignalHandler()
-
-	// Initialize Tracing Provider
-	var instrumenter = asmetrics.NewNoOp()
-	if enableTracing {
-		var cleanup func()
-		var err error
-		// Use a timeout context for initialization to prevent blocking
-		initCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-
-		instrumenter, cleanup, err = asmetrics.SetupOTel(initCtx, "sandbox-operator")
-		if err != nil {
-			setupLog.Error(err, "unable to initialize tracing")
-			os.Exit(1)
-		}
-		defer cleanup()
+	instrumenter, cleanup, err := setupTracing(ctx, o.enableTracing)
+	if err != nil {
+		return fmt.Errorf("initialize tracing: %w", err)
 	}
+	defer cleanup()
 
 	// Importing net/http/pprof registers handlers on the global DefaultServeMux.
-	// Reset it to avoid accidentally exposing pprof via any server that uses the default mux.
+	// Reset it so no server using the default mux exposes pprof by accident.
 	http.DefaultServeMux = http.NewServeMux()
 
 	scheme := controllers.Scheme
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
 	utilruntime.Must(cocoonsandboxv1.AddToScheme(scheme))
-	if extensions {
+	if o.extensions {
 		utilruntime.Must(extensionsv1alpha1.AddToScheme(scheme))
 		utilruntime.Must(extensionsv1beta1.AddToScheme(scheme))
 	}
 
-	metricsOpts := metricsserver.Options{
-		BindAddress: metricsAddr,
-	}
-	if enablePprof || enablePprofDebug {
-		setupLog.Info("pprof enabled", "debug", enablePprofDebug)
-		metricsOpts.ExtraHandlers = map[string]http.Handler{
-			"/debug/pprof/profile": http.HandlerFunc(pprof.Profile),
-		}
-		if enablePprofDebug {
-			setupLog.Info("pprof debug endpoints enabled")
-			if pprofBlockProfileRate < 0 {
-				setupLog.Info("invalid pprof block profile rate; clamping to 0", "rate", pprofBlockProfileRate)
-				pprofBlockProfileRate = 0
-			}
-			if pprofMutexProfileFraction < 0 {
-				setupLog.Info("invalid pprof mutex profile fraction; clamping to 0", "fraction", pprofMutexProfileFraction)
-				pprofMutexProfileFraction = 0
-			}
-			runtime.SetBlockProfileRate(pprofBlockProfileRate)
-			runtime.SetMutexProfileFraction(pprofMutexProfileFraction)
-			setupLog.Info("pprof sampling configured",
-				"blockProfileRateNs", pprofBlockProfileRate,
-				"mutexProfileFraction", pprofMutexProfileFraction,
-			)
-			metricsOpts.ExtraHandlers["/debug/pprof/"] = http.HandlerFunc(pprof.Index)
-			metricsOpts.ExtraHandlers["/debug/pprof/cmdline"] = http.HandlerFunc(pprof.Cmdline)
-			metricsOpts.ExtraHandlers["/debug/pprof/symbol"] = http.HandlerFunc(pprof.Symbol)
-			metricsOpts.ExtraHandlers["/debug/pprof/heap"] = pprof.Handler("heap")
-			metricsOpts.ExtraHandlers["/debug/pprof/goroutine"] = pprof.Handler("goroutine")
-			metricsOpts.ExtraHandlers["/debug/pprof/allocs"] = pprof.Handler("allocs")
-			metricsOpts.ExtraHandlers["/debug/pprof/block"] = pprof.Handler("block")
-			metricsOpts.ExtraHandlers["/debug/pprof/mutex"] = pprof.Handler("mutex")
-			metricsOpts.ExtraHandlers["/debug/pprof/trace"] = http.HandlerFunc(pprof.Trace)
-			metricsOpts.ExtraHandlers["/debug/fgprof"] = fgprof.Handler()
-		}
-	}
-
 	restConfig := ctrl.GetConfigOrDie()
-	restConfig.QPS = float32(kubeAPIQPS)
-	restConfig.Burst = kubeAPIBurst
+	restConfig.QPS = float32(o.kubeAPIQPS)
+	restConfig.Burst = o.kubeAPIBurst
 
-	if manageWebhookCerts {
-		// Create a temporary client to patch the CRDs and access Secrets
-		tempClient, err := client.New(restConfig, client.Options{Scheme: scheme})
-		if err != nil {
-			setupLog.Error(err, "unable to create temporary client")
-			os.Exit(1)
-		}
-
-		// Generate or load self-signed TLS certificates for the webhook server
-		setupLog.Info("Preparing webhook certificates", "certDir", webhookCertDir)
-		caPEM, err := generateWebhookCerts(ctx, tempClient, webhookCertDir, webhookServiceName, webhookNamespace, clusterDomain)
-		if err != nil {
-			setupLog.Error(err, "unable to prepare webhook certificates")
-			os.Exit(1)
-		}
-
-		setupLog.Info("Patching CRDs with generated CA bundle")
-		if err := patchCRDs(ctx, tempClient, caPEM, webhookServiceName, webhookNamespace, extensions); err != nil {
-			setupLog.Error(err, "failed to patch CRDs with CA bundle")
-			os.Exit(1)
-		}
-	} else {
-		setupLog.Info("Webhook cert management and CRD conversion caBundle patching disabled; expecting existing tls.crt/tls.key in certDir and CRDs patched externally",
-			"certDir", webhookCertDir,
-			"serviceName", webhookServiceName,
-			"namespace", webhookNamespace,
-		)
-		for _, f := range []string{"tls.crt", "tls.key"} {
-			p := filepath.Join(webhookCertDir, f)
-			if _, err := os.Stat(p); err != nil {
-				setupLog.Error(err, "required webhook cert file missing", "path", p,
-					"hint", "with --manage-webhook-certs=false you must pre-provision tls.crt/tls.key via cert-manager, GKE, or similar")
-				os.Exit(1)
-			}
-		}
+	if err = o.prepareWebhookCerts(ctx, restConfig, scheme); err != nil {
+		return fmt.Errorf("webhook certificate setup: %w", err)
 	}
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                  scheme,
-		Metrics:                 metricsOpts,
-		HealthProbeBindAddress:  probeAddr,
-		LeaderElection:          enableLeaderElection,
-		LeaderElectionNamespace: leaderElectionNamespace,
+		Metrics:                 metricsserver.Options{BindAddress: o.metricsAddr, ExtraHandlers: o.pprofHandlers()},
+		HealthProbeBindAddress:  o.probeAddr,
+		LeaderElection:          o.enableLeaderElection,
+		LeaderElectionNamespace: o.leaderElectionNamespace,
 		LeaderElectionID:        "sandbox-operator.agents.x-k8s.io",
 		WebhookServer: webhook.NewServer(webhook.Options{
-			Port:    webhookPort,
-			CertDir: webhookCertDir,
+			Port:    o.webhookPort,
+			CertDir: o.webhookCertDir,
 			TLSOpts: []func(*tls.Config){
-				func(cfg *tls.Config) {
-					cfg.ClientAuth = tls.NoClientCert
-				},
+				func(cfg *tls.Config) { cfg.ClientAuth = tls.NoClientCert },
 			},
 		}),
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
+		return fmt.Errorf("start manager: %w", err)
 	}
 
-	// Register the custom Sandbox metric collector globally.
 	asmetrics.RegisterSandboxCollector(mgr.GetClient(), mgr.GetLogger().WithName("sandbox-collector"))
 
-	if err = (&controllers.SandboxReconciler{
-		Client:        mgr.GetClient(),
-		Scheme:        mgr.GetScheme(),
-		Tracer:        instrumenter,
-		ClusterDomain: clusterDomain,
-		PodMutator:    podMutator,
-	}).SetupWithManager(mgr, sandboxConcurrentWorkers); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Sandbox")
-		os.Exit(1)
-	}
-
-	if err = ctrl.NewWebhookManagedBy(mgr, &sandboxv1beta1.Sandbox{}).
-		Complete(); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "Sandbox")
-		os.Exit(1)
-	}
-
-	if err = (&cocooncontroller.CocoonSandboxNodeController{
-		Client: mgr.GetClient(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "CocoonSandboxNode")
-		os.Exit(1)
-	}
-	if err = (&cocooncontroller.CocoonSandboxPoolController{
-		Client: mgr.GetClient(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "CocoonSandboxPool")
-		os.Exit(1)
-	}
-	if err = (&cocooncontroller.CocoonSandboxController{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "CocoonSandbox")
-		os.Exit(1)
-	}
-
-	if extensions {
-		warmSandboxQueue := queue.NewSimpleSandboxQueue()
-
-		var allowedDomains []string
-		configPath := "/etc/sandbox-config/allowed-label-domains"
-		if data, err := os.ReadFile(configPath); err == nil {
-			val := strings.TrimSpace(string(data))
-			if val != "" {
-				for _, d := range strings.FieldsFunc(val, func(c rune) bool {
-					return c == ',' || c == '\n' || c == '\r'
-				}) {
-					d = strings.ToLower(strings.TrimSpace(d))
-					if d != "" {
-						allowedDomains = append(allowedDomains, d)
-					}
-				}
-			}
-		} else if !os.IsNotExist(err) {
-			setupLog.Error(err, "failed to read configuration file", "path", configPath)
-			os.Exit(1)
-		}
-
-		if err = (&extensionscontrollers.SandboxClaimReconciler{
-			Client:              mgr.GetClient(),
-			Scheme:              mgr.GetScheme(),
-			WarmSandboxQueue:    warmSandboxQueue,
-			Recorder:            mgr.GetEventRecorder("sandboxclaim-controller"),
-			Tracer:              instrumenter,
-			AllowedLabelDomains: allowedDomains,
-		}).SetupWithManager(mgr, sandboxClaimConcurrentWorkers); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "SandboxClaim")
-			os.Exit(1)
-		}
-
-		if err = (&extensionscontrollers.SandboxTemplateReconciler{
-			Client:          mgr.GetClient(),
-			Scheme:          mgr.GetScheme(),
-			Recorder:        mgr.GetEventRecorder("sandboxtemplate-controller"),
-			Tracer:          instrumenter,
-			RouterNamespace: webhookNamespace,
-		}).SetupWithManager(mgr, sandboxTemplateConcurrentWorkers); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "SandboxTemplate")
-			os.Exit(1)
-		}
-
-		if err = (&extensionscontrollers.SandboxWarmPoolReconciler{
-			Client:                     mgr.GetClient(),
-			Scheme:                     mgr.GetScheme(),
-			MaxBatchSize:               sandboxWarmPoolMaxBatchSize,
-			EnableWarmPoolEviction:     enableWarmPoolEviction,
-			DisableSandboxCRManagement: sandboxWarmPoolDisableCRManagement,
-		}).SetupWithManager(mgr, sandboxWarmPoolConcurrentWorkers); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "SandboxWarmPool")
-			os.Exit(1)
-		}
-
-		if err = ctrl.NewWebhookManagedBy(mgr, &extensionsv1beta1.SandboxClaim{}).
-			Complete(); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "SandboxClaim")
-			os.Exit(1)
-		}
-
-		if err = ctrl.NewWebhookManagedBy(mgr, &extensionsv1beta1.SandboxTemplate{}).
-			Complete(); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "SandboxTemplate")
-			os.Exit(1)
-		}
-
-		if err = ctrl.NewWebhookManagedBy(mgr, &extensionsv1beta1.SandboxWarmPool{}).
-			Complete(); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "SandboxWarmPool")
-			os.Exit(1)
-		}
+	if err := o.setupControllers(mgr, instrumenter, podMutator); err != nil {
+		return err
 	}
 
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
-		os.Exit(1)
+		return fmt.Errorf("set up health check: %w", err)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
-		os.Exit(1)
+		return fmt.Errorf("set up ready check: %w", err)
 	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {
-		setupLog.Error(err, "problem running manager")
-		os.Exit(1)
+		return fmt.Errorf("run manager: %w", err)
 	}
+	return nil
+}
+
+func (o *options) logSettings() {
+	setupLog.Info("Concurrency settings",
+		"sandbox", o.sandboxWorkers,
+		"sandboxClaim", o.claimWorkers,
+		"sandboxWarmPool", o.warmPoolWorkers,
+		"sandboxTemplate", o.templateWorkers,
+		"sandboxWarmPoolMaxBatchSize", o.warmPoolMaxBatchSize,
+	)
+	total := o.totalWorkers()
+	if total > 1000 {
+		setupLog.Info("Warning: total concurrent workers exceeds 1000, which could lead to resource exhaustion", "total", total)
+	}
+	if o.kubeAPIQPS > 0 && total > o.kubeAPIBurst {
+		setupLog.Info("Warning: Total concurrent workers exceeds the kube API burst limit. Workers may experience client-side throttling.",
+			"totalWorkers", total, "kubeAPIBurst", o.kubeAPIBurst)
+	}
+	if o.enableLeaderElection && o.leaderElectionNamespace == "" {
+		setupLog.V(1).Info("leader election is enabled (--leader-elect=true), but --leader-election-namespace is empty; attempting auto-detection")
+	}
+}
+
+func setupTracing(ctx context.Context, enabled bool) (asmetrics.Instrumenter, func(), error) {
+	if !enabled {
+		return asmetrics.NewNoOp(), func() {}, nil
+	}
+	initCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return asmetrics.SetupOTel(initCtx, "sandbox-operator")
+}
+
+func (o *options) pprofHandlers() map[string]http.Handler {
+	if !o.enablePprof && !o.enablePprofDebug {
+		return nil
+	}
+	setupLog.Info("pprof enabled", "debug", o.enablePprofDebug)
+	h := map[string]http.Handler{"/debug/pprof/profile": http.HandlerFunc(pprof.Profile)}
+	if !o.enablePprofDebug {
+		return h
+	}
+
+	setupLog.Info("pprof debug endpoints enabled")
+	blockRate := max(o.pprofBlockProfileRate, 0)
+	mutexFraction := max(o.pprofMutexProfileFraction, 0)
+	if blockRate != o.pprofBlockProfileRate {
+		setupLog.Info("invalid pprof block profile rate; clamping to 0", "rate", o.pprofBlockProfileRate)
+	}
+	if mutexFraction != o.pprofMutexProfileFraction {
+		setupLog.Info("invalid pprof mutex profile fraction; clamping to 0", "fraction", o.pprofMutexProfileFraction)
+	}
+	runtime.SetBlockProfileRate(blockRate)
+	runtime.SetMutexProfileFraction(mutexFraction)
+	setupLog.Info("pprof sampling configured", "blockProfileRateNs", blockRate, "mutexProfileFraction", mutexFraction)
+
+	h["/debug/pprof/"] = http.HandlerFunc(pprof.Index)
+	h["/debug/pprof/cmdline"] = http.HandlerFunc(pprof.Cmdline)
+	h["/debug/pprof/symbol"] = http.HandlerFunc(pprof.Symbol)
+	h["/debug/pprof/heap"] = pprof.Handler("heap")
+	h["/debug/pprof/goroutine"] = pprof.Handler("goroutine")
+	h["/debug/pprof/allocs"] = pprof.Handler("allocs")
+	h["/debug/pprof/block"] = pprof.Handler("block")
+	h["/debug/pprof/mutex"] = pprof.Handler("mutex")
+	h["/debug/pprof/trace"] = http.HandlerFunc(pprof.Trace)
+	h["/debug/fgprof"] = fgprof.Handler()
+	return h
+}
+
+func (o *options) prepareWebhookCerts(ctx context.Context, restConfig *rest.Config, scheme *apiruntime.Scheme) error {
+	if !o.manageWebhookCerts {
+		setupLog.Info("Webhook cert management and CRD conversion caBundle patching disabled; expecting existing tls.crt/tls.key in certDir and CRDs patched externally",
+			"certDir", o.webhookCertDir, "serviceName", o.webhookServiceName, "namespace", o.webhookNamespace)
+		for _, f := range []string{"tls.crt", "tls.key"} {
+			p := filepath.Join(o.webhookCertDir, f)
+			if _, err := os.Stat(p); err != nil {
+				return fmt.Errorf("required webhook cert file %s missing: %w (pre-provision tls.crt/tls.key via cert-manager, GKE, or similar)", p, err)
+			}
+		}
+		return nil
+	}
+
+	tempClient, err := client.New(restConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		return fmt.Errorf("create temporary client: %w", err)
+	}
+	setupLog.Info("Preparing webhook certificates", "certDir", o.webhookCertDir)
+	caPEM, err := generateWebhookCerts(ctx, tempClient, o.webhookCertDir, o.webhookServiceName, o.webhookNamespace, o.clusterDomain)
+	if err != nil {
+		return fmt.Errorf("prepare webhook certificates: %w", err)
+	}
+	setupLog.Info("Patching CRDs with generated CA bundle")
+	if err := patchCRDs(ctx, tempClient, caPEM, o.webhookServiceName, o.webhookNamespace, o.extensions); err != nil {
+		return fmt.Errorf("patch CRDs with CA bundle: %w", err)
+	}
+	return nil
+}
+
+func (o *options) setupControllers(mgr ctrl.Manager, instrumenter asmetrics.Instrumenter, podMutator controllers.PodMutator) error {
+	if err := (&controllers.SandboxReconciler{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		Tracer:        instrumenter,
+		ClusterDomain: o.clusterDomain,
+		PodMutator:    podMutator,
+	}).SetupWithManager(mgr, o.sandboxWorkers); err != nil {
+		return fmt.Errorf("controller Sandbox: %w", err)
+	}
+	if err := ctrl.NewWebhookManagedBy(mgr, &sandboxv1beta1.Sandbox{}).Complete(); err != nil {
+		return fmt.Errorf("webhook Sandbox: %w", err)
+	}
+	if err := (&cocooncontroller.CocoonSandboxNodeController{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("controller CocoonSandboxNode: %w", err)
+	}
+	if err := (&cocooncontroller.CocoonSandboxPoolController{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("controller CocoonSandboxPool: %w", err)
+	}
+	if err := (&cocooncontroller.CocoonSandboxController{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("controller CocoonSandbox: %w", err)
+	}
+	if !o.extensions {
+		return nil
+	}
+	return o.setupExtensionControllers(mgr, instrumenter)
+}
+
+func (o *options) setupExtensionControllers(mgr ctrl.Manager, instrumenter asmetrics.Instrumenter) error {
+	allowedDomains, err := readAllowedLabelDomains()
+	if err != nil {
+		return err
+	}
+	if err := (&extensionscontrollers.SandboxClaimReconciler{
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		WarmSandboxQueue:    queue.NewSimpleSandboxQueue(),
+		Recorder:            mgr.GetEventRecorder("sandboxclaim-controller"),
+		Tracer:              instrumenter,
+		AllowedLabelDomains: allowedDomains,
+	}).SetupWithManager(mgr, o.claimWorkers); err != nil {
+		return fmt.Errorf("controller SandboxClaim: %w", err)
+	}
+	if err := (&extensionscontrollers.SandboxTemplateReconciler{
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Recorder:        mgr.GetEventRecorder("sandboxtemplate-controller"),
+		Tracer:          instrumenter,
+		RouterNamespace: o.webhookNamespace,
+	}).SetupWithManager(mgr, o.templateWorkers); err != nil {
+		return fmt.Errorf("controller SandboxTemplate: %w", err)
+	}
+	if err := (&extensionscontrollers.SandboxWarmPoolReconciler{
+		Client:                     mgr.GetClient(),
+		Scheme:                     mgr.GetScheme(),
+		MaxBatchSize:               o.warmPoolMaxBatchSize,
+		EnableWarmPoolEviction:     o.enableWarmPoolEviction,
+		DisableSandboxCRManagement: o.warmPoolDisableCRManage,
+	}).SetupWithManager(mgr, o.warmPoolWorkers); err != nil {
+		return fmt.Errorf("controller SandboxWarmPool: %w", err)
+	}
+	for _, w := range []client.Object{
+		&extensionsv1beta1.SandboxClaim{},
+		&extensionsv1beta1.SandboxTemplate{},
+		&extensionsv1beta1.SandboxWarmPool{},
+	} {
+		if err := ctrl.NewWebhookManagedBy(mgr, w).Complete(); err != nil {
+			return fmt.Errorf("webhook %T: %w", w, err)
+		}
+	}
+	return nil
+}
+
+// readAllowedLabelDomains reads the optional label-domain allowlist mounted by
+// the deployment; a missing file leaves the allowlist empty.
+func readAllowedLabelDomains() ([]string, error) {
+	const configPath = "/etc/sandbox-config/allowed-label-domains"
+	data, err := os.ReadFile(configPath)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", configPath, err)
+	}
+	var domains []string
+	for d := range strings.FieldsFuncSeq(strings.TrimSpace(string(data)), func(c rune) bool {
+		return c == ',' || c == '\n' || c == '\r'
+	}) {
+		if d = strings.ToLower(strings.TrimSpace(d)); d != "" {
+			domains = append(domains, d)
+		}
+	}
+	return domains, nil
 }

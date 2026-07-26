@@ -24,9 +24,6 @@ import (
 	"testing"
 	"time"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
-	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -37,6 +34,10 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
+	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
 func TestReconcilePool(t *testing.T) {
@@ -318,25 +319,26 @@ func TestPoolLabelValueInIntegration(t *testing.T) {
 				Name:      templateName,
 				Namespace: poolNamespace,
 			},
-			Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-				ObjectMeta: sandboxv1beta1.PodMetadata{
-					Labels: map[string]string{
-						"pod-label": "from-podtemplate",
-						"version":   "2.0",
-					},
-					Annotations: map[string]string{
-						"pod-annotation": "from-podtemplate",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "test-image:latest",
+			Spec: extensionsv1beta1.SandboxTemplateSpec{
+				SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+					ObjectMeta: sandboxv1beta1.PodMetadata{
+						Labels: map[string]string{
+							"pod-label": "from-podtemplate",
+							"version":   "2.0",
+						},
+						Annotations: map[string]string{
+							"pod-annotation": "from-podtemplate",
 						},
 					},
-				},
-			}},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "test-container",
+								Image: "test-image:latest",
+							},
+						},
+					},
+				}},
 			},
 		}
 
@@ -404,37 +406,40 @@ func TestCreatePoolSandboxPropagatesVolumeClaimTemplates(t *testing.T) {
 			Name:      templateName,
 			Namespace: poolNamespace,
 		},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "app", Image: "test-image"},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
+				PodTemplate: sandboxv1beta1.PodTemplate{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: "app", Image: "test-image"},
+						},
+					},
+				},
+				VolumeClaimTemplates: []sandboxv1beta1.PersistentVolumeClaimTemplate{
+					{
+						EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"},
+						Spec: corev1.PersistentVolumeClaimSpec{
+							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+							Resources: corev1.VolumeResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceStorage: resource.MustParse("1Gi"),
+								},
+							},
+						},
+					},
+					{
+						EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "cache"},
+						Spec: corev1.PersistentVolumeClaimSpec{
+							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+							Resources: corev1.VolumeResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceStorage: resource.MustParse("500Mi"),
+								},
+							},
+						},
+					},
 				},
 			},
-		},
-			VolumeClaimTemplates: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{
-					EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"},
-					Spec: corev1.PersistentVolumeClaimSpec{
-						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-						Resources: corev1.VolumeResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceStorage: resource.MustParse("1Gi"),
-							},
-						},
-					},
-				},
-				{
-					EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "cache"},
-					Spec: corev1.PersistentVolumeClaimSpec{
-						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-						Resources: corev1.VolumeResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceStorage: resource.MustParse("500Mi"),
-							},
-						},
-					},
-				},
-			}},
 		},
 	}
 
@@ -528,9 +533,10 @@ func TestCreatePoolSandboxAppliesSecureDefaults(t *testing.T) {
 					Name:      templateName,
 					Namespace: poolNamespace,
 				},
-				Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-					Spec: tt.templateSpec,
-				}}, NetworkPolicyManagement: tt.management,
+				Spec: extensionsv1beta1.SandboxTemplateSpec{
+					SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+						Spec: tt.templateSpec,
+					}}, NetworkPolicyManagement: tt.management,
 					NetworkPolicy: tt.networkPolicy,
 				},
 			}
@@ -849,16 +855,17 @@ func TestReconcilePool_TemplateUpdateRollout(t *testing.T) {
 					Name:      templateName,
 					Namespace: poolNamespace,
 				},
-				Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:  "test-container",
-								Image: "image-v1",
+				Spec: extensionsv1beta1.SandboxTemplateSpec{
+					SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name:  "test-container",
+									Image: "image-v1",
+								},
 							},
 						},
-					},
-				}},
+					}},
 				},
 			}
 
@@ -991,16 +998,17 @@ func TestReconcilePool_TemplateRefUpdate_SameSpec(t *testing.T) {
 			Name:      templateName1,
 			Namespace: poolNamespace,
 		},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:  "test-container",
-						Image: "image-v1",
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "test-container",
+							Image: "image-v1",
+						},
 					},
 				},
-			},
-		}},
+			}},
 		},
 	}
 
@@ -1206,9 +1214,10 @@ func TestComparePodSpecsNormalization(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			template := &extensionsv1beta1.SandboxTemplate{
-				Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-					Spec: tt.templateSpec,
-				}},
+				Spec: extensionsv1beta1.SandboxTemplateSpec{
+					SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+						Spec: tt.templateSpec,
+					}},
 				},
 			}
 			if tt.secureByDef {
@@ -1248,14 +1257,15 @@ func TestReconcilePool_TemplateUpdate_DNSPolicy(t *testing.T) {
 			Name:      templateName,
 			Namespace: poolNamespace,
 		},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "test", Image: "img"},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "test", Image: "img"},
+					},
+					DNSPolicy: corev1.DNSDefault,
 				},
-				DNSPolicy: corev1.DNSDefault,
-			},
-		}}, NetworkPolicyManagement: extensionsv1beta1.NetworkPolicyManagementUnmanaged,
+			}}, NetworkPolicyManagement: extensionsv1beta1.NetworkPolicyManagementUnmanaged,
 		},
 	}
 
@@ -1326,13 +1336,14 @@ func TestIsSandboxStale_OrphanedSandboxVetting(t *testing.T) {
 			Name:      templateName,
 			Namespace: poolNamespace,
 		},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{Name: "app", Image: "genuine-image"},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "app", Image: "genuine-image"},
+					},
 				},
-			},
-		}},
+			}},
 		},
 	}
 
@@ -1627,10 +1638,10 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 				}
 			},
 			updateFn: func(tmpl *extensionsv1beta1.SandboxTemplate) {
-				if tmpl.Spec.SandboxBlueprint.VolumeClaimTemplates[0].EmbeddedObjectMetadata.Annotations == nil {
-					tmpl.Spec.SandboxBlueprint.VolumeClaimTemplates[0].EmbeddedObjectMetadata.Annotations = make(map[string]string)
+				if tmpl.Spec.VolumeClaimTemplates[0].Annotations == nil {
+					tmpl.Spec.VolumeClaimTemplates[0].Annotations = make(map[string]string)
 				}
-				tmpl.Spec.SandboxBlueprint.VolumeClaimTemplates[0].EmbeddedObjectMetadata.Annotations["new-annotation"] = "value"
+				tmpl.Spec.VolumeClaimTemplates[0].Annotations["new-annotation"] = "value"
 			},
 			expectRecreation: false,
 		},
@@ -1642,10 +1653,10 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 				}
 			},
 			updateFn: func(tmpl *extensionsv1beta1.SandboxTemplate) {
-				if tmpl.Spec.SandboxBlueprint.VolumeClaimTemplates[0].EmbeddedObjectMetadata.Labels == nil {
-					tmpl.Spec.SandboxBlueprint.VolumeClaimTemplates[0].EmbeddedObjectMetadata.Labels = make(map[string]string)
+				if tmpl.Spec.VolumeClaimTemplates[0].Labels == nil {
+					tmpl.Spec.VolumeClaimTemplates[0].Labels = make(map[string]string)
 				}
-				tmpl.Spec.SandboxBlueprint.VolumeClaimTemplates[0].EmbeddedObjectMetadata.Labels["new-label"] = "value"
+				tmpl.Spec.VolumeClaimTemplates[0].Labels["new-label"] = "value"
 			},
 			expectRecreation: false,
 		},
@@ -1662,12 +1673,12 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 		{
 			name: "VCT addition should recreate",
 			updateFn: func(tmpl *extensionsv1beta1.SandboxTemplate) {
-				tmpl.Spec.SandboxBlueprint.VolumeClaimTemplates = []sandboxv1beta1.PersistentVolumeClaimTemplate{
+				tmpl.Spec.VolumeClaimTemplates = []sandboxv1beta1.PersistentVolumeClaimTemplate{
 					createVolumeClaimTemplate("data", "standard"),
 				}
 			},
 			verifyFn: func(t *testing.T, sb sandboxv1beta1.Sandbox) {
-				require.Len(t, sb.Spec.SandboxBlueprint.VolumeClaimTemplates, 1)
+				require.Len(t, sb.Spec.VolumeClaimTemplates, 1)
 				require.Equal(t, "data", sb.Spec.SandboxBlueprint.VolumeClaimTemplates[0].Name)
 			},
 			expectRecreation: true,
@@ -1679,11 +1690,11 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 			},
 			updateFn: func(tmpl *extensionsv1beta1.SandboxTemplate) {
 				newSC := "fast-ssd"
-				tmpl.Spec.SandboxBlueprint.VolumeClaimTemplates[0].Spec.StorageClassName = &newSC
+				tmpl.Spec.VolumeClaimTemplates[0].Spec.StorageClassName = &newSC
 			},
 			verifyFn: func(t *testing.T, sb sandboxv1beta1.Sandbox) {
-				require.Len(t, sb.Spec.SandboxBlueprint.VolumeClaimTemplates, 1)
-				require.Equal(t, "fast-ssd", *sb.Spec.SandboxBlueprint.VolumeClaimTemplates[0].Spec.StorageClassName)
+				require.Len(t, sb.Spec.VolumeClaimTemplates, 1)
+				require.Equal(t, "fast-ssd", *sb.Spec.VolumeClaimTemplates[0].Spec.StorageClassName)
 			},
 			expectRecreation: true,
 		},
@@ -1693,21 +1704,21 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 				bp.VolumeClaimTemplates = []sandboxv1beta1.PersistentVolumeClaimTemplate{createVolumeClaimTemplate("data", "standard")}
 			},
 			updateFn: func(tmpl *extensionsv1beta1.SandboxTemplate) {
-				tmpl.Spec.SandboxBlueprint.VolumeClaimTemplates = nil
+				tmpl.Spec.VolumeClaimTemplates = nil
 			},
 			verifyFn: func(t *testing.T, sb sandboxv1beta1.Sandbox) {
-				require.Empty(t, sb.Spec.SandboxBlueprint.VolumeClaimTemplates)
+				require.Empty(t, sb.Spec.VolumeClaimTemplates)
 			},
 			expectRecreation: true,
 		},
 		{
 			name: "Service addition should recreate",
 			updateFn: func(tmpl *extensionsv1beta1.SandboxTemplate) {
-				tmpl.Spec.SandboxBlueprint.Service = &trueVal
+				tmpl.Spec.Service = &trueVal
 			},
 			verifyFn: func(t *testing.T, sb sandboxv1beta1.Sandbox) {
-				require.NotNil(t, sb.Spec.SandboxBlueprint.Service)
-				require.True(t, *sb.Spec.SandboxBlueprint.Service)
+				require.NotNil(t, sb.Spec.Service)
+				require.True(t, *sb.Spec.Service)
 			},
 			expectRecreation: true,
 		},
@@ -2169,17 +2180,18 @@ func createPoolSandbox(poolName, namespace, poolNameHash string, template *exten
 				sandboxv1beta1.SandboxTemplateHashLabel:              sandboxBlueprintHash,
 			},
 		},
-		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			ObjectMeta: sandboxv1beta1.PodMetadata{
-				Labels: map[string]string{
-					warmPoolSandboxLabel:                                 poolNameHash,
-					sandboxTemplateRefHash:                               templateRefHash,
-					sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel: podTemplateHash,
-					sandboxv1beta1.SandboxTemplateHashLabel:              sandboxBlueprintHash,
+		Spec: sandboxv1beta1.SandboxSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				ObjectMeta: sandboxv1beta1.PodMetadata{
+					Labels: map[string]string{
+						warmPoolSandboxLabel:                                 poolNameHash,
+						sandboxTemplateRefHash:                               templateRefHash,
+						sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel: podTemplateHash,
+						sandboxv1beta1.SandboxTemplateHashLabel:              sandboxBlueprintHash,
+					},
 				},
-			},
-			Spec: podSpec,
-		}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning,
+				Spec: podSpec,
+			}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning,
 		},
 	}
 }
@@ -2190,16 +2202,17 @@ func createTemplate(namespace string) *extensionsv1beta1.SandboxTemplate {
 			Name:      "test-template",
 			Namespace: namespace,
 		},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:  "test-container",
-						Image: "test-image",
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "test-container",
+							Image: "test-image",
+						},
 					},
 				},
-			},
-		}},
+			}},
 		},
 	}
 }

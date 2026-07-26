@@ -161,8 +161,10 @@ func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
 			Authorizer: &ReviewAuthorizer{Reviewer: fakeSAR{allow: false}},
 			Recorder:   noopRecorder{}, BaseContext: context.Background(), Logger: testr.New(t),
 		})
-		req := ClaimRequest{Namespace: "default", ClaimName: "c3", WarmPool: "base:24.04",
-			Selector: map[string]string{RequestUserSelectorKey: "alice"}}
+		req := ClaimRequest{
+			Namespace: "default", ClaimName: "c3", WarmPool: "base:24.04",
+			Selector: map[string]string{RequestUserSelectorKey: "alice"},
+		}
 		a, err := gw.Claim(context.Background(), req)
 		require.Error(t, err)
 		require.False(t, IsFallback(err), "an authz denial is a hard reject, not a fallback")
@@ -190,8 +192,10 @@ func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
 			Authorizer: &ReviewAuthorizer{Reviewer: fakeSAR{allow: true}},
 			Recorder:   NewClaimRecorder(fc), BaseContext: context.Background(), Logger: testr.New(t),
 		})
-		req := ClaimRequest{Namespace: "default", ClaimName: "c5", WarmPool: "base:24.04",
-			Selector: map[string]string{RequestUserSelectorKey: "alice"}}
+		req := ClaimRequest{
+			Namespace: "default", ClaimName: "c5", WarmPool: "base:24.04",
+			Selector: map[string]string{RequestUserSelectorKey: "alice"},
+		}
 		a, err := gw.Claim(context.Background(), req)
 		require.NoError(t, err)
 		require.NotEmpty(t, a.SandboxName)

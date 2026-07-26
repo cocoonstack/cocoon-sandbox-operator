@@ -338,10 +338,7 @@ func distribute(replicas int32, nodes []nodeView) map[string]int {
 	if len(nodes) == 0 {
 		return targets
 	}
-	total := int(replicas)
-	if total < 0 {
-		total = 0
-	}
+	total := max(int(replicas), 0)
 	base := total / len(nodes)
 	remainder := total % len(nodes)
 	for i := range nodes {
