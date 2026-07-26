@@ -104,8 +104,72 @@ func sandboxOpenAPIDefinitions(ref openapicommon.ReferenceCallback) map[string]o
 		},
 		Dependencies: []string{sandboxDefPrefix + "Sandbox"},
 	}
-	return map[string]openapicommon.OpenAPIDefinition{
+	defs := map[string]openapicommon.OpenAPIDefinition{
 		sandboxDefPrefix + "Sandbox":     sandbox,
 		sandboxDefPrefix + "SandboxList": list,
+	}
+	// The action subresources (sandboxes/pause, /resume, /fork, /snapshot)
+	// exchange their own request and reply types. Every type reachable from a
+	// served resource needs a model here or InstallAPIGroup fails outright with
+	// "cannot find model definition for ...TypeMeta" — the subresource bodies
+	// embed metav1.TypeMeta, and openapinamer resolves them through this map,
+	// not through the Scheme.
+	// The action bodies embed metav1.TypeMeta, and the definition builder walks
+	// embedded field types looking for a model. Without this entry it aborts
+	// the whole group install with "cannot find model definition for
+	// ...meta.v1.TypeMeta" — a crash loop on rollout, not a degraded feature.
+	typeMeta := openapicommon.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: spec.StringOrArray{"object"},
+				Properties: map[string]spec.Schema{
+					"kind":       stringSchema(),
+					"apiVersion": stringSchema(),
+				},
+			},
+		},
+	}
+	// Registered under BOTH spellings: the namer keys models by Go package path,
+	// while the definition builder resolves embedded fields by their canonical
+	// ("friendly") OpenAPI name. Only one of them being present still aborts the
+	// group install.
+	defs["k8s.io/apimachinery/pkg/apis/meta/v1.TypeMeta"] = typeMeta
+	defs["io.k8s.apimachinery.pkg.apis.meta.v1.TypeMeta"] = typeMeta
+	for _, kind := range []string{
+		"SandboxPauseOptions",
+		"SandboxResumeOptions",
+		"SandboxForkOptions",
+		"SandboxForkResult",
+		"SandboxSnapshotOptions",
+		"SandboxSnapshotResult",
+	} {
+		defs[sandboxDefPrefix+kind] = actionDefinition(kind)
+	}
+	return defs
+}
+
+// actionDefinition is the model for one action-subresource body. Like the
+// Sandbox model it is deliberately coarse: these types are never persisted, so
+// per-field server-side-apply tracking buys nothing — the model exists so the
+// TypeConverter can resolve the GVK at all.
+func actionDefinition(kind string) openapicommon.OpenAPIDefinition {
+	ext := gvkExtension(kind)
+	// These bodies carry their own fields (count, ttlSeconds, children, ...).
+	// Declaring only kind/apiVersion would make every other field "unknown" to
+	// the field manager, so the interior is preserved rather than enumerated —
+	// the same trade the Sandbox model makes, and for the same reason: nothing
+	// here is persisted, so per-field tracking buys nothing.
+	ext["x-kubernetes-preserve-unknown-fields"] = true
+	return openapicommon.OpenAPIDefinition{
+		Schema: spec.Schema{
+			VendorExtensible: spec.VendorExtensible{Extensions: ext},
+			SchemaProps: spec.SchemaProps{
+				Type: spec.StringOrArray{"object"},
+				Properties: map[string]spec.Schema{
+					"kind":       stringSchema(),
+					"apiVersion": stringSchema(),
+				},
+			},
+		},
 	}
 }

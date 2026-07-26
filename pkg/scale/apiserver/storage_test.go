@@ -107,3 +107,25 @@ func TestDelete_FailsLoudWithoutClaimID(t *testing.T) {
 	assert.True(t, apierrors.IsInternalError(err), "expected an internal error, got %v", err)
 	assert.False(t, store.released, "must not release when the sandboxd claim id is unknown")
 }
+
+// The lifecycle verbs are not exercised by these tests; they satisfy the
+// SandboxStore contract so the fake stays a drop-in.
+func (f *fakeStore) Pause(context.Context, string, string) error  { return nil }
+func (f *fakeStore) Resume(context.Context, string, string) error { return nil }
+func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
+	return nil, nil
+}
+func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Snapshot, error) {
+	return scale.Snapshot{}, nil
+}
+func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }
+func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error        { return nil }
+func (f *fakeStore) ClaimSnapshot(context.Context, string, string, int) (scale.Assignment, error) {
+	return scale.Assignment{}, nil
+}
+func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, error) {
+	return scale.PoolKey{}, nil
+}
+func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
+	return scale.SandboxStats{}, nil
+}

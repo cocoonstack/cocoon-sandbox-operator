@@ -51,6 +51,12 @@ func InstallSandboxAPI(server *genericapiserver.GenericAPIServer, store scale.Sa
 	apiGroupInfo := genericapiserver.NewDefaultAPIGroupInfo(sandboxv1beta1.GroupVersion.Group, Scheme, ParameterCodec, Codecs)
 	apiGroupInfo.VersionedResourcesStorageMap[sandboxv1beta1.GroupVersion.Version] = map[string]rest.Storage{
 		"sandboxes": NewSandboxREST(store),
+		// Action subresources. A map key with a slash installs the tail as a
+		// subresource of the head, so the standard Sandbox schema is untouched.
+		"sandboxes/pause":    NewSandboxPauseREST(store),
+		"sandboxes/resume":   NewSandboxResumeREST(store),
+		"sandboxes/fork":     NewSandboxForkREST(store),
+		"sandboxes/snapshot": NewSandboxSnapshotREST(store),
 	}
 	if err := server.InstallAPIGroup(&apiGroupInfo); err != nil {
 		return fmt.Errorf("apiserver: install sandboxes API group: %w", err)

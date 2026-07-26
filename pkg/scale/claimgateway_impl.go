@@ -49,6 +49,19 @@ func IsFallback(err error) bool { return errors.Is(err, ErrNoNodeCapacity) }
 type SandboxdClient interface {
 	Claim(ctx context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error)
 	Release(ctx context.Context, id, token string) error
+
+	// The lifecycle verbs address an already-delivered sandbox by id. They all
+	// take sandboxd's operator path, authorized by the fleet api_token the
+	// client already carries, so the control plane needs no per-sandbox secret.
+	Hibernate(ctx context.Context, id string) error
+	Wake(ctx context.Context, id string) error
+	Fork(ctx context.Context, id string, spec sandboxd.ForkSpec) (sandboxd.ForkResult, error)
+	Checkpoint(ctx context.Context, id string, spec sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error)
+	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)
+	DeleteCheckpoint(ctx context.Context, checkpointID string) error
+	ClaimCheckpoint(ctx context.Context, checkpointID string, spec sandboxd.CheckpointClaimSpec) (sandboxd.ClaimResult, error)
+	Promote(ctx context.Context, id string, spec sandboxd.PromoteSpec) (sandboxd.PoolKey, error)
+	Stats(ctx context.Context, id string) (sandboxd.SandboxStats, error)
 }
 
 // Authorizer runs the inline policy check (SubjectAccessReview + ResourceQuota)

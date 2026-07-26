@@ -16,6 +16,7 @@ package scale
 
 import (
 	"context"
+	"time"
 
 	"k8s.io/apimachinery/pkg/watch"
 
@@ -72,6 +73,72 @@ type SandboxStore interface {
 	// it never destroys a VM on pod state alone. The node's sandboxd address is
 	// resolved from its NodeInventory.
 	Release(ctx context.Context, node, id string) error
+
+	// SandboxLifecycle is the post-claim verb set. Every verb routes to the
+	// owning node and stores nothing: the control plane stays O(pools+nodes)
+	// however many sandboxes are paused, forked, or checkpointed.
+	SandboxLifecycle
+}
+
+// SandboxLifecycle is the verb set a claimed sandbox supports after delivery.
+// It is separate from SandboxStore's placement verbs because these all address
+// an existing sandbox on a known node — there is no pool selection involved,
+// only routing to the owner.
+//
+// Latency is not uniform across these verbs and callers should not assume it
+// is: Resume takes cocoon's mmap restore fast path (~55 ms) and Fork's children
+// clone at 28–75 ms each, but Pause and Snapshot write the guest's memory out
+// and therefore cost time proportional to its size.
+type SandboxLifecycle interface {
+	// Pause hibernates the sandbox: its state is snapshotted and the VM stops,
+	// freeing the node's memory. Idempotent on an already-paused sandbox.
+	Pause(ctx context.Context, node, id string) error
+	// Resume restores a paused sandbox and leaves it running. Idempotent on a
+	// running one.
+	Resume(ctx context.Context, node, id string) error
+	// Fork branches the sandbox into count children, each a fresh claim with
+	// its own id and lease. The parent is checkpointed in place and keeps
+	// running.
+	Fork(ctx context.Context, node, id string, count int, ttlSeconds int) ([]Assignment, error)
+	// Snapshot captures the sandbox's state as a named checkpoint that later
+	// claims can branch from. The source keeps running.
+	Snapshot(ctx context.Context, node, id, name string) (Snapshot, error)
+	// Snapshots lists the checkpoints on a node, newest first.
+	Snapshots(ctx context.Context, node string) ([]Snapshot, error)
+	// DeleteSnapshot removes a checkpoint. A missing checkpoint is success.
+	DeleteSnapshot(ctx context.Context, node, snapshotID string) error
+	// ClaimSnapshot delivers a fresh sandbox branched from a checkpoint.
+	ClaimSnapshot(ctx context.Context, node, snapshotID string, ttlSeconds int) (Assignment, error)
+	// Promote publishes the sandbox as a node-local template that later claims
+	// for that key clone from.
+	Promote(ctx context.Context, node, id, template string) (PoolKey, error)
+	// Stats reports one sandbox's resource usage.
+	Stats(ctx context.Context, node, id string) (SandboxStats, error)
+}
+
+// Snapshot is a captured sandbox state that new sandboxes can branch from.
+type Snapshot struct {
+	ID        string
+	Name      string
+	SandboxID string
+	Pool      PoolKey
+	CreatedAt time.Time
+	// Node is the node holding the checkpoint. Checkpoints are node-local, so
+	// a caller needs it to branch from or delete this snapshot later.
+	Node string
+}
+
+// SandboxStats is one sandbox's resource usage. CPUCount and MemTotalBytes are
+// the tier the VM was booted with and are authoritative; MemUsedBytes is only
+// meaningful when MemUsedMeasured is true (a paused sandbox has no process to
+// measure), so callers must not read zero as "idle".
+type SandboxStats struct {
+	CPUCount        int
+	MemTotalBytes   int64
+	MemUsedBytes    int64
+	MemUsedMeasured bool
+	Paused          bool
+	MeasuredAt      time.Time
 }
 
 // InventoryEntry is one live sandbox as summarized by its owning node.

@@ -48,6 +48,16 @@ func init() {
 	// conversions while keeping v1beta1 the served, prioritized version.
 	internalGV := schema.GroupVersion{Group: sandboxv1beta1.GroupVersion.Group, Version: runtime.APIVersionInternal}
 	Scheme.AddKnownTypes(internalGV, &sandboxv1beta1.Sandbox{}, &sandboxv1beta1.SandboxList{})
+	// The action subresources' request/response bodies round-trip through the
+	// same pipeline, so they need the identity internal version too.
+	Scheme.AddKnownTypes(internalGV,
+		&sandboxv1beta1.SandboxPauseOptions{},
+		&sandboxv1beta1.SandboxResumeOptions{},
+		&sandboxv1beta1.SandboxForkOptions{},
+		&sandboxv1beta1.SandboxForkResult{},
+		&sandboxv1beta1.SandboxSnapshotOptions{},
+		&sandboxv1beta1.SandboxSnapshotResult{},
+	)
 	metav1.AddToGroupVersion(Scheme, sandboxv1beta1.GroupVersion)
 	// The common request/response meta types (ListOptions, GetOptions, Status,
 	// WatchEvent, ...) live at the "v1" options version the request pipeline

@@ -42,6 +42,18 @@ spec:
         app.kubernetes.io/component: aggregated-apiserver
     spec:
       serviceAccountName: cocoon-sandbox-apiserver
+      # An unavailable APIService does not just fail `kubectl get sandboxes`: it
+      # fails discovery for the whole cluster, so the two replicas must never
+      # share a failure domain. Spreading is required, not preferred — running
+      # both on one node is worse than running one, because it turns a single
+      # drain into a cluster-wide discovery outage.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: cocoon-sandbox-apiserver
       containers:
       - name: cocoon-sandbox-apiserver
         image: ko://github.com/cocoonstack/cocoon-sandbox-operator/cmd/sandbox-apiserver # placeholder value, replaced by deployment scripts
