@@ -58,9 +58,6 @@ const (
 	sandboxdMaxIdleConns        = 256
 	sandboxdMaxIdleConnsPerHost = 32
 	sandboxdIdleConnTimeout     = 90 * time.Second
-
-	// watchIdleBackoffFactor caps how far a quiet watch stretches its poll.
-	watchIdleBackoffFactor = 8
 )
 
 // NodeInventoryGVK is the GroupVersionKind of the O(nodes) intent object the
@@ -297,28 +294,37 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 	if s.sandboxdFactory == nil {
 		return Assignment{}, fmt.Errorf("scale: claim routing not configured (call WithClaimRouting)")
 	}
-	node, addr, err := s.pickWarmNode(ctx, pool)
+	candidates, err := s.warmCandidates(ctx, pool)
 	if err != nil {
 		return Assignment{}, err
 	}
-	res, err := s.sandboxdFactory(addr, s.sandboxdToken).Claim(ctx, sandboxd.ClaimSpec{
-		Template: pool.Template,
-		Net:      pool.Net,
-		Size:     pool.Size,
-		// Name the claim by the k8s object so the node's operator index echoes it
-		// back and the aggregated read path (List/Get) resolves this sandbox by
-		// "<namespace>/<name>".
-		ClaimRef: namespace + "/" + name,
-	})
-	if err != nil {
-		if errors.Is(err, sandboxd.ErrNodeAtCapacity) {
-			// The node's advertised warm count was stale (raced to zero): surface as
-			// no-capacity so the caller retries rather than 500s.
-			return Assignment{}, fmt.Errorf("scale: claim %s/%s: node %q warm-raced: %w", namespace, name, node, ErrNoWarmCapacity)
+
+	// Inventory is 5-30s stale, so a node can advertise warm capacity it no
+	// longer has. Reporting the whole fleet exhausted because one sampled node
+	// raced to zero would 503 a caller that other nodes could still serve, so
+	// each capacity miss drops that node and re-samples the rest.
+	for len(candidates) > 0 {
+		best, idx := pickPowerOfTwo(candidates)
+		res, claimErr := s.sandboxdFactory(best.addr, s.sandboxdToken).Claim(ctx, sandboxd.ClaimSpec{
+			Template: pool.Template,
+			Net:      pool.Net,
+			Size:     pool.Size,
+			// Name the claim by the k8s object so the node's operator index echoes
+			// it back and the aggregated read path (List/Get) resolves this sandbox
+			// by "<namespace>/<name>".
+			ClaimRef: namespace + "/" + name,
+		})
+		if claimErr == nil {
+			return Assignment{SandboxName: res.ID, Node: best.node, Address: res.OwnerAddr, Token: res.Token}, nil
 		}
-		return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, node, err)
+		if !errors.Is(claimErr, sandboxd.ErrNodeAtCapacity) {
+			return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, best.node, claimErr)
+		}
+		s.log.V(1).Info("node warm-raced to zero during claim; trying another node",
+			"node", best.node, "remaining", len(candidates)-1)
+		candidates = slices.Delete(candidates, idx, idx+1)
 	}
-	return Assignment{SandboxName: res.ID, Node: node, Address: res.OwnerAddr, Token: res.Token}, nil
+	return Assignment{}, fmt.Errorf("scale: claim %s/%s: every warm node raced to zero: %w", namespace, name, ErrNoWarmCapacity)
 }
 
 // Release returns the claimed microVM id to node's pool via that node's sandboxd,
@@ -344,22 +350,6 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 		return fmt.Errorf("scale: sandboxd release of %q on node %q: %w", id, node, err)
 	}
 	return nil
-}
-
-// pickWarmNode scans node inventories and returns the node (and its sandboxd
-// advertise address) with the most warm capacity for pool. A node with no
-// advertised address is skipped (there is nowhere to route a claim). Returns
-// ErrNoWarmCapacity when no node has Warm>0 for the pool.
-func (s *scatterGatherStore) pickWarmNode(ctx context.Context, pool PoolKey) (node, addr string, err error) {
-	candidates, err := s.warmCandidates(ctx, pool)
-	if err != nil {
-		return "", "", err
-	}
-	if len(candidates) == 0 {
-		return "", "", ErrNoWarmCapacity
-	}
-	best := pickPowerOfTwo(candidates)
-	return best.node, best.addr, nil
 }
 
 // warmCandidates lists every node advertising warm capacity for pool. A node whose
@@ -394,18 +384,18 @@ func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) (
 // is 5-30s stale, so always taking the global maximum funnels an entire burst onto
 // whichever node looked best in that snapshot; sampling spreads the burst while
 // still biasing toward warm capacity. A stale pick costs one gossip redirect.
-func pickPowerOfTwo(candidates []warmCandidate) warmCandidate {
+func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
 	if len(candidates) == 1 {
-		return candidates[0]
+		return candidates[0], 0
 	}
 	//nolint:gosec // load spreading, not a security decision
-	a := candidates[rand.IntN(len(candidates))]
+	i := rand.IntN(len(candidates))
 	//nolint:gosec // load spreading, not a security decision
-	b := candidates[rand.IntN(len(candidates))]
-	if b.warm > a.warm {
-		return b
+	j := rand.IntN(len(candidates))
+	if candidates[j].warm > candidates[i].warm {
+		return candidates[j], j
 	}
-	return a
+	return candidates[i], i
 }
 
 // poolCapacityMatches reports whether a node's advertised pool capacity serves the
@@ -465,26 +455,24 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 		}
 	}
 
-	// Re-deriving the fleet view is O(nodes x sandboxes) — 40ms at 200 nodes and
-	// 50k sandboxes — so a quiet watch backs off instead of paying that every
-	// tick. Any observed change drops straight back to the base interval.
-	interval := s.watchPoll
-	timer := time.NewTimer(interval)
-	defer timer.Stop()
+	// A fixed cadence, deliberately: backing off while quiet would let a sandbox
+	// that is created and deleted inside the widened gap produce neither an Added
+	// nor a Deleted. Re-deriving the fleet view costs 1.6ms at 20 nodes (40ms at
+	// the 200-node projection), which is not worth losing events over.
+	ticker := time.NewTicker(s.watchPoll)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-w.done:
 			return
-		case <-timer.C:
+		case <-ticker.C:
 			list, err := s.List(ctx, opts)
 			if err != nil {
 				s.log.Error(err, "watch poll list failed")
-				timer.Reset(interval)
 				continue
 			}
-			changed := false
 			cur := make(map[string]*sandboxv1beta1.Sandbox, len(list.Items))
 			for i := range list.Items {
 				sb := list.Items[i].DeepCopy()
@@ -493,12 +481,10 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 				prev, ok := known[k]
 				switch {
 				case !ok:
-					changed = true
 					if !emit(watch.Added, sb) {
 						return
 					}
 				case prev.ResourceVersion != sb.ResourceVersion:
-					changed = true
 					if !emit(watch.Modified, sb) {
 						return
 					}
@@ -506,20 +492,12 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 			}
 			for k, prev := range known {
 				if _, ok := cur[k]; !ok {
-					changed = true
 					if !emit(watch.Deleted, prev) {
 						return
 					}
 				}
 			}
 			known = cur
-
-			if changed {
-				interval = s.watchPoll
-			} else {
-				interval = min(interval*2, s.watchPoll*watchIdleBackoffFactor)
-			}
-			timer.Reset(interval)
 		}
 	}
 }

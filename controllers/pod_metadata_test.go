@@ -131,3 +131,21 @@ func TestUpdatePodMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestResourceOwnershipIotaValues(t *testing.T) {
+	// The iota block was merged into a larger const block; these must stay 0/1/2
+	// because checkOwnership's switch and every caller depend on the ordering.
+	for _, c := range []struct {
+		got  resourceOwnership
+		want int
+		name string
+	}{
+		{resourceOwnedBySandbox, 0, "resourceOwnedBySandbox"},
+		{resourceUnowned, 1, "resourceUnowned"},
+		{resourceOwnedByOther, 2, "resourceOwnedByOther"},
+	} {
+		if int(c.got) != c.want {
+			t.Errorf("%s = %d, want %d", c.name, c.got, c.want)
+		}
+	}
+}

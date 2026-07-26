@@ -5225,6 +5225,42 @@ func TestStageAnnotationsWritesWhenNothingElseTouchedTheClaim(t *testing.T) {
 		"a pass with no other claim write must still persist the observability annotation")
 }
 
+func TestExpiredClaimStillPersistsItsObservabilityAnnotation(t *testing.T) {
+	scheme := newScheme(t)
+	// Already past its deadline, and no expired condition yet: the pass takes the
+	// status-update-and-return branch, which happens before the normal flush point.
+	pastTime := metav1.NewTime(time.Now().Add(-time.Hour))
+	claim := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "default", UID: "c-uid"},
+		Spec: extensionsv1beta1.SandboxClaimSpec{
+			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "p"},
+			Lifecycle: &extensionsv1beta1.Lifecycle{
+				ShutdownPolicy: extensionsv1beta1.ShutdownPolicyRetain,
+				ShutdownTime:   &pastTime,
+			},
+		},
+		Status: extensionsv1beta1.SandboxClaimStatus{},
+	}
+	claim.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Hour))
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(claim).WithStatusSubresource(claim).Build()
+	r := &SandboxClaimReconciler{
+		Client: fakeClient, Scheme: scheme,
+		Recorder: events.NewFakeRecorder(10), Tracer: asmetrics.NewNoOp(),
+		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
+	}
+	_, err := r.Reconcile(t.Context(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "c", Namespace: "default"},
+	})
+	require.NoError(t, err)
+
+	got := &extensionsv1beta1.SandboxClaim{}
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, got))
+	require.NotEmpty(t, got.Annotations[asmetrics.ObservabilityAnnotation],
+		"the expired path returned before flushing, so the staged annotation was lost")
+}
+
 func newScheme(t *testing.T) *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {

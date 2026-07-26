@@ -114,9 +114,10 @@ func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
 
 	picked := map[string]int{}
 	for range 200 {
-		node, _, err := store.pickWarmNode(context.Background(), PoolKey{Template: "img"})
+		candidates, err := store.warmCandidates(context.Background(), PoolKey{Template: "img"})
 		require.NoError(t, err)
-		picked[node]++
+		best, _ := pickPowerOfTwo(candidates)
+		picked[best.node]++
 	}
 	// Deterministic max-first would put all 200 on one node. Equal warmth means
 	// power-of-two sampling must reach every node.
@@ -131,14 +132,79 @@ func TestPickWarmNodePrefersTheWarmerSample(t *testing.T) {
 
 	warmPicks := 0
 	for range 200 {
-		node, _, err := store.pickWarmNode(context.Background(), PoolKey{Template: "img"})
+		candidates, err := store.warmCandidates(context.Background(), PoolKey{Template: "img"})
 		require.NoError(t, err)
-		if node == "warm" {
+		best, _ := pickPowerOfTwo(candidates)
+		if best.node == "warm" {
 			warmPicks++
 		}
 	}
 	// Two samples with replacement pick the cold node only when both land on it.
 	assert.Greater(t, warmPicks, 130, "sampling lost its bias toward warm capacity")
+}
+
+func TestStoreClaimFallsBackWhenTheSampledNodeRacedToZero(t *testing.T) {
+	// The classic stale-inventory shape: a node still advertising one warm
+	// microVM it no longer has, next to a node that is genuinely warm. Sampling
+	// picks the empty one often enough that giving up on it would 503 callers
+	// the fleet can serve.
+	src := NewStaticInventorySource()
+	src.Put(poolInv("stale", "stale:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
+	src.Put(poolInv("warm", "warm:7777", PoolCapacity{Template: "img", Warm: 100, Target: 200}))
+
+	f := &raceFactory{emptyAddr: "stale:7777", result: sandboxd.ClaimResult{ID: "sb-ok", Token: "tok"}}
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+
+	for range 40 {
+		a, err := store.Claim(context.Background(), "ns", "s", PoolKey{Template: "img"})
+		require.NoError(t, err, "a warm node was available but the claim reported no capacity")
+		assert.Equal(t, "warm", a.Node)
+	}
+}
+
+func TestStoreClaimReportsNoCapacityOnlyWhenEveryNodeRaced(t *testing.T) {
+	src := NewStaticInventorySource()
+	src.Put(poolInv("n1", "n1:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
+	src.Put(poolInv("n2", "n2:7777", PoolCapacity{Template: "img", Warm: 3, Target: 5}))
+
+	f := &raceFactory{emptyAll: true}
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
+
+	_, err := store.Claim(context.Background(), "ns", "s", PoolKey{Template: "img"})
+	require.Error(t, err)
+	assert.True(t, IsNoWarmCapacity(err), "exhausting every node must stay the retryable no-capacity signal")
+	assert.Equal(t, 2, f.calls, "each node must be tried exactly once")
+}
+
+// raceFactory answers ErrNodeAtCapacity for nodes that advertised warm capacity
+// they no longer hold.
+type raceFactory struct {
+	emptyAddr string
+	emptyAll  bool
+	result    sandboxd.ClaimResult
+	calls     int
+}
+
+func (r *raceFactory) factory() SandboxdClientFactory {
+	return func(addr, _ string) SandboxdClient {
+		return &raceClient{recordingClient: &recordingClient{}, f: r, addr: addr}
+	}
+}
+
+// raceClient embeds recordingClient for the rest of the SandboxdClient surface
+// and only decides whether this node still has the warm microVM it advertised.
+type raceClient struct {
+	*recordingClient
+	f    *raceFactory
+	addr string
+}
+
+func (c *raceClient) Claim(context.Context, sandboxd.ClaimSpec) (sandboxd.ClaimResult, error) {
+	c.f.calls++
+	if c.f.emptyAll || c.addr == c.f.emptyAddr {
+		return sandboxd.ClaimResult{}, sandboxd.ErrNodeAtCapacity
+	}
+	return c.f.result, nil
 }
 
 // poolInv builds a NodeInventory advertising a sandboxd address and pool capacities.

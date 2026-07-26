@@ -236,6 +236,11 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// We calculate this upfront to decide the flow.
 	claimExpired, timeLeft := r.checkExpiration(claim)
 	if claimExpired && !hasClaimExpiredCondition(claim.Status.Conditions) {
+		// Status writes cannot carry metadata, so the staged annotations must be
+		// flushed before this path returns or they are lost for good.
+		if err := flushAnnotations(); err != nil {
+			return ctrl.Result{}, err
+		}
 		meta.SetStatusCondition(&claim.Status.Conditions, r.computeReadyCondition(claim, nil, nil, true))
 		if updateErr := r.updateStatus(ctx, originalClaimStatus, claim); updateErr != nil {
 			logger.V(1).Info("Sandboxclaim UpdateStatus error encountered", "errors", updateErr, "request", req.NamespacedName)
@@ -259,6 +264,11 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		logger.Info("Deleting Claim because time has expired", "shutdownPolicy", policy, "claim", claim.Name)
 		if r.Recorder != nil {
 			r.Recorder.Eventf(claim, nil, corev1.EventTypeNormal, extensionsv1beta1.ClaimExpiredReason, "Deleting", fmt.Sprintf("Deleting Claim (ShutdownPolicy=%s)", policy))
+		}
+
+		// The claim is about to go away; persist what was observed about it first.
+		if err := flushAnnotations(); err != nil {
+			return ctrl.Result{}, err
 		}
 
 		deleteOpts := []client.DeleteOption{}
