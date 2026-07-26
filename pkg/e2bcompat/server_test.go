@@ -140,8 +140,11 @@ func TestCreateClaimsFromTemplatePool(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got.SandboxID != "sb_abc123" {
-		t.Errorf("sandboxID = %q, want the node-assigned claim id", got.SandboxID)
+	// The published id is the DNS-label-safe rendering of the node's claim id,
+	// not the raw one: the SDK builds "{port}-{sandboxID}.{domain}", and the
+	// claim id's underscore would make that host unresolvable.
+	if got.SandboxID != "sb-abc123" {
+		t.Errorf("sandboxID = %q, want the DNS-safe rendering of the claim id", got.SandboxID)
 	}
 	if got.TemplateID != "registry/rt:24.04" {
 		t.Errorf("templateID = %q, want it echoed back", got.TemplateID)
@@ -295,7 +298,7 @@ func TestGetReportsDetail(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.SandboxID != "sb_one" || got.TemplateID != "registry/rt:24.04" || got.ClientID != "node-a" {
+	if got.SandboxID != "sb-one" || got.TemplateID != "registry/rt:24.04" || got.ClientID != "node-a" {
 		t.Errorf("detail = %+v, want the live sandbox's id/template/node", got)
 	}
 	if got.State != StateRunning {
@@ -377,4 +380,26 @@ func TestErrorBodyCarriesMessage(t *testing.T) {
 	if got.Message == "" || got.Code != http.StatusBadRequest {
 		t.Errorf("error = %+v, want code 400 and a message", got)
 	}
+}
+
+// The lifecycle verbs are not exercised by these tests; they satisfy the
+// SandboxStore contract so the fake stays a drop-in.
+func (f *fakeStore) Pause(context.Context, string, string) error  { return nil }
+func (f *fakeStore) Resume(context.Context, string, string) error { return nil }
+func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
+	return nil, nil
+}
+func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Snapshot, error) {
+	return scale.Snapshot{}, nil
+}
+func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }
+func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error        { return nil }
+func (f *fakeStore) ClaimSnapshot(context.Context, string, string, int) (scale.Assignment, error) {
+	return scale.Assignment{}, nil
+}
+func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, error) {
+	return scale.PoolKey{}, nil
+}
+func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
+	return scale.SandboxStats{}, nil
 }

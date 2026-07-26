@@ -1,0 +1,71 @@
+// Copyright 2026 The CocoonStack Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package e2bcompat
+
+import "strings"
+
+// A sandboxd claim id is "sb_" + hex (sandboxd pool/claim.go), whose underscore
+// is not legal in a DNS label. The e2b SDK derives the in-sandbox envd host as
+// "{port}-{sandboxID}.{domain}", so an id carrying an underscore produces a host
+// that cannot resolve — the sandbox would be created but unreachable.
+//
+// The compat surface therefore publishes a DNS-safe rendering of the claim id
+// and accepts either form on the way back in. The mapping only rewrites
+// characters that are illegal in a DNS label, so it is stable, and it round
+// trips for every id sandboxd actually mints (whose only illegal character is
+// that one underscore).
+
+// publicID renders a node-local claim id as a DNS-label-safe sandbox id, the
+// form handed to e2b clients.
+func publicID(claimID string) string {
+	if !needsRewrite(claimID) {
+		return claimID
+	}
+	var b strings.Builder
+	b.Grow(len(claimID))
+	for _, r := range strings.ToLower(claimID) {
+		if isDNSSafe(r) {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('-')
+	}
+	return b.String()
+}
+
+// matchesID reports whether a live sandbox's claim id is the one a client asked
+// for, accepting both the raw claim id and its published DNS-safe rendering so
+// an id observed through either surface keeps working.
+func matchesID(claimID, requested string) bool {
+	if claimID == "" || requested == "" {
+		return false
+	}
+	return claimID == requested || publicID(claimID) == requested
+}
+
+func needsRewrite(s string) bool {
+	for _, r := range s {
+		if !isDNSSafe(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDNSSafe reports whether r is legal inside a DNS label (RFC 1123): lowercase
+// alphanumerics and the hyphen.
+func isDNSSafe(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-'
+}

@@ -58,6 +58,9 @@ const (
 	DefaultTimeoutSeconds = 15
 	// apiKeyHeader is the header the e2b SDKs authenticate with.
 	apiKeyHeader = "X-API-KEY"
+	// phaseHibernated is the phase label value a node publishes for a paused
+	// sandbox (vk-cocoon-sandbox inventory publisher).
+	phaseHibernated = "Hibernated"
 )
 
 // Options configures the compat server.
@@ -69,11 +72,10 @@ type Options struct {
 	// envd host as "{port}-{sandboxID}.{domain}". Empty leaves it unset, which
 	// makes the SDK fall back to its configured E2B_DOMAIN/E2B_SANDBOX_URL.
 	//
-	// Note that a sandboxID here is the node's sandboxd claim id, which is not
-	// guaranteed to be a valid DNS label (it carries an underscore). The
-	// subdomain form therefore only works behind a proxy that routes on the
-	// E2b-Sandbox-Id / E2b-Sandbox-Port headers the SDK also sends; otherwise
-	// point the SDK at the sandbox with E2B_SANDBOX_URL.
+	// The sandbox ids published here are DNS-label safe (see sandboxid.go), so
+	// that host form resolves; the proxy in front of the sandboxes still has to
+	// route it, either on the host or on the E2b-Sandbox-Id / E2b-Sandbox-Port
+	// headers the SDK also sends.
 	Domain string
 	// EnvdVersion overrides DefaultEnvdVersion.
 	EnvdVersion string
@@ -86,6 +88,11 @@ type Options struct {
 	// SizeClass pins the warm-pool size axis for compat claims (default
 	// "small"); e2b's NewSandbox carries no size selector.
 	SizeClass string
+	// Inventory enumerates the fleet's nodes and their advertised pools. It is
+	// required by the surfaces that are fleet-wide rather than sandbox-scoped
+	// (template listing, snapshot listing); without it those report an error
+	// instead of an empty list, so a missing dependency cannot read as "none".
+	Inventory scale.InventorySource
 	// Log receives request-level errors.
 	Log logr.Logger
 }
@@ -139,6 +146,18 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /sandboxes/{sandboxID}", s.auth(http.HandlerFunc(s.deleteSandbox)))
 	mux.Handle("POST /sandboxes/{sandboxID}/timeout", s.auth(http.HandlerFunc(s.setTimeout)))
 	mux.Handle("POST /sandboxes/{sandboxID}/refreshes", s.auth(http.HandlerFunc(s.refresh)))
+
+	// Lifecycle verbs.
+	mux.Handle("POST /sandboxes/{sandboxID}/pause", s.auth(http.HandlerFunc(s.pauseSandbox)))
+	mux.Handle("POST /sandboxes/{sandboxID}/connect", s.auth(http.HandlerFunc(s.connectSandbox)))
+	mux.Handle("POST /sandboxes/{sandboxID}/fork", s.auth(http.HandlerFunc(s.forkSandbox)))
+	mux.Handle("POST /sandboxes/{sandboxID}/snapshots", s.auth(http.HandlerFunc(s.createSnapshot)))
+	mux.Handle("GET /snapshots", s.auth(http.HandlerFunc(s.listSnapshots)))
+	mux.Handle("GET /sandboxes/{sandboxID}/metrics", s.auth(http.HandlerFunc(s.sandboxMetrics)))
+	mux.Handle("GET /templates", s.auth(http.HandlerFunc(s.listTemplates)))
+	mux.Handle("GET /v2/templates", s.auth(http.HandlerFunc(s.listTemplates)))
+	// e2b addresses a snapshot as a template on delete.
+	mux.Handle("DELETE /templates/{snapshotID}", s.auth(http.HandlerFunc(s.deleteSnapshot)))
 	return mux
 }
 
@@ -204,7 +223,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, Sandbox{
 		TemplateID:      req.TemplateID,
-		SandboxID:       assignment.SandboxName,
+		SandboxID:       publicID(assignment.SandboxName),
 		ClientID:        assignment.Node,
 		EnvdVersion:     s.opts.EnvdVersion,
 		EnvdAccessToken: assignment.Token,
@@ -252,8 +271,12 @@ func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if err := s.store.Release(r.Context(), node, id); err != nil {
-		s.opts.Log.Error(err, "e2b delete: release failed", "sandboxID", id, "node", node)
+	// Release against the raw node-local claim id, never the id as the client
+	// spelled it: the published id is a DNS-safe rendering, and sandboxd knows
+	// only the original.
+	claimID := sb.Annotations[scale.ClaimIDAnnotation]
+	if err := s.store.Release(r.Context(), node, claimID); err != nil {
+		s.opts.Log.Error(err, "e2b delete: release failed", "sandboxID", id, "claimID", claimID, "node", node)
 		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
 		return
 	}
@@ -306,7 +329,7 @@ func (s *Server) lookup(r *http.Request, id string) (*sandboxv1beta1.Sandbox, er
 		return nil, err
 	}
 	for i := range list.Items {
-		if list.Items[i].Annotations[scale.ClaimIDAnnotation] == id {
+		if matchesID(list.Items[i].Annotations[scale.ClaimIDAnnotation], id) {
 			return &list.Items[i], nil
 		}
 	}
@@ -332,7 +355,7 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	}
 	return SandboxDetail{
 		TemplateID:      templateOf(sb),
-		SandboxID:       sb.Annotations[scale.ClaimIDAnnotation],
+		SandboxID:       publicID(sb.Annotations[scale.ClaimIDAnnotation]),
 		ClientID:        sb.Status.NodeName,
 		StartedAt:       started.UTC().Format(time.RFC3339),
 		EndAt:           started.Add(DefaultTimeoutSeconds * time.Second).UTC().Format(time.RFC3339),
