@@ -68,6 +68,7 @@ linters:
           - unparam
           - goconst
           - gocyclo
+          - nestif
       # kubebuilder API packages register their types through SchemeBuilder in init.
       - path: (api|extensions/api)/.*\.go
         linters:

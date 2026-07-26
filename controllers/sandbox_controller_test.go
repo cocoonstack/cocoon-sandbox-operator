@@ -3057,12 +3057,12 @@ func TestReconcileService(t *testing.T) {
 
 func TestCheckOwnership(t *testing.T) {
 	sandboxName := "test-sandbox"
-	sandboxUID := types.UID("sandbox-uid-123")
+	localSandboxUID := types.UID("sandbox-uid-123")
 
 	sandbox := &sandboxv1beta1.Sandbox{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: sandboxName,
-			UID:  sandboxUID,
+			UID:  localSandboxUID,
 		},
 	}
 
@@ -3079,7 +3079,7 @@ func TestCheckOwnership(t *testing.T) {
 		APIVersion:         "agents.x-k8s.io/v1beta1",
 		Kind:               "Sandbox",
 		Name:               sandboxName,
-		UID:                sandboxUID,
+		UID:                localSandboxUID,
 		Controller:         new(true),
 		BlockOwnerDeletion: new(true),
 	}
@@ -3168,7 +3168,7 @@ func TestCheckOwnership(t *testing.T) {
 func TestReconcilePVCs(t *testing.T) {
 	sandboxName := "test-sandbox"
 	sandboxNs := "test-ns"
-	sandboxUID := types.UID("sandbox-uid-123")
+	localSandboxUID := types.UID("sandbox-uid-123")
 	otherUID := types.UID("other-uid-456")
 	pvcTemplateName := "data"
 	pvcName := pvcTemplateName + "-" + sandboxName // "data-test-sandbox"
@@ -3178,7 +3178,7 @@ func TestReconcilePVCs(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      sandboxName,
 			Namespace: sandboxNs,
-			UID:       sandboxUID,
+			UID:       localSandboxUID,
 		},
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{VolumeClaimTemplates: []sandboxv1beta1.PersistentVolumeClaimTemplate{
@@ -3219,7 +3219,7 @@ func TestReconcilePVCs(t *testing.T) {
 								APIVersion:         "agents.x-k8s.io/v1beta1",
 								Kind:               "Sandbox",
 								Name:               sandboxName,
-								UID:                sandboxUID,
+								UID:                localSandboxUID,
 								Controller:         new(true),
 								BlockOwnerDeletion: new(true),
 							},
@@ -3332,7 +3332,7 @@ func TestReconcilePVCs(t *testing.T) {
 			require.NoError(t, err)
 			ownerRef := metav1.GetControllerOf(livePVC)
 			require.NotNil(t, ownerRef, "PVC should have a controller owner reference")
-			require.Equal(t, sandboxUID, ownerRef.UID, "PVC controller reference UID should match sandbox UID")
+			require.Equal(t, localSandboxUID, ownerRef.UID, "PVC controller reference UID should match sandbox UID")
 		})
 	}
 }
