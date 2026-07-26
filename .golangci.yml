@@ -10,6 +10,11 @@ linters:
     - staticcheck
     - testifylint
     - unconvert
+  settings:
+    misspell:
+      # rest.Creater is the upstream k8s.io/apiserver interface name.
+      ignore-rules:
+        - creater
   exclusions:
     generated: lax
     presets:
