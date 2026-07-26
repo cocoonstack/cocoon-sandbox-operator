@@ -89,13 +89,13 @@ tail).
 The `sandboxd` sub-millisecond claim is no longer only a data-plane number: it is
 now reachable **through the same Kubernetes API and this operator**, via
 `runtime: sandboxd`. The operator's `podruntime` mutator pins such a Sandbox to a
-[`vk-cocoon-sandbox`](https://github.com/cocoonstack/vk-cocoon-sandbox) virtual
+[`vk-sandbox`](https://github.com/cocoonstack/vk-sandbox) virtual
 node (one per host, co-located with `vk-cocoon`), which serves the claim from the
 node-local `sandboxd` hot pool. Kubernetes stays the record-of-intent plane; the
 claim transaction runs on the node.
 
 Measured on the 26-node MY fleet (each node: co-located `vk-cocoon` +
-`vk-cocoon-sandbox` + `sandboxd`; warm pool of **125 golden microVMs**,
+`vk-sandbox` + `sandboxd`; warm pool of **125 golden microVMs**,
 `warm=5`/node, template `sandbox/rt:24.04` distributed **P2P** node-to-node):
 
 | metric | result |
@@ -110,7 +110,7 @@ Measured on the 26-node MY fleet (each node: co-located `vk-cocoon` +
 The end-to-end `create → Ready` is dominated by the Kubernetes round-trip
 (admission → operator reconcile → schedule → status propagation), sub-second at
 this scale; the underlying `sandboxd` ownership transfer itself is **0.2–0.7 ms**
-and the `vk-cocoon-sandbox` gateway overhead **~0.04 ms** (see the operator's
+and the `vk-sandbox` gateway overhead **~0.04 ms** (see the operator's
 `pkg/scale` L2 gateway bench). This is the operator's answer to the "cold boot is
 slow" caveat above: the hot tier now serves warm claims at node-local speed while
 `kubectl get sandboxes` keeps working.

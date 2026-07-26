@@ -101,7 +101,7 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&leaderElectionNamespace, "leader-election-namespace", "", "The namespace in which the leader election resource will be created.")
 	flag.BoolVar(&extensions, "extensions", true, "Enable SandboxTemplate, SandboxWarmPool, and SandboxClaim controllers.")
-	flag.StringVar(&defaultRuntime, "default-runtime", podruntime.DefaultMode, "Default Pod runtime: standard, vk-cocoon, or sandboxd. sandboxd routes sandbox Pods to the vk-cocoon-sandbox hot-pool virtual node. Set the Pod runtime annotation to override; an explicit runtimeClassName selects standard kubelet.")
+	flag.StringVar(&defaultRuntime, "default-runtime", podruntime.DefaultMode, "Default Pod runtime: standard, vk-cocoon, or sandboxd. sandboxd routes sandbox Pods to the vk-sandbox hot-pool virtual node. Set the Pod runtime annotation to override; an explicit runtimeClassName selects standard kubelet.")
 	flag.BoolVar(&enableTracing, "enable-tracing", false, "Enable OpenTelemetry tracing via OTLP.")
 	flag.BoolVar(&enablePprof, "enable-pprof", false,
 		"Enable CPU profiling endpoint (/debug/pprof/profile) on the metrics server.")

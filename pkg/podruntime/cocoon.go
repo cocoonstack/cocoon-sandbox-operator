@@ -1,17 +1,3 @@
-// Copyright 2026 The CocoonStack Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 // Package podruntime adapts agent-sandbox Pods to Cocoon runtime backends.
 package podruntime
 
@@ -33,7 +19,7 @@ const (
 	ModeVKCocoon = "vk-cocoon"
 	ModeStandard = "standard"
 	// ModeSandboxd routes a Sandbox Pod to the sandboxd hot-pool data plane —
-	// the vk-cocoon-sandbox virtual node, which serves the claim from a
+	// the vk-sandbox virtual node, which serves the claim from a
 	// node-local sandboxd (github.com/cocoonstack/sandbox) in sub-millisecond
 	// time. This is the successor to ModeVKCocoon for agent-sandbox workloads;
 	// vk-cocoon no longer answers sandbox Pods when this mode is selected.
@@ -47,12 +33,12 @@ const (
 	vkNodeLabelKey     = "node.kubernetes.io/instance-type"
 	vkNodeLabelValue   = "virtual-node"
 
-	// sandboxd virtual-node contract: vk-cocoon-sandbox advertises this label
+	// sandboxd virtual-node contract: vk-sandbox advertises this label
 	// and taints with vkProviderTaintKey (Exists toleration covers both planes).
 	sandboxdNodeLabelKey   = "cocoon-sandbox.io/runtime"
 	sandboxdNodeLabelValue = "sandboxd"
 	// sandboxd claim axes — mirror pkg/scale selector keys and the
-	// vk-cocoon-sandbox provider's AnnTemplate/AnnNet/AnnSize contract.
+	// vk-sandbox provider's AnnTemplate/AnnNet/AnnSize contract.
 	sandboxdTemplateAnnotation = "sandbox.cocoonstack.io/template"
 
 	cocoonModeAnnotation    = "cocoonset.cocoonstack.io/mode"
@@ -130,7 +116,7 @@ func (m *Mutator) mutateVKCocoon(sandbox *sandboxv1beta1.Sandbox, pod *corev1.Po
 	return nil
 }
 
-// mutateSandboxd routes the Pod to a vk-cocoon-sandbox virtual node (sandboxd
+// mutateSandboxd routes the Pod to a vk-sandbox virtual node (sandboxd
 // hot pool). It sets the sandboxd claim template axis from the first container
 // image when unset, so the node provider always has a template to claim.
 func (m *Mutator) mutateSandboxd(pod *corev1.Pod, explicit bool) error {

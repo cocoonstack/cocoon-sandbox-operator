@@ -1,17 +1,3 @@
-// Copyright 2026 The CocoonStack Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 // Package e2bcompat serves an e2b-compatible REST surface in front of the L3
 // sandbox store, so an unmodified e2b SDK (JS or Python) can drive cocoon warm
 // pools by pointing E2B_API_URL at this server.
@@ -59,7 +45,7 @@ const (
 	// apiKeyHeader is the header the e2b SDKs authenticate with.
 	apiKeyHeader = "X-API-KEY"
 	// phaseHibernated is the phase label value a node publishes for a paused
-	// sandbox (vk-cocoon-sandbox inventory publisher).
+	// sandbox (vk-sandbox inventory publisher).
 	phaseHibernated = "Hibernated"
 )
 

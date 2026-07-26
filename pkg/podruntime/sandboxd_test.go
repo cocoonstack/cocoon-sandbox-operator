@@ -1,17 +1,3 @@
-// Copyright 2026 The CocoonStack Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package podruntime
 
 import (
@@ -34,9 +20,9 @@ func sandboxdPod(image string) *corev1.Pod {
 }
 
 // TestMutateSandboxdRoutesToHotPool: sandboxd mode pins the pod to the
-// vk-cocoon-sandbox virtual node, tolerates its taint, stamps the runtime, and
+// vk-sandbox virtual node, tolerates its taint, stamps the runtime, and
 // defaults the claim template from the container image — the contract the
-// vk-cocoon-sandbox provider consumes. vk-cocoon must NOT be involved.
+// vk-sandbox provider consumes. vk-cocoon must NOT be involved.
 func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
 	m, err := NewMutator(ModeSandboxd)
 	if err != nil {

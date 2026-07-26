@@ -12,7 +12,23 @@ GIT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 LD_FLAGS := -s -w -X $(VERSION_PKG).gitVersion=$(GIT_VERSION) -X $(VERSION_PKG).gitSHA=$(GIT_SHA) -X $(VERSION_PKG).buildDate=$(BUILD_DATE)
 
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
+## Tool versions
+GOLANGCILINT_VERSION ?= v2.12.2
+GOLANGCILINT_ROOT := $(LOCALBIN)/golangci-lint-$(GOLANGCILINT_VERSION)
+GOLANGCILINT := $(GOLANGCILINT_ROOT)/golangci-lint
+
 .DEFAULT_GOAL := all
+
+## Tool download targets
+.PHONY: golangci-lint
+golangci-lint: $(GOLANGCILINT)
+$(GOLANGCILINT):
+	GOBIN=$(GOLANGCILINT_ROOT) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCILINT_VERSION)
 
 .PHONY: all
 all: fmt-check vet test build
@@ -32,7 +48,7 @@ apiserver-image: ## Build the aggregated sandbox-apiserver image (override APISE
 	docker build -f Dockerfile.apiserver -t $(APISERVER_IMG) .
 
 .PHONY: test
-test: ## Run unit tests.
+test: vet ## Run unit tests.
 	go test ./...
 
 .PHONY: test-race
@@ -40,7 +56,7 @@ test-race: ## Run unit tests with the race detector.
 	go test -race ./...
 
 .PHONY: coverage
-coverage: ## Write unit-test coverage to bin/coverage.out.
+coverage: vet ## Write unit-test coverage to bin/coverage.out.
 	mkdir -p bin
 	go test -coverprofile=bin/coverage.out ./...
 
@@ -49,8 +65,8 @@ vet: ## Run go vet.
 	go vet ./...
 
 .PHONY: lint
-lint: ## Run golangci-lint v2 when installed.
-	golangci-lint run
+lint: golangci-lint ## Run golangci-lint.
+	$(GOLANGCILINT) run ./...
 
 .PHONY: fmt
 fmt: ## Format Go source files.
@@ -73,6 +89,11 @@ deps: ## Download module dependencies.
 .PHONY: clean
 clean: ## Remove build and coverage outputs.
 	rm -rf bin
+	go clean -testcache
+
+.PHONY: cloc
+cloc: ## Count lines of code excluding tests (requires cloc).
+	cloc --exclude-dir=vendor,dist,bin --exclude-ext=json --not-match-f='_test\.go$$' .
 
 .PHONY: help
 help: ## Show available targets.

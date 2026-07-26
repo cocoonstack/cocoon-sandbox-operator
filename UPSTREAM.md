@@ -30,3 +30,11 @@ When updating from upstream, import the same source trees, reapply the local
 deltas above, run `make generate`, and require
 `make all` plus conversion/controller tests to pass. Do not replace the Cocoon
 compatibility API or Pod runtime adapter with upstream files.
+
+## Licensing
+
+The project as a whole is AGPL-3.0 (`LICENSE`), which Apache-2.0 upstream code
+may be combined into. Files imported from `kubernetes-sigs/agent-sandbox` keep
+their `Copyright The Kubernetes Authors` + Apache-2.0 headers — Apache-2.0 §4
+requires retaining them, and they must survive every future upstream import.
+Files authored here carry no per-file header; `LICENSE` is authoritative.
