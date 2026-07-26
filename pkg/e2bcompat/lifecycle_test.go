@@ -10,60 +10,6 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
-// lifecycleStore records which verb the compat layer routed where, so the tests
-// assert the translation rather than any node behavior.
-type lifecycleStore struct {
-	fakeStore
-
-	pausedNode, pausedID   string
-	resumedNode, resumedID string
-	forkedID               string
-	forkCount              int
-	forkChildren           []scale.Assignment
-	snapshotName           string
-	snapshot               scale.Snapshot
-	err                    error
-
-	// nodePaused is what the owning node reports for Stats().Paused — the
-	// authoritative answer isPaused now consults instead of the cached label.
-	nodePaused bool
-}
-
-func (f *lifecycleStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
-	return scale.SandboxStats{Paused: f.nodePaused, CPUCount: 1, MemTotalBytes: 512 << 20}, nil
-}
-
-func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {
-	f.pausedNode, f.pausedID = node, id
-	return f.err
-}
-
-func (f *lifecycleStore) Resume(_ context.Context, node, id string) error {
-	f.resumedNode, f.resumedID = node, id
-	return f.err
-}
-
-func (f *lifecycleStore) Fork(_ context.Context, _, id string, count, _ int) ([]scale.Assignment, error) {
-	f.forkedID, f.forkCount = id, count
-	return f.forkChildren, f.err
-}
-
-func (f *lifecycleStore) Snapshot(_ context.Context, _, _, name string) (scale.Snapshot, error) {
-	f.snapshotName = name
-	return f.snapshot, f.err
-}
-
-// pausedSandbox is a sandbox as the node publishes it while hibernated.
-func pausedSandbox(name, claimID, node, image, token string) sandboxv1beta1.Sandbox {
-	sb := liveSandbox(name, claimID, node, image, token)
-	sb.Labels = map[string]string{scale.PhaseLabel: phaseHibernated}
-	return sb
-}
-
-// nodeReportsPaused makes the fake's owning node report the sandbox hibernated,
-// which is what isPaused actually consults.
-func nodeReportsPaused(s *lifecycleStore) { s.nodePaused = true }
-
 // TestPauseAlreadyPausedIs409 is load-bearing for the SDK, not cosmetic:
 // e2b's pause() returns a boolean, and it derives false ("was already paused")
 // from a 409. Reporting anything else turns an idempotent no-op into an error
@@ -310,3 +256,57 @@ func TestConnectTrustsTheNodeNotTheStaleView(t *testing.T) {
 		t.Errorf("resumed %q, want sb_abc — a stale label must not skip the restore", store.resumedID)
 	}
 }
+
+// lifecycleStore records which verb the compat layer routed where, so the tests
+// assert the translation rather than any node behavior.
+type lifecycleStore struct {
+	fakeStore
+
+	pausedNode, pausedID   string
+	resumedNode, resumedID string
+	forkedID               string
+	forkCount              int
+	forkChildren           []scale.Assignment
+	snapshotName           string
+	snapshot               scale.Snapshot
+	err                    error
+
+	// nodePaused is what the owning node reports for Stats().Paused — the
+	// authoritative answer isPaused now consults instead of the cached label.
+	nodePaused bool
+}
+
+func (f *lifecycleStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
+	return scale.SandboxStats{Paused: f.nodePaused, CPUCount: 1, MemTotalBytes: 512 << 20}, nil
+}
+
+func (f *lifecycleStore) Pause(_ context.Context, node, id string) error {
+	f.pausedNode, f.pausedID = node, id
+	return f.err
+}
+
+func (f *lifecycleStore) Resume(_ context.Context, node, id string) error {
+	f.resumedNode, f.resumedID = node, id
+	return f.err
+}
+
+func (f *lifecycleStore) Fork(_ context.Context, _, id string, count, _ int) ([]scale.Assignment, error) {
+	f.forkedID, f.forkCount = id, count
+	return f.forkChildren, f.err
+}
+
+func (f *lifecycleStore) Snapshot(_ context.Context, _, _, name string) (scale.Snapshot, error) {
+	f.snapshotName = name
+	return f.snapshot, f.err
+}
+
+// pausedSandbox is a sandbox as the node publishes it while hibernated.
+func pausedSandbox(name, claimID, node, image, token string) sandboxv1beta1.Sandbox {
+	sb := liveSandbox(name, claimID, node, image, token)
+	sb.Labels = map[string]string{scale.PhaseLabel: phaseHibernated}
+	return sb
+}
+
+// nodeReportsPaused makes the fake's owning node report the sandbox hibernated,
+// which is what isPaused actually consults.
+func nodeReportsPaused(s *lifecycleStore) { s.nodePaused = true }

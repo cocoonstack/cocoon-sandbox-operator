@@ -32,20 +32,22 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 )
 
-// netAnnotation selects the pool network mode; it mirrors the aggregated
-// apiserver's NetAnnotation so a Create derives the same key the driver sets.
-const netAnnotation = "sandbox.cocoonstack.io/net"
+const (
+	// netAnnotation selects the pool network mode; it mirrors the aggregated
+	// apiserver's NetAnnotation so a Create derives the same key the driver sets.
+	netAnnotation = "sandbox.cocoonstack.io/net"
 
-// defaultInterval is the pool resync cadence, and with it the sampling period of
-// the fleet-wide warm count reported in pool status. Pools are O(single-digit)
-// and every tick's node fan-out is the same PUT the driver already owes, so a 5s
-// loop costs no extra round trips — it buys a 5s-granularity view of total warm
-// capacity while still reconciling drift (a node that restarted, a target edited
-// out of band).
-const defaultInterval = 5 * time.Second
+	// defaultInterval is the pool resync cadence, and with it the sampling period of
+	// the fleet-wide warm count reported in pool status. Pools are O(single-digit)
+	// and every tick's node fan-out is the same PUT the driver already owes, so a 5s
+	// loop costs no extra round trips — it buys a 5s-granularity view of total warm
+	// capacity while still reconciling drift (a node that restarted, a target edited
+	// out of band).
+	defaultInterval = 5 * time.Second
 
-// maxNodeConcurrency bounds the per-node PUT /v1/pools fan-out per tick.
-const maxNodeConcurrency = 16
+	// maxNodeConcurrency bounds the per-node PUT /v1/pools fan-out per tick.
+	maxNodeConcurrency = 16
+)
 
 // PoolSetter is the sandboxd surface the driver needs: replace a node's whole
 // warm-target set. The concrete *sandboxd.Client satisfies it; tests inject a fake.

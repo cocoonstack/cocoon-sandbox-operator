@@ -21,116 +21,6 @@ import (
 
 const testImage = "ghcr.io/cocoonstack/sandbox/rt@sha256:deadbeef"
 
-// fakeSetter records the last pools set per node address and plays back the warm
-// counts a node reports in its PUT response — the driver's status source.
-type fakeSetter struct {
-	mu     sync.Mutex
-	byAddr map[string][]sandboxd.PoolSpec
-	// warm is the warm count each node echoes per pool; absent means 0 (target
-	// accepted, nothing filled yet).
-	warm map[string]int
-	// failAddr, when set, makes that node's PUT fail.
-	failAddr string
-}
-
-// reportWarm makes addr answer every PUT reporting n warm for each pool it holds.
-func (f *fakeSetter) reportWarm(addr string, n int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.warm == nil {
-		f.warm = map[string]int{}
-	}
-	f.warm[addr] = n
-}
-
-func (f *fakeSetter) factory() ClientFactory {
-	return func(addr, _ string) PoolSetter { return &fakeNode{addr: addr, parent: f} }
-}
-
-type fakeNode struct {
-	addr   string
-	parent *fakeSetter
-}
-
-func (n *fakeNode) SetPools(_ context.Context, pools []sandboxd.PoolSpec) (*sandboxd.NodeInfo, error) {
-	n.parent.mu.Lock()
-	defer n.parent.mu.Unlock()
-	if n.parent.failAddr == n.addr {
-		return nil, errors.New("node unreachable")
-	}
-	n.parent.byAddr[n.addr] = pools
-	// Mirror real sandboxd: the response echoes every pool the node now holds,
-	// each with its live warm count.
-	info := &sandboxd.NodeInfo{}
-	for _, p := range pools {
-		var entry struct {
-			Key struct {
-				Template string `json:"template"`
-				Net      string `json:"net"`
-				Size     string `json:"size"`
-			} `json:"key"`
-			Warm      int  `json:"warm"`
-			Refilling int  `json:"refilling"`
-			Target    int  `json:"target"`
-			Golden    bool `json:"golden"`
-		}
-		entry.Key.Template, entry.Key.Net, entry.Key.Size = p.Template, p.Net, p.Size
-		entry.Warm = n.parent.warm[n.addr]
-		entry.Target = p.Warm
-		info.Pools = append(info.Pools, entry)
-	}
-	return info, nil
-}
-
-func newTestDriver(t *testing.T, objs ...client.Object) (*Driver, *fakeSetter, *scale.StaticInventorySource, client.Client) {
-	t.Helper()
-	scheme := runtime.NewScheme()
-	if err := extv1beta1.AddToScheme(scheme); err != nil {
-		t.Fatalf("scheme: %v", err)
-	}
-	kube := fake.NewClientBuilder().WithScheme(scheme).
-		WithStatusSubresource(&extv1beta1.SandboxWarmPool{}).
-		WithObjects(objs...).Build()
-	inv := scale.NewStaticInventorySource()
-	setter := &fakeSetter{byAddr: map[string][]sandboxd.PoolSpec{}}
-	d := New(kube, inv, "tok", setter.factory(), Options{Interval: 0})
-	return d, setter, inv, kube
-}
-
-func warmPool(name string, replicas int32) *extv1beta1.SandboxWarmPool {
-	return &extv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name},
-		Spec: extv1beta1.SandboxWarmPoolSpec{
-			Replicas:    ptr.To(replicas),
-			TemplateRef: extv1beta1.SandboxTemplateRef{Name: "tpl"},
-		},
-	}
-}
-
-func template() *extv1beta1.SandboxTemplate {
-	return &extv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "tpl"},
-		Spec: extv1beta1.SandboxTemplateSpec{
-			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
-				PodTemplate: sandboxv1beta1.PodTemplate{
-					Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: testImage}}},
-				},
-			},
-		},
-	}
-}
-
-func putNodes(inv *scale.StaticInventorySource, n int) {
-	for i := 0; i < n; i++ {
-		name := string(rune('a' + i))
-		inv.Put(&scale.NodeInventory{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Node:       name,
-			Address:    "10.0.0." + name + ":7777",
-		})
-	}
-}
-
 // TestReconcileDistributesAndMatchesPoolKey pins the two load-bearing invariants:
 // (1) a SandboxWarmPool's replicas are spread across all nodes summing to EXACTLY
 // replicas, and (2) the pool key the driver sets is byte-identical to what the
@@ -301,12 +191,6 @@ func TestTwoPoolsSameKeyAggregate(t *testing.T) {
 	}
 }
 
-// warmPool2 builds a second pool referencing the same template.
-func warmPool2(name string, replicas int32) *extv1beta1.SandboxWarmPool {
-	p := warmPool(name, replicas)
-	return p
-}
-
 // TestDrainOnZeroReplicas: replicas=0 sets every node's target to 0 (the
 // control-plane drain — kubectl scale to 0 or delete recycles the pool).
 func TestDrainOnZeroReplicas(t *testing.T) {
@@ -320,4 +204,120 @@ func TestDrainOnZeroReplicas(t *testing.T) {
 			t.Fatalf("node %s target != 0 on drain: %+v", addr, specs)
 		}
 	}
+}
+
+// fakeSetter records the last pools set per node address and plays back the warm
+// counts a node reports in its PUT response — the driver's status source.
+type fakeSetter struct {
+	mu     sync.Mutex
+	byAddr map[string][]sandboxd.PoolSpec
+	// warm is the warm count each node echoes per pool; absent means 0 (target
+	// accepted, nothing filled yet).
+	warm map[string]int
+	// failAddr, when set, makes that node's PUT fail.
+	failAddr string
+}
+
+// reportWarm makes addr answer every PUT reporting n warm for each pool it holds.
+func (f *fakeSetter) reportWarm(addr string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.warm == nil {
+		f.warm = map[string]int{}
+	}
+	f.warm[addr] = n
+}
+
+func (f *fakeSetter) factory() ClientFactory {
+	return func(addr, _ string) PoolSetter { return &fakeNode{addr: addr, parent: f} }
+}
+
+type fakeNode struct {
+	addr   string
+	parent *fakeSetter
+}
+
+func (n *fakeNode) SetPools(_ context.Context, pools []sandboxd.PoolSpec) (*sandboxd.NodeInfo, error) {
+	n.parent.mu.Lock()
+	defer n.parent.mu.Unlock()
+	if n.parent.failAddr == n.addr {
+		return nil, errors.New("node unreachable")
+	}
+	n.parent.byAddr[n.addr] = pools
+	// Mirror real sandboxd: the response echoes every pool the node now holds,
+	// each with its live warm count.
+	info := &sandboxd.NodeInfo{}
+	for _, p := range pools {
+		var entry struct {
+			Key struct {
+				Template string `json:"template"`
+				Net      string `json:"net"`
+				Size     string `json:"size"`
+			} `json:"key"`
+			Warm      int  `json:"warm"`
+			Refilling int  `json:"refilling"`
+			Target    int  `json:"target"`
+			Golden    bool `json:"golden"`
+		}
+		entry.Key.Template, entry.Key.Net, entry.Key.Size = p.Template, p.Net, p.Size
+		entry.Warm = n.parent.warm[n.addr]
+		entry.Target = p.Warm
+		info.Pools = append(info.Pools, entry)
+	}
+	return info, nil
+}
+
+func newTestDriver(t *testing.T, objs ...client.Object) (*Driver, *fakeSetter, *scale.StaticInventorySource, client.Client) {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := extv1beta1.AddToScheme(scheme); err != nil {
+		t.Fatalf("scheme: %v", err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(&extv1beta1.SandboxWarmPool{}).
+		WithObjects(objs...).Build()
+	inv := scale.NewStaticInventorySource()
+	setter := &fakeSetter{byAddr: map[string][]sandboxd.PoolSpec{}}
+	d := New(kube, inv, "tok", setter.factory(), Options{Interval: 0})
+	return d, setter, inv, kube
+}
+
+func warmPool(name string, replicas int32) *extv1beta1.SandboxWarmPool {
+	return &extv1beta1.SandboxWarmPool{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name},
+		Spec: extv1beta1.SandboxWarmPoolSpec{
+			Replicas:    ptr.To(replicas),
+			TemplateRef: extv1beta1.SandboxTemplateRef{Name: "tpl"},
+		},
+	}
+}
+
+func template() *extv1beta1.SandboxTemplate {
+	return &extv1beta1.SandboxTemplate{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "tpl"},
+		Spec: extv1beta1.SandboxTemplateSpec{
+			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
+				PodTemplate: sandboxv1beta1.PodTemplate{
+					Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: testImage}}},
+				},
+			},
+		},
+	}
+}
+
+func putNodes(inv *scale.StaticInventorySource, n int) {
+	for i := 0; i < n; i++ {
+		name := string(rune('a' + i))
+		inv.Put(&scale.NodeInventory{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Node:       name,
+			Address:    "10.0.0." + name + ":7777",
+		})
+	}
+}
+
+// warmPool2 builds a second pool referencing the same template.
+func warmPool2(name string, replicas int32) *extv1beta1.SandboxWarmPool {
+	p := warmPool(name, replicas)
+	return p
 }

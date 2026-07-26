@@ -39,122 +39,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-// Create a test scheme with extensions types registered.
-func newTestScheme() *runtime.Scheme {
-	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(sandboxv1beta1.AddToScheme(scheme))
-	utilruntime.Must(extensionsv1beta1.AddToScheme(scheme))
-	return scheme
-}
-
-func newFakeClient(scheme *runtime.Scheme, initialObjs ...runtime.Object) client.WithWatch {
-	return fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithStatusSubresource(&extensionsv1beta1.SandboxWarmPool{}).
-		WithIndex(&sandboxv1beta1.Sandbox{}, sandboxWarmPoolLabelIndex, sandboxWarmPoolLabelIndexer).
-		WithIndex(&extensionsv1beta1.SandboxWarmPool{}, extensionsv1beta1.TemplateRefField, sandboxTemplateRefNameIndexer).
-		WithRuntimeObjects(initialObjs...).
-		Build()
-}
-
-func createPoolSandbox(poolName, namespace, poolNameHash string, template *extensionsv1beta1.SandboxTemplate, suffix string) *sandboxv1beta1.Sandbox {
-	templateRefHash := ""
-	var podTemplateHash, sandboxBlueprintHash string
-	var podSpec corev1.PodSpec
-
-	if template != nil {
-		templateRefHash = sandboxcontrollers.NameHash(template.Name)
-		podSpec = *template.Spec.PodTemplate.Spec.DeepCopy()
-		ApplySandboxSecureDefaults(template, &podSpec)
-		// If template has a version label, we could use it as part of the hash placeholder
-		if v, ok := template.Spec.PodTemplate.ObjectMeta.Labels["version"]; ok {
-			podTemplateHash = "pod-hash-" + v
-			sandboxBlueprintHash = "blueprint-hash-" + v
-		} else {
-			podTemplateJSON, _ := json.Marshal(template.Spec.PodTemplate)
-			podTemplateHash = sandboxcontrollers.NameHash(string(podTemplateJSON))
-
-			sandboxBlueprintJSON, _ := json.Marshal(template.Spec.SandboxBlueprint)
-			sandboxBlueprintHash = sandboxcontrollers.NameHash(string(sandboxBlueprintJSON))
-		}
-	} else {
-		// Fallback for tests that don't provide a template
-		podSpec = corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:  "test-container",
-					Image: "test-image",
-				},
-			},
-		}
-		podTemplateJSON, _ := json.Marshal(sandboxv1beta1.PodTemplate{Spec: podSpec})
-		podTemplateHash = sandboxcontrollers.NameHash(string(podTemplateJSON))
-
-		sandboxBlueprintJSON, _ := json.Marshal(sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: podSpec}})
-		sandboxBlueprintHash = sandboxcontrollers.NameHash(string(sandboxBlueprintJSON))
-	}
-
-	return &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              poolName + suffix,
-			Namespace:         namespace,
-			CreationTimestamp: metav1.Now(),
-			Labels: map[string]string{
-				warmPoolSandboxLabel:                                 poolNameHash,
-				sandboxTemplateRefHash:                               templateRefHash,
-				sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel: podTemplateHash,
-				sandboxv1beta1.SandboxTemplateHashLabel:              sandboxBlueprintHash,
-			},
-		},
-		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			ObjectMeta: sandboxv1beta1.PodMetadata{
-				Labels: map[string]string{
-					warmPoolSandboxLabel:                                 poolNameHash,
-					sandboxTemplateRefHash:                               templateRefHash,
-					sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel: podTemplateHash,
-					sandboxv1beta1.SandboxTemplateHashLabel:              sandboxBlueprintHash,
-				},
-			},
-			Spec: podSpec,
-		}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning,
-		},
-	}
-}
-
-func createTemplate(namespace string) *extensionsv1beta1.SandboxTemplate {
-	return &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-template",
-			Namespace: namespace,
-		},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:  "test-container",
-						Image: "test-image",
-					},
-				},
-			},
-		}},
-		},
-	}
-}
-
-func createVolumeClaimTemplate(name string, storageClass string) sandboxv1beta1.PersistentVolumeClaimTemplate {
-	return sandboxv1beta1.PersistentVolumeClaimTemplate{
-		EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: name},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-			StorageClassName: &storageClass,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
-			},
-		},
-	}
-}
-
 func TestReconcilePool(t *testing.T) {
 	poolName := "test-pool"
 	poolNamespace := "default"
@@ -2215,4 +2099,120 @@ func TestSandboxBlueprintFieldsAreCompared(t *testing.T) {
 		"SandboxBlueprint fields have changed. Update compareSandboxBlueprint() in "+
 			"sandboxwarmpool_controller.go to compare the new field for staleness detection, then update the "+
 			"expected field list in this test to include it.")
+}
+
+// Create a test scheme with extensions types registered.
+func newTestScheme() *runtime.Scheme {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(sandboxv1beta1.AddToScheme(scheme))
+	utilruntime.Must(extensionsv1beta1.AddToScheme(scheme))
+	return scheme
+}
+
+func newFakeClient(scheme *runtime.Scheme, initialObjs ...runtime.Object) client.WithWatch {
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&extensionsv1beta1.SandboxWarmPool{}).
+		WithIndex(&sandboxv1beta1.Sandbox{}, sandboxWarmPoolLabelIndex, sandboxWarmPoolLabelIndexer).
+		WithIndex(&extensionsv1beta1.SandboxWarmPool{}, extensionsv1beta1.TemplateRefField, sandboxTemplateRefNameIndexer).
+		WithRuntimeObjects(initialObjs...).
+		Build()
+}
+
+func createPoolSandbox(poolName, namespace, poolNameHash string, template *extensionsv1beta1.SandboxTemplate, suffix string) *sandboxv1beta1.Sandbox {
+	templateRefHash := ""
+	var podTemplateHash, sandboxBlueprintHash string
+	var podSpec corev1.PodSpec
+
+	if template != nil {
+		templateRefHash = sandboxcontrollers.NameHash(template.Name)
+		podSpec = *template.Spec.PodTemplate.Spec.DeepCopy()
+		ApplySandboxSecureDefaults(template, &podSpec)
+		// If template has a version label, we could use it as part of the hash placeholder
+		if v, ok := template.Spec.PodTemplate.ObjectMeta.Labels["version"]; ok {
+			podTemplateHash = "pod-hash-" + v
+			sandboxBlueprintHash = "blueprint-hash-" + v
+		} else {
+			podTemplateJSON, _ := json.Marshal(template.Spec.PodTemplate)
+			podTemplateHash = sandboxcontrollers.NameHash(string(podTemplateJSON))
+
+			sandboxBlueprintJSON, _ := json.Marshal(template.Spec.SandboxBlueprint)
+			sandboxBlueprintHash = sandboxcontrollers.NameHash(string(sandboxBlueprintJSON))
+		}
+	} else {
+		// Fallback for tests that don't provide a template
+		podSpec = corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "test-container",
+					Image: "test-image",
+				},
+			},
+		}
+		podTemplateJSON, _ := json.Marshal(sandboxv1beta1.PodTemplate{Spec: podSpec})
+		podTemplateHash = sandboxcontrollers.NameHash(string(podTemplateJSON))
+
+		sandboxBlueprintJSON, _ := json.Marshal(sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: podSpec}})
+		sandboxBlueprintHash = sandboxcontrollers.NameHash(string(sandboxBlueprintJSON))
+	}
+
+	return &sandboxv1beta1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              poolName + suffix,
+			Namespace:         namespace,
+			CreationTimestamp: metav1.Now(),
+			Labels: map[string]string{
+				warmPoolSandboxLabel:                                 poolNameHash,
+				sandboxTemplateRefHash:                               templateRefHash,
+				sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel: podTemplateHash,
+				sandboxv1beta1.SandboxTemplateHashLabel:              sandboxBlueprintHash,
+			},
+		},
+		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+			ObjectMeta: sandboxv1beta1.PodMetadata{
+				Labels: map[string]string{
+					warmPoolSandboxLabel:                                 poolNameHash,
+					sandboxTemplateRefHash:                               templateRefHash,
+					sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel: podTemplateHash,
+					sandboxv1beta1.SandboxTemplateHashLabel:              sandboxBlueprintHash,
+				},
+			},
+			Spec: podSpec,
+		}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning,
+		},
+	}
+}
+
+func createTemplate(namespace string) *extensionsv1beta1.SandboxTemplate {
+	return &extensionsv1beta1.SandboxTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-template",
+			Namespace: namespace,
+		},
+		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:  "test-container",
+						Image: "test-image",
+					},
+				},
+			},
+		}},
+		},
+	}
+}
+
+func createVolumeClaimTemplate(name string, storageClass string) sandboxv1beta1.PersistentVolumeClaimTemplate {
+	return sandboxv1beta1.PersistentVolumeClaimTemplate{
+		EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: name},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			StorageClassName: &storageClass,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+			},
+		},
+	}
 }

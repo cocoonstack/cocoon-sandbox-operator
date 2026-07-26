@@ -48,25 +48,22 @@ import (
 )
 
 const (
+	resourceOwnedBySandbox resourceOwnership = iota
+	resourceUnowned
+	resourceOwnedByOther
+
 	sandboxLabel = "agents.x-k8s.io/sandbox-name-hash"
-	// podSandboxNameHashIndex is the cache field index over the sandboxLabel
-	// value on Pods, so per-reconcile pod lookups are O(1).
+	// podSandboxNameHashIndex is a cache field index, so per-reconcile pod lookups are O(1).
 	podSandboxNameHashIndex     = ".metadata.labels[" + sandboxLabel + "]"
 	sandboxControllerFieldOwner = "sandbox-controller"
 	immediateRequeueDelay       = time.Millisecond
 )
 
+// Scheme registers the types sandbox controllers need on their client.
+var Scheme = runtime.NewScheme()
+
 // resourceOwnership represents the ownership state of a Kubernetes resource relative to a Sandbox.
 type resourceOwnership int
-
-const (
-	// resourceOwnedBySandbox indicates the resource's controllerRef points to this Sandbox.
-	resourceOwnedBySandbox resourceOwnership = iota
-	// resourceUnowned indicates the resource has no controllerRef.
-	resourceUnowned
-	// resourceOwnedByOther indicates the resource's controllerRef points to a different controller.
-	resourceOwnedByOther
-)
 
 // checkOwnership determines whether a Kubernetes resource is owned by the given Sandbox,
 // has no controller, or is owned by a different controller.
@@ -112,11 +109,6 @@ func MergeVolumeClaimVolumes(existing []corev1.Volume, pvcVolumes []corev1.Volum
 	}
 	return append(filtered, pvcVolumes...)
 }
-
-var (
-	// Scheme for use by sandbox controllers. Registers required types for client.
-	Scheme = runtime.NewScheme()
-)
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(Scheme))

@@ -12,58 +12,7 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 )
 
-// poolInv builds a NodeInventory advertising a sandboxd address and pool capacities.
-func poolInv(node, addr string, pools ...PoolCapacity) *NodeInventory {
-	return &NodeInventory{
-		ObjectMeta: metav1.ObjectMeta{Name: node},
-		Node:       node,
-		Address:    addr,
-		Pools:      pools,
-	}
-}
-
-// recordingFactory captures how the store built and called the per-node sandboxd
-// client, so tests can assert claim/release routing (address + uniform token) and
-// the derived claim spec without a live node.
-type recordingFactory struct {
-	builtAddr    string
-	builtToken   string
-	claimSpec    sandboxd.ClaimSpec
-	claimCalls   int
-	releaseID    string
-	releaseToken string
-	releaseCalls int
-
-	claimResult sandboxd.ClaimResult
-	claimErr    error
-	releaseErr  error
-}
-
-func (f *recordingFactory) factory() SandboxdClientFactory {
-	return func(addr, token string) SandboxdClient {
-		f.builtAddr, f.builtToken = addr, token
-		return &recordingClient{f: f}
-	}
-}
-
-type recordingClient struct{ f *recordingFactory }
-
 var _ SandboxdClient = (*recordingClient)(nil)
-
-func (c *recordingClient) Claim(_ context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error) {
-	c.f.claimCalls++
-	c.f.claimSpec = spec
-	if c.f.claimErr != nil {
-		return sandboxd.ClaimResult{}, c.f.claimErr
-	}
-	return c.f.claimResult, nil
-}
-
-func (c *recordingClient) Release(_ context.Context, id, token string) error {
-	c.f.releaseCalls++
-	c.f.releaseID, c.f.releaseToken = id, token
-	return c.f.releaseErr
-}
 
 func TestStoreClaim_PicksMostWarmNodeAndRoutes(t *testing.T) {
 	src := NewStaticInventorySource()
@@ -155,26 +104,85 @@ func TestStoreClaimRelease_FailClosedWithoutRouting(t *testing.T) {
 	require.Error(t, store.Release(context.Background(), "n1", "sb-1"))
 }
 
+// poolInv builds a NodeInventory advertising a sandboxd address and pool capacities.
+func poolInv(node, addr string, pools ...PoolCapacity) *NodeInventory {
+	return &NodeInventory{
+		ObjectMeta: metav1.ObjectMeta{Name: node},
+		Node:       node,
+		Address:    addr,
+		Pools:      pools,
+	}
+}
+
+// recordingFactory captures how the store built and called the per-node sandboxd
+// client, so tests can assert claim/release routing (address + uniform token) and
+// the derived claim spec without a live node.
+type recordingFactory struct {
+	builtAddr    string
+	builtToken   string
+	claimSpec    sandboxd.ClaimSpec
+	claimCalls   int
+	releaseID    string
+	releaseToken string
+	releaseCalls int
+
+	claimResult sandboxd.ClaimResult
+	claimErr    error
+	releaseErr  error
+}
+
+func (f *recordingFactory) factory() SandboxdClientFactory {
+	return func(addr, token string) SandboxdClient {
+		f.builtAddr, f.builtToken = addr, token
+		return &recordingClient{f: f}
+	}
+}
+
+type recordingClient struct{ f *recordingFactory }
+
+func (c *recordingClient) Claim(_ context.Context, spec sandboxd.ClaimSpec) (sandboxd.ClaimResult, error) {
+	c.f.claimCalls++
+	c.f.claimSpec = spec
+	if c.f.claimErr != nil {
+		return sandboxd.ClaimResult{}, c.f.claimErr
+	}
+	return c.f.claimResult, nil
+}
+
+func (c *recordingClient) Release(_ context.Context, id, token string) error {
+	c.f.releaseCalls++
+	c.f.releaseID, c.f.releaseToken = id, token
+	return c.f.releaseErr
+}
+
 // The lifecycle verbs are not exercised here; they satisfy the SandboxdClient
 // port so the recorder stays a drop-in.
 func (c *recordingClient) Hibernate(context.Context, string) error { return nil }
-func (c *recordingClient) Wake(context.Context, string) error      { return nil }
+
+func (c *recordingClient) Wake(context.Context, string) error { return nil }
+
 func (c *recordingClient) Fork(context.Context, string, sandboxd.ForkSpec) (sandboxd.ForkResult, error) {
 	return sandboxd.ForkResult{}, nil
 }
+
 func (c *recordingClient) Checkpoint(context.Context, string, sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error) {
 	return sandboxd.Checkpoint{}, nil
 }
+
 func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, error) {
 	return nil, nil
 }
+
 func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { return nil }
+
 func (c *recordingClient) ClaimCheckpoint(context.Context, string, sandboxd.CheckpointClaimSpec) (sandboxd.ClaimResult, error) {
 	return sandboxd.ClaimResult{}, nil
 }
+
 func (c *recordingClient) Promote(context.Context, string, sandboxd.PromoteSpec) (sandboxd.PoolKey, error) {
 	return sandboxd.PoolKey{}, nil
 }
+
 func (c *recordingClient) Stats(context.Context, string) (sandboxd.SandboxStats, error) {
 	return sandboxd.SandboxStats{}, nil
 }

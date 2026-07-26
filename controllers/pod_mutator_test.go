@@ -13,12 +13,6 @@ import (
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
-type podMutatorFunc func(context.Context, *sandboxv1beta1.Sandbox, *corev1.Pod) error
-
-func (f podMutatorFunc) MutatePod(ctx context.Context, sandbox *sandboxv1beta1.Sandbox, pod *corev1.Pod) error {
-	return f(ctx, sandbox, pod)
-}
-
 func TestReconcilePodAppliesPodMutator(t *testing.T) {
 	sandbox := testSandboxForPodMutation()
 	kube := newFakeClient(sandbox)
@@ -63,6 +57,12 @@ func TestReconcilePodDoesNotCreatePodWhenMutatorFails(t *testing.T) {
 	if err := kube.Get(context.Background(), clientObjectKey(sandbox.Namespace, sandbox.Name), &pod); err == nil {
 		t.Fatal("Pod was created after mutator failure")
 	}
+}
+
+type podMutatorFunc func(context.Context, *sandboxv1beta1.Sandbox, *corev1.Pod) error
+
+func (f podMutatorFunc) MutatePod(ctx context.Context, sandbox *sandboxv1beta1.Sandbox, pod *corev1.Pod) error {
+	return f(ctx, sandbox, pod)
 }
 
 func testSandboxForPodMutation() *sandboxv1beta1.Sandbox {

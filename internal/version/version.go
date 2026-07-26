@@ -24,22 +24,22 @@ import (
 )
 
 var (
-	// The version of sandbox-operator.
 	gitVersion = "unknown"
-	// Short sha1 from git, output of $(git rev-parse --short HEAD).
-	gitSHA = "unknown"
-	// Build date in ISO8601 format, output of $(date -u +'%Y-%m-%dT%H:%M:%SZ').
-	buildDate = "unknown"
+	gitSHA     = "unknown"
+	buildDate  = "unknown"
 
-	// Go runtime version used to build sandbox-operator.
-	goVersion = runtime.Version()
-
-	// Go compiler name used to build agent-sandbox (e.g., "gc").
+	goVersion  = runtime.Version()
 	goCompiler = runtime.Compiler
+	goOS       = runtime.GOOS
+	goArch     = runtime.GOARCH
 
-	// Operating system and CPU architecture the binary is compiled for.
-	goOS   = runtime.GOOS
-	goArch = runtime.GOARCH
+	versionInfoTmpl = `
+{{.Program}}, version {{.GitVersion}} (revision: {{.GitSHA}})
+  build date:       {{.BuildDate}}
+  go version:       {{.GoVersion}}
+  compiler:         {{.Compiler}}
+  platform:         {{.Platform}}
+`
 )
 
 type Info struct {
@@ -51,14 +51,6 @@ type Info struct {
 	Compiler   string `json:"compiler"`
 	Platform   string `json:"platform"`
 }
-
-var versionInfoTmpl = `
-{{.Program}}, version {{.GitVersion}} (revision: {{.GitSHA}})
-  build date:       {{.BuildDate}}
-  go version:       {{.GoVersion}}
-  compiler:         {{.Compiler}}
-  platform:         {{.Platform}}
-`
 
 // Get returns version information populated with build-time values.
 func Get() Info {

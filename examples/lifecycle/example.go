@@ -53,10 +53,15 @@ import (
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
-// visibilityTimeout bounds the wait for the read view to publish a sandbox.
-// It is generous relative to the ~30s inventory cadence so a single slow
-// publish does not fail the walk-through.
-const visibilityTimeout = 90 * time.Second
+const (
+	// visibilityTimeout bounds the wait for the read view to publish a sandbox.
+	// It is generous relative to the ~30s inventory cadence so a single slow
+	// publish does not fail the walk-through.
+	visibilityTimeout = 90 * time.Second
+
+	// claimIDAnnotation carries the node-local claim id of a delivered sandbox.
+	claimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+)
 
 type options struct {
 	kubeconfig string
@@ -239,9 +244,6 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 	step("delete", "released %s/%s", o.namespace, name)
 	return nil
 }
-
-// claimIDAnnotation carries the node-local claim id of a delivered sandbox.
-const claimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
 
 // waitVisible polls until the synthesized read view publishes the sandbox.
 // Create returns as soon as the node-local claim completes, but List/Get are

@@ -20,9 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-// Important: Run "make" to regenerate code after modifying this file
-
 const (
 	// ClaimExpiredReason is the reason used in conditions/events when a claim expires.
 	ClaimExpiredReason = "ClaimExpired"
@@ -33,16 +30,7 @@ const (
 
 	// AssignedSandboxNameAnnotation is the annotation key applied to the claim to identify the adopted Sandbox Name.
 	AssignedSandboxNameAnnotation = "agents.x-k8s.io/sandbox-name"
-)
 
-// WarmPoolPolicy describes the policy for using warm pools.
-// It can be one of the following:
-//   - "none": Do not use any warm pool, always create fresh sandboxes
-//   - "default": Select from all available warm pools that match the template (default)
-//   - A warm pool name: Select only from the specified warm pool (e.g., "fast-pool", "secure-pool")
-type WarmPoolPolicy string
-
-const (
 	// WarmPoolPolicyNone indicates that no warm pool should be used.
 	// A fresh sandbox will always be created.
 	WarmPoolPolicyNone WarmPoolPolicy = "none"
@@ -51,19 +39,7 @@ const (
 	// available warm pools that match the template. This is the default behavior
 	// if warmpool is not specified.
 	WarmPoolPolicyDefault WarmPoolPolicy = "default"
-)
 
-// IsSpecificPool returns true if the policy specifies a specific warm pool name
-// (not "none" or "default").
-func (p WarmPoolPolicy) IsSpecificPool() bool {
-	return p != WarmPoolPolicyNone && p != WarmPoolPolicyDefault && p != ""
-}
-
-// ShutdownPolicy describes the policy for shutting down the underlying Sandbox when the SandboxClaim expires.
-// +kubebuilder:validation:Enum=Delete;DeleteForeground;Retain
-type ShutdownPolicy string
-
-const (
 	// ShutdownPolicyDelete deletes the SandboxClaim (and cascadingly the Sandbox) when expired.
 	ShutdownPolicyDelete ShutdownPolicy = "Delete"
 
@@ -78,6 +54,26 @@ const (
 	// but the SandboxClaim object itself remains.
 	ShutdownPolicyRetain ShutdownPolicy = "Retain"
 )
+
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// Important: Run "make" to regenerate code after modifying this file
+
+// WarmPoolPolicy describes the policy for using warm pools.
+// It can be one of the following:
+//   - "none": Do not use any warm pool, always create fresh sandboxes
+//   - "default": Select from all available warm pools that match the template (default)
+//   - A warm pool name: Select only from the specified warm pool (e.g., "fast-pool", "secure-pool")
+type WarmPoolPolicy string
+
+// IsSpecificPool returns true if the policy specifies a specific warm pool name
+// (not "none" or "default").
+func (p WarmPoolPolicy) IsSpecificPool() bool {
+	return p != WarmPoolPolicyNone && p != WarmPoolPolicyDefault && p != ""
+}
+
+// ShutdownPolicy describes the policy for shutting down the underlying Sandbox when the SandboxClaim expires.
+// +kubebuilder:validation:Enum=Delete;DeleteForeground;Retain
+type ShutdownPolicy string
 
 // Lifecycle defines the lifecycle management for the SandboxClaim.
 type Lifecycle struct {

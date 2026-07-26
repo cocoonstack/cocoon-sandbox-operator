@@ -16,30 +16,6 @@ import (
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
-func inv(node string, entries ...InventoryEntry) *NodeInventory {
-	return &NodeInventory{
-		ObjectMeta: metav1.ObjectMeta{Name: node},
-		Node:       node,
-		Entries:    entries,
-	}
-}
-
-func entry(name, phase string) InventoryEntry { return InventoryEntry{Name: name, Phase: phase} }
-
-// sliceLive is a NodeLiveSource fed from an in-memory slice.
-type sliceLive []InventoryEntry
-
-func (s sliceLive) LiveSandboxes(context.Context) ([]InventoryEntry, error) {
-	return []InventoryEntry(s), nil
-}
-
-// mutableLive is a NodeLiveSource whose entries can change between publishes.
-type mutableLive struct{ entries []InventoryEntry }
-
-func (m *mutableLive) LiveSandboxes(context.Context) ([]InventoryEntry, error) {
-	return m.entries, nil
-}
-
 func TestScatterGatherList_FlattensAllNodes(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(inv("n1", entry("ns-a/s1", "Running"), entry("ns-b/s2", "Pending")))
@@ -64,8 +40,6 @@ func TestScatterGatherList_FlattensAllNodes(t *testing.T) {
 	assert.Equal(t, "n1", byName["s1"].label)
 	assert.Equal(t, "n2", byName["s3"].node)
 }
-
-type sandboxStatusView struct{ node, label string }
 
 func TestScatterGatherList_HonorsNamespaceFilter(t *testing.T) {
 	src := NewStaticInventorySource()
@@ -270,6 +244,32 @@ func TestNodeInventory_DeepCopyIsIndependent(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "n1", clone.Node)
 }
+
+func inv(node string, entries ...InventoryEntry) *NodeInventory {
+	return &NodeInventory{
+		ObjectMeta: metav1.ObjectMeta{Name: node},
+		Node:       node,
+		Entries:    entries,
+	}
+}
+
+func entry(name, phase string) InventoryEntry { return InventoryEntry{Name: name, Phase: phase} }
+
+// sliceLive is a NodeLiveSource fed from an in-memory slice.
+type sliceLive []InventoryEntry
+
+func (s sliceLive) LiveSandboxes(context.Context) ([]InventoryEntry, error) {
+	return []InventoryEntry(s), nil
+}
+
+// mutableLive is a NodeLiveSource whose entries can change between publishes.
+type mutableLive struct{ entries []InventoryEntry }
+
+func (m *mutableLive) LiveSandboxes(context.Context) ([]InventoryEntry, error) {
+	return m.entries, nil
+}
+
+type sandboxStatusView struct{ node, label string }
 
 // waitForType drains events until one of type want arrives or the deadline hits.
 func waitForType(t *testing.T, w watch.Interface, want watch.EventType, timeout time.Duration) watch.Event {

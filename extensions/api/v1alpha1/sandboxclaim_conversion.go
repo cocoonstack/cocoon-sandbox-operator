@@ -26,14 +26,16 @@ import (
 	v1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
-const v1alpha1SandboxClaimStateAnnotation = "api.agents.x-k8s.io/v1alpha1-sandboxclaim-state"
+const (
+	v1alpha1SandboxClaimStateAnnotation = "api.agents.x-k8s.io/v1alpha1-sandboxclaim-state"
 
-// v1beta1SandboxClaimVolumeClaimTemplatesAnnotation preserves the v1beta1-only
-// spec.volumeClaimTemplates field across the lossy v1alpha1 representation, so a
-// v1beta1-authored claim keeps its PVCs (and forced cold-start) after a round trip
-// through any v1alpha1 client. Symmetric to the SandboxTemplate
-// VolumeClaimTemplatesPolicy annotation.
-const v1beta1SandboxClaimVolumeClaimTemplatesAnnotation = "api.agents.x-k8s.io/v1beta1-sandboxclaim-volume-claim-templates"
+	// v1beta1SandboxClaimVolumeClaimTemplatesAnnotation preserves the v1beta1-only
+	// spec.volumeClaimTemplates field across the lossy v1alpha1 representation, so a
+	// v1beta1-authored claim keeps its PVCs (and forced cold-start) after a round trip
+	// through any v1alpha1 client. Symmetric to the SandboxTemplate
+	// VolumeClaimTemplatesPolicy annotation.
+	v1beta1SandboxClaimVolumeClaimTemplatesAnnotation = "api.agents.x-k8s.io/v1beta1-sandboxclaim-volume-claim-templates"
+)
 
 // ConvertTo converts this SandboxClaim to the Hub version (v1beta1).
 func (s *SandboxClaim) ConvertTo(dstRaw conversion.Hub) error {

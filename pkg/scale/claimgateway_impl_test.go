@@ -24,119 +24,6 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 )
 
-// --- test doubles ------------------------------------------------------------
-
-// fakeSandboxd is an httptest-backed sandboxd. It serves POST /v1/claim (200 with
-// a fresh id, unless forceStatus overrides) and POST /v1/sandboxes/{id}/release
-// (204), counting both so tests can assert the VM-destroy path.
-type fakeSandboxd struct {
-	srv         *httptest.Server
-	claims      atomic.Int64
-	releases    atomic.Int64
-	nextID      atomic.Int64
-	forceStatus atomic.Int64 // when non-zero, claim returns this status (e.g. 429)
-}
-
-func newFakeSandboxd(t *testing.T) *fakeSandboxd {
-	t.Helper()
-	f := &fakeSandboxd{}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/claim", func(w http.ResponseWriter, _ *http.Request) {
-		f.claims.Add(1)
-		if s := f.forceStatus.Load(); s != 0 {
-			w.WriteHeader(int(s))
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "node at max_claims"})
-			return
-		}
-		id := fmt.Sprintf("sb_%d", f.nextID.Add(1))
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(sandboxd.ClaimResult{
-			ID: id, Token: "tok_" + id, Deadline: "2026-07-06T00:05:00Z", OwnerAddr: "10.0.0.5:7777",
-		})
-	})
-	mux.HandleFunc("/v1/sandboxes/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/release") {
-			f.releases.Add(1)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	})
-	f.srv = httptest.NewServer(mux)
-	t.Cleanup(f.srv.Close)
-	return f
-}
-
-func (f *fakeSandboxd) client() *sandboxd.Client { return sandboxd.New(f.srv.URL, "root-token") }
-
-type allowAuthorizer struct{}
-
-func (allowAuthorizer) Authorize(context.Context, ClaimRequest) error { return nil }
-
-type noopRecorder struct{}
-
-func (noopRecorder) RecordBound(context.Context, string, string, Assignment) error { return nil }
-
-// failingRecorder always fails — modeling the async Bound record lost to a gateway
-// crash, which leaves an orphan binding for the OrphanReconciler to heal.
-type failingRecorder struct{}
-
-func (failingRecorder) RecordBound(context.Context, string, string, Assignment) error {
-	return fmt.Errorf("simulated record failure (gateway crashed before recording Bound)")
-}
-
-// sliceInventory is a NodeInventorySource backed by a fixed slice (as if read from
-// sandboxd's own inventory after a crash).
-type sliceInventory []Delivery
-
-func (s sliceInventory) LiveDeliveries(context.Context) ([]Delivery, error) {
-	return []Delivery(s), nil
-}
-
-type fakeSAR struct {
-	allow bool
-	deny  bool
-	err   error
-}
-
-func (f fakeSAR) Create(_ context.Context, sar *authzv1.SubjectAccessReview, _ metav1.CreateOptions) (*authzv1.SubjectAccessReview, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	out := sar.DeepCopy()
-	out.Status = authzv1.SubjectAccessReviewStatus{Allowed: f.allow, Denied: f.deny, Reason: "test"}
-	return out, nil
-}
-
-func newScaleScheme(t *testing.T) *runtime.Scheme {
-	t.Helper()
-	s := runtime.NewScheme()
-	require.NoError(t, sandboxv1beta1.AddToScheme(s))
-	require.NoError(t, extv1beta1.AddToScheme(s))
-	return s
-}
-
-func newClaimClient(t *testing.T, names ...string) client.Client {
-	t.Helper()
-	b := fake.NewClientBuilder().WithScheme(newScaleScheme(t)).WithStatusSubresource(&extv1beta1.SandboxClaim{})
-	for _, n := range names {
-		b = b.WithObjects(&extv1beta1.SandboxClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: n, Namespace: "default"},
-			Spec:       extv1beta1.SandboxClaimSpec{WarmPoolRef: extv1beta1.SandboxWarmPoolRef{Name: "base:24.04"}},
-		})
-	}
-	return b.Build()
-}
-
-func getClaim(t *testing.T, c client.Client, name string) *extv1beta1.SandboxClaim {
-	t.Helper()
-	cur := &extv1beta1.SandboxClaim{}
-	require.NoError(t, c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: name}, cur))
-	return cur
-}
-
-// --- tests -------------------------------------------------------------------
-
 // TestClaimGatewayHappyPath: a warm sandbox is delivered and the Assignment is
 // returned immediately; the SandboxClaim is recorded Bound asynchronously (the
 // node acts first, the apiserver records after). No VM is destroyed on the claim
@@ -312,6 +199,119 @@ func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
 		gw.Wait()
 	})
 }
+
+// --- test doubles ------------------------------------------------------------
+
+// fakeSandboxd is an httptest-backed sandboxd. It serves POST /v1/claim (200 with
+// a fresh id, unless forceStatus overrides) and POST /v1/sandboxes/{id}/release
+// (204), counting both so tests can assert the VM-destroy path.
+type fakeSandboxd struct {
+	srv         *httptest.Server
+	claims      atomic.Int64
+	releases    atomic.Int64
+	nextID      atomic.Int64
+	forceStatus atomic.Int64 // when non-zero, claim returns this status (e.g. 429)
+}
+
+func newFakeSandboxd(t *testing.T) *fakeSandboxd {
+	t.Helper()
+	f := &fakeSandboxd{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/claim", func(w http.ResponseWriter, _ *http.Request) {
+		f.claims.Add(1)
+		if s := f.forceStatus.Load(); s != 0 {
+			w.WriteHeader(int(s))
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "node at max_claims"})
+			return
+		}
+		id := fmt.Sprintf("sb_%d", f.nextID.Add(1))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sandboxd.ClaimResult{
+			ID: id, Token: "tok_" + id, Deadline: "2026-07-06T00:05:00Z", OwnerAddr: "10.0.0.5:7777",
+		})
+	})
+	mux.HandleFunc("/v1/sandboxes/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/release") {
+			f.releases.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	f.srv = httptest.NewServer(mux)
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+func (f *fakeSandboxd) client() *sandboxd.Client { return sandboxd.New(f.srv.URL, "root-token") }
+
+type allowAuthorizer struct{}
+
+func (allowAuthorizer) Authorize(context.Context, ClaimRequest) error { return nil }
+
+type noopRecorder struct{}
+
+func (noopRecorder) RecordBound(context.Context, string, string, Assignment) error { return nil }
+
+// failingRecorder always fails — modeling the async Bound record lost to a gateway
+// crash, which leaves an orphan binding for the OrphanReconciler to heal.
+type failingRecorder struct{}
+
+func (failingRecorder) RecordBound(context.Context, string, string, Assignment) error {
+	return fmt.Errorf("simulated record failure (gateway crashed before recording Bound)")
+}
+
+// sliceInventory is a NodeInventorySource backed by a fixed slice (as if read from
+// sandboxd's own inventory after a crash).
+type sliceInventory []Delivery
+
+func (s sliceInventory) LiveDeliveries(context.Context) ([]Delivery, error) {
+	return []Delivery(s), nil
+}
+
+type fakeSAR struct {
+	allow bool
+	deny  bool
+	err   error
+}
+
+func (f fakeSAR) Create(_ context.Context, sar *authzv1.SubjectAccessReview, _ metav1.CreateOptions) (*authzv1.SubjectAccessReview, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := sar.DeepCopy()
+	out.Status = authzv1.SubjectAccessReviewStatus{Allowed: f.allow, Denied: f.deny, Reason: "test"}
+	return out, nil
+}
+
+func newScaleScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := runtime.NewScheme()
+	require.NoError(t, sandboxv1beta1.AddToScheme(s))
+	require.NoError(t, extv1beta1.AddToScheme(s))
+	return s
+}
+
+func newClaimClient(t *testing.T, names ...string) client.Client {
+	t.Helper()
+	b := fake.NewClientBuilder().WithScheme(newScaleScheme(t)).WithStatusSubresource(&extv1beta1.SandboxClaim{})
+	for _, n := range names {
+		b = b.WithObjects(&extv1beta1.SandboxClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: n, Namespace: "default"},
+			Spec:       extv1beta1.SandboxClaimSpec{WarmPoolRef: extv1beta1.SandboxWarmPoolRef{Name: "base:24.04"}},
+		})
+	}
+	return b.Build()
+}
+
+func getClaim(t *testing.T, c client.Client, name string) *extv1beta1.SandboxClaim {
+	t.Helper()
+	cur := &extv1beta1.SandboxClaim{}
+	require.NoError(t, c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: name}, cur))
+	return cur
+}
+
+// --- tests -------------------------------------------------------------------
 
 func findCond(c *extv1beta1.SandboxClaim, t string) *metav1.Condition {
 	for i := range c.Status.Conditions {

@@ -15,43 +15,6 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
-// fakeStore is a scale.SandboxStore stub for the Delete path: Get returns a
-// preset sandbox, Release records its arguments. The read-path verbs are unused.
-type fakeStore struct {
-	getSandbox *sandboxv1beta1.Sandbox
-	getErr     error
-
-	released    bool
-	releaseNode string
-	releaseID   string
-	releaseErr  error
-}
-
-func (f *fakeStore) List(context.Context, scale.ListOptions) (*sandboxv1beta1.SandboxList, error) {
-	return &sandboxv1beta1.SandboxList{}, nil
-}
-
-func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbox, error) {
-	return f.getSandbox, f.getErr
-}
-
-func (f *fakeStore) Watch(context.Context, scale.ListOptions) (watch.Interface, error) {
-	return watch.NewFake(), nil
-}
-
-func (f *fakeStore) Claim(context.Context, string, string, scale.PoolKey) (scale.Assignment, error) {
-	return scale.Assignment{}, nil
-}
-
-func (f *fakeStore) Release(_ context.Context, node, id string) error {
-	f.released, f.releaseNode, f.releaseID = true, node, id
-	return f.releaseErr
-}
-
-func deleteCtx(ns string) context.Context {
-	return genericapirequest.WithNamespace(context.Background(), ns)
-}
-
 // TestDelete_ReleasesByClaimIDAnnotation proves Delete releases the microVM by
 // the sandboxd claim id the node published (the claim-id annotation), never by
 // the k8s object name.
@@ -94,24 +57,69 @@ func TestDelete_FailsLoudWithoutClaimID(t *testing.T) {
 	assert.False(t, store.released, "must not release when the sandboxd claim id is unknown")
 }
 
+// fakeStore is a scale.SandboxStore stub for the Delete path: Get returns a
+// preset sandbox, Release records its arguments. The read-path verbs are unused.
+type fakeStore struct {
+	getSandbox *sandboxv1beta1.Sandbox
+	getErr     error
+
+	released    bool
+	releaseNode string
+	releaseID   string
+	releaseErr  error
+}
+
+func (f *fakeStore) List(context.Context, scale.ListOptions) (*sandboxv1beta1.SandboxList, error) {
+	return &sandboxv1beta1.SandboxList{}, nil
+}
+
+func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbox, error) {
+	return f.getSandbox, f.getErr
+}
+
+func (f *fakeStore) Watch(context.Context, scale.ListOptions) (watch.Interface, error) {
+	return watch.NewFake(), nil
+}
+
+func (f *fakeStore) Claim(context.Context, string, string, scale.PoolKey) (scale.Assignment, error) {
+	return scale.Assignment{}, nil
+}
+
+func (f *fakeStore) Release(_ context.Context, node, id string) error {
+	f.released, f.releaseNode, f.releaseID = true, node, id
+	return f.releaseErr
+}
+
+func deleteCtx(ns string) context.Context {
+	return genericapirequest.WithNamespace(context.Background(), ns)
+}
+
 // The lifecycle verbs are not exercised by these tests; they satisfy the
 // SandboxStore contract so the fake stays a drop-in.
-func (f *fakeStore) Pause(context.Context, string, string) error  { return nil }
+func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
+
 func (f *fakeStore) Resume(context.Context, string, string) error { return nil }
+
 func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
 	return nil, nil
 }
+
 func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Snapshot, error) {
 	return scale.Snapshot{}, nil
 }
+
 func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }
-func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error        { return nil }
+
+func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
+
 func (f *fakeStore) ClaimSnapshot(context.Context, string, string, int) (scale.Assignment, error) {
 	return scale.Assignment{}, nil
 }
+
 func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, error) {
 	return scale.PoolKey{}, nil
 }
+
 func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
 	return scale.SandboxStats{}, nil
 }

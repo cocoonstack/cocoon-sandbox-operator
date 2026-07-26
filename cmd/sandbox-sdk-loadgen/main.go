@@ -55,9 +55,6 @@ import (
 	sdk "github.com/cocoonstack/sandbox/sdk/go"
 )
 
-// version is stamped at build time (-ldflags "-X main.version=...").
-var version = "dev"
-
 // L3 Create stamps these onto the returned Sandbox: the delivered connection
 // address, per-sandbox exec token, and sandboxd claim id. Together they let the
 // loadgen exec into exactly what it claimed (create -> exec latency).
@@ -67,11 +64,19 @@ const (
 	claimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
 )
 
-// sdkClient is the shared silkd data-plane client; per-sandbox handles are built
-// with Attach (no lookup round-trip) from the claim's address/id/token.
-var sdkClient *sdk.Client
-
 var (
+	// version is stamped at build time (-ldflags "-X main.version=...").
+	version = "dev"
+
+	// sdkClient is shared; per-sandbox handles come from Attach, with no lookup round-trip.
+	sdkClient *sdk.Client
+
+	failReasons = []string{"no-warm-503", "throttled-429", "internal-500", "timeout", "conflict", "other"}
+
+	// logMu/lastLog rate-limit logSampled to one line per key per 5s so load-test rates cannot flood the pod log.
+	logMu   sync.Mutex
+	lastLog = map[string]time.Time{}
+
 	createSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name: "sandbox_sdk_create_seconds",
 		Help: "Latency of Create(Sandbox) against the aggregated apiserver (warm claim round-trip).",
@@ -135,8 +140,6 @@ var (
 		Help: "Loadgen build info; value is always 1.",
 	}, []string{"version"})
 )
-
-var failReasons = []string{"no-warm-503", "throttled-429", "internal-500", "timeout", "conflict", "other"}
 
 type options struct {
 	namespace      string
@@ -586,13 +589,6 @@ func classify(err error) string {
 		return "other"
 	}
 }
-
-// logSampled prints at most one line per key per 5s so failure causes are always
-// visible in the pod log without flooding it at load-test rates.
-var (
-	logMu   sync.Mutex
-	lastLog = map[string]time.Time{}
-)
 
 func logSampled(key, format string, args ...interface{}) {
 	logMu.Lock()

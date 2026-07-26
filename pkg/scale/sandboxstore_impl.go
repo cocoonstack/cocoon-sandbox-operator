@@ -28,26 +28,26 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 )
 
-// Synthesized-Sandbox label keys. The aggregated store stamps these onto every
-// Sandbox it materializes from a NodeInventory entry so label selectors (the
-// `kubectl get sandboxes -l ...` path) have real axes to filter on without any
-// per-sandbox etcd object.
 const (
+	// Synthesized-Sandbox label keys. The aggregated store stamps these onto every
+	// Sandbox it materializes from a NodeInventory entry so label selectors (the
+	// `kubectl get sandboxes -l ...` path) have real axes to filter on without any
+	// per-sandbox etcd object.
 	// NodeLabel carries the owning node of a synthesized Sandbox.
 	NodeLabel = "sandbox.cocoonstack.io/node"
 	// PhaseLabel carries the entry phase of a synthesized Sandbox.
 	PhaseLabel = "sandbox.cocoonstack.io/phase"
 	// ClaimLabel carries the claim name a synthesized Sandbox is bound to.
 	ClaimLabel = "sandbox.cocoonstack.io/claim"
-)
 
-// ClaimIDAnnotation carries the owning node's sandboxd claim id ("sb_...") on a
-// synthesized Sandbox. Unlike the label keys above it is an annotation — an
-// opaque node-local handle, not a selector axis: the aggregated apiserver reads
-// it on Delete to release exactly the microVM this Sandbox stands for (releasing
-// by k8s name would target the wrong claim). This is the single definition of
-// the key; apiserver.ClaimIDAnnotation aliases it so both write it identically.
-const ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+	// ClaimIDAnnotation carries the owning node's sandboxd claim id ("sb_...") on a
+	// synthesized Sandbox. Unlike the label keys above it is an annotation — an
+	// opaque node-local handle, not a selector axis: the aggregated apiserver reads
+	// it on Delete to release exactly the microVM this Sandbox stands for (releasing
+	// by k8s name would target the wrong claim). This is the single definition of
+	// the key; apiserver.ClaimIDAnnotation aliases it so both write it identically.
+	ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+)
 
 // NodeInventoryGVK is the GroupVersionKind of the O(nodes) intent object the
 // publisher server-side-applies. It lives in the extensions CRD group next to
@@ -55,7 +55,12 @@ const ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
 // the APIService hands that entire group-version to the aggregated server,
 // which serves only `sandboxes`, so a NodeInventory registered there would 404
 // once the APIService cuts over.
-var NodeInventoryGVK = extv1beta1.GroupVersion.WithKind("NodeInventory")
+var (
+	NodeInventoryGVK = extv1beta1.GroupVersion.WithKind("NodeInventory")
+
+	// ErrNoWarmCapacity lets the aggregated apiserver map an exhausted pool to a retryable 503 instead of writing an object.
+	ErrNoWarmCapacity = errors.New("scale: no node has warm capacity for the requested pool")
+)
 
 // InventorySource enumerates the per-node NodeInventory objects that back the
 // aggregated store. It is deliberately granular — a node enumeration plus a
@@ -251,15 +256,6 @@ func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*
 	}
 	return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), name)
 }
-
-// --- Write path: node-local claim / release (no per-sandbox etcd object) ------
-
-// ErrNoWarmCapacity is returned by Claim when no node advertises a warm microVM
-// for the requested pool (or a node's advertised warm count was stale and its
-// sandboxd had none left). The aggregated apiserver maps it to a retryable 503 so
-// the client retries as warm capacity refills, rather than writing an object.
-// Test it with IsNoWarmCapacity rather than comparing directly.
-var ErrNoWarmCapacity = errors.New("scale: no node has warm capacity for the requested pool")
 
 // IsNoWarmCapacity reports whether err means Claim found no warm node.
 func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }

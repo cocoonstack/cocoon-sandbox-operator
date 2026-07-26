@@ -2393,6 +2393,7 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 		})
 	}
 }
+
 func TestSandboxEventHandler_Delete_RemovesGhostPods(t *testing.T) {
 	q := queue.NewSimpleSandboxQueue()
 	handler := &sandboxEventHandler{sandboxQueue: q}
@@ -2967,53 +2968,6 @@ func TestInitializeSandboxLaunchTypeLabel(t *testing.T) {
 	}
 }
 
-func newScheme(t *testing.T) *runtime.Scheme {
-	scheme := runtime.NewScheme()
-	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add to scheme: (%v)", err)
-	}
-	if err := extensionsv1beta1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add to scheme: (%v)", err)
-	}
-	if err := corev1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add to scheme: (%v)", err)
-	}
-	if err := networkingv1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add to scheme: (%v)", err)
-	}
-	return scheme
-}
-
-func ignoreTimestamp(_, _ metav1.Time) bool {
-	return true
-}
-
-type conflictClient struct {
-	client.Client
-	conflictCount int
-	maxConflicts  int
-}
-
-func (c *conflictClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
-	if sandbox, ok := obj.(*sandboxv1beta1.Sandbox); ok {
-		if c.conflictCount < c.maxConflicts {
-			c.conflictCount++
-			return k8errors.NewConflict(sandboxv1beta1.Resource("sandboxes"), sandbox.Name, fmt.Errorf("simulated conflict"))
-		}
-	}
-	return c.Client.Update(ctx, obj, opts...)
-}
-
-func (c *conflictClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-	if sandbox, ok := obj.(*sandboxv1beta1.Sandbox); ok {
-		if c.conflictCount < c.maxConflicts {
-			c.conflictCount++
-			return k8errors.NewConflict(sandboxv1beta1.Resource("sandboxes"), sandbox.Name, fmt.Errorf("simulated conflict"))
-		}
-	}
-	return c.Client.Patch(ctx, obj, patch, opts...)
-}
-
 func TestSandboxClaimTimingPredicates(t *testing.T) {
 	r := &SandboxClaimReconciler{}
 	pred := r.getTimingPredicate()
@@ -3434,13 +3388,6 @@ func TestSandboxClaimReconcileCleanup(t *testing.T) {
 			}
 		})
 	}
-}
-
-// countObservedTimesEntries returns the number of live entries in the observedTimes map.
-func countObservedTimesEntries(r *SandboxClaimReconciler) int {
-	count := 0
-	r.observedTimes.inner.Range(func(_, _ any) bool { count++; return true })
-	return count
 }
 
 func TestVerifySandboxCandidate_NamespaceIsolation(t *testing.T) {
@@ -5153,28 +5100,6 @@ func TestSandboxClaimReconcile_TransientLookupErrorPreservesStatus(t *testing.T)
 	require.Equal(t, "warm-sandbox", updatedClaim.Status.SandboxStatus.Name, "status.sandbox.name must not be wiped out when sandbox lookup fails with transient error")
 }
 
-type mockTracer struct {
-	asmetrics.Instrumenter
-	capturedAttrs map[string]string
-}
-
-func (m *mockTracer) StartSpan(ctx context.Context, _ metav1.Object, _ string, attrs map[string]string) (context.Context, func()) {
-	if len(attrs) > 0 {
-		m.capturedAttrs = attrs
-	}
-	return ctx, func() {}
-}
-
-func (m *mockTracer) GetTraceContext(_ context.Context) string {
-	return ""
-}
-
-func (m *mockTracer) IsRecording(_ context.Context) bool {
-	return true
-}
-
-func (m *mockTracer) AddEvent(_ context.Context, _ string, _ map[string]string) {}
-
 func TestReconcile_TracingNormalization(t *testing.T) {
 	claimName := "tracing-test-claim"
 	claim := &extensionsv1beta1.SandboxClaim{
@@ -5214,3 +5139,79 @@ func TestReconcile_TracingNormalization(t *testing.T) {
 	require.NotNil(t, mt.capturedAttrs)
 	require.Equal(t, "unknown", mt.capturedAttrs[sandboxv1beta1.CreatedByLabel], "created-by label must be normalized in span attributes")
 }
+
+func newScheme(t *testing.T) *runtime.Scheme {
+	scheme := runtime.NewScheme()
+	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add to scheme: (%v)", err)
+	}
+	if err := extensionsv1beta1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add to scheme: (%v)", err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add to scheme: (%v)", err)
+	}
+	if err := networkingv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add to scheme: (%v)", err)
+	}
+	return scheme
+}
+
+func ignoreTimestamp(_, _ metav1.Time) bool {
+	return true
+}
+
+type conflictClient struct {
+	client.Client
+	conflictCount int
+	maxConflicts  int
+}
+
+func (c *conflictClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	if sandbox, ok := obj.(*sandboxv1beta1.Sandbox); ok {
+		if c.conflictCount < c.maxConflicts {
+			c.conflictCount++
+			return k8errors.NewConflict(sandboxv1beta1.Resource("sandboxes"), sandbox.Name, fmt.Errorf("simulated conflict"))
+		}
+	}
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+func (c *conflictClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	if sandbox, ok := obj.(*sandboxv1beta1.Sandbox); ok {
+		if c.conflictCount < c.maxConflicts {
+			c.conflictCount++
+			return k8errors.NewConflict(sandboxv1beta1.Resource("sandboxes"), sandbox.Name, fmt.Errorf("simulated conflict"))
+		}
+	}
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+
+// countObservedTimesEntries returns the number of live entries in the observedTimes map.
+func countObservedTimesEntries(r *SandboxClaimReconciler) int {
+	count := 0
+	r.observedTimes.inner.Range(func(_, _ any) bool { count++; return true })
+	return count
+}
+
+type mockTracer struct {
+	asmetrics.Instrumenter
+	capturedAttrs map[string]string
+}
+
+func (m *mockTracer) StartSpan(ctx context.Context, _ metav1.Object, _ string, attrs map[string]string) (context.Context, func()) {
+	if len(attrs) > 0 {
+		m.capturedAttrs = attrs
+	}
+	return ctx, func() {}
+}
+
+func (m *mockTracer) GetTraceContext(_ context.Context) string {
+	return ""
+}
+
+func (m *mockTracer) IsRecording(_ context.Context) bool {
+	return true
+}
+
+func (m *mockTracer) AddEvent(_ context.Context, _ string, _ map[string]string) {}

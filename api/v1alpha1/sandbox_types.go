@@ -20,11 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// ConditionType is a type of condition for a resource.
-type ConditionType string
-
-func (c ConditionType) String() string { return string(c) }
-
 const (
 	// SandboxConditionSuspended indicates the sandbox is administratively suspended.
 	SandboxConditionSuspended ConditionType = "Suspended"
@@ -64,7 +59,18 @@ const (
 	SandboxPropagatedLabelsAnnotation = "agents.x-k8s.io/propagated-labels"
 	// SandboxPropagatedAnnotationsAnnotation is the annotation used to track the annotations explicitly propagated from sandbox spec to pod.
 	SandboxPropagatedAnnotationsAnnotation = "agents.x-k8s.io/propagated-annotations"
+
+	// ShutdownPolicyDelete deletes the Sandbox when expired.
+	ShutdownPolicyDelete ShutdownPolicy = "Delete"
+
+	// ShutdownPolicyRetain keeps the Sandbox when expired (Status will show Expired).
+	ShutdownPolicyRetain ShutdownPolicy = "Retain"
 )
+
+// ConditionType is a type of condition for a resource.
+type ConditionType string
+
+func (c ConditionType) String() string { return string(c) }
 
 type PodMetadata struct {
 	// labels defines the map of string keys and values that can be used to organize and categorize
@@ -168,14 +174,6 @@ type SandboxSpec struct {
 // ShutdownPolicy describes the policy for deleting the Sandbox when it expires.
 // +kubebuilder:validation:Enum=Delete;Retain
 type ShutdownPolicy string
-
-const (
-	// ShutdownPolicyDelete deletes the Sandbox when expired.
-	ShutdownPolicyDelete ShutdownPolicy = "Delete"
-
-	// ShutdownPolicyRetain keeps the Sandbox when expired (Status will show Expired).
-	ShutdownPolicyRetain ShutdownPolicy = "Retain"
-)
 
 // Lifecycle defines the lifecycle management for the Sandbox.
 type Lifecycle struct {

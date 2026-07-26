@@ -35,13 +35,13 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/warmpool"
 )
 
-// inventoryCacheSyncTimeout bounds the startup wait for the NodeInventory
-// informer to sync. If the NodeInventory CRD is not installed or the
-// kube-apiserver is unreachable, the binary fails loud instead of serving
-// empty sandbox lists.
-const inventoryCacheSyncTimeout = 2 * time.Minute
-
 const (
+	// inventoryCacheSyncTimeout bounds the startup wait for the NodeInventory
+	// informer to sync. If the NodeInventory CRD is not installed or the
+	// kube-apiserver is unreachable, the binary fails loud instead of serving
+	// empty sandbox lists.
+	inventoryCacheSyncTimeout = 2 * time.Minute
+
 	// e2bReadHeaderTimeout bounds how long a client may take to send its request
 	// headers on the e2b surface, so a stalled connection cannot pin a handler.
 	e2bReadHeaderTimeout = 10 * time.Second

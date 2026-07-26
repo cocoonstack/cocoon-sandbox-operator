@@ -50,6 +50,8 @@ const (
 )
 
 // Options configures the compat server.
+var errSandboxNotFound = errors.New("sandbox not found")
+
 type Options struct {
 	// Namespace is the Kubernetes namespace claims are made in. e2b has no
 	// namespace concept, so every compat claim lands in this one.
@@ -300,9 +302,6 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-
-// errSandboxNotFound is returned by lookup when no live sandbox carries the id.
-var errSandboxNotFound = errors.New("sandbox not found")
 
 // lookup finds the sandbox whose sandboxd claim id matches id. The id is the
 // node-assigned claim id, which the store stamps on each synthesized Sandbox.

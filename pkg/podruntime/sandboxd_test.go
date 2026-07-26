@@ -10,15 +10,6 @@ import (
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
-func sandboxdPod(image string) *corev1.Pod {
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{{Name: "agent", Image: image}},
-		},
-	}
-}
-
 // TestMutateSandboxdRoutesToHotPool: sandboxd mode pins the pod to the
 // vk-sandbox virtual node, tolerates its taint, stamps the runtime, and
 // defaults the claim template from the container image — the contract the
@@ -91,5 +82,14 @@ func TestNewMutatorAcceptsSandboxd(t *testing.T) {
 	}
 	if _, err := NewMutator("nonsense"); err == nil {
 		t.Fatal("NewMutator must reject unknown modes")
+	}
+}
+
+func sandboxdPod(image string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "agent", Image: image}},
+		},
 	}
 }

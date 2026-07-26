@@ -54,65 +54,39 @@ import (
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
-const ObservabilityAnnotation = "agents.x-k8s.io/controller-first-observed-at"
-const immediateRequeueDelay = time.Millisecond
+const (
+	ObservabilityAnnotation = "agents.x-k8s.io/controller-first-observed-at"
 
-// ErrTemplateNotFound is a sentinel error indicating a SandboxTemplate was not found.
-var ErrTemplateNotFound = errors.New("SandboxTemplate not found")
+	immediateRequeueDelay = time.Millisecond
+	// adoptionCacheLagRequeueDelay sets the latency floor for a warm-pool claim: the claim is only marked Bound on the pass that observes the adopted Sandbox.
+	adoptionCacheLagRequeueDelay = 5 * time.Millisecond
+)
 
-// ErrInvalidMetadata is a sentinel error indicating additionalPodMetadata was invalid.
-var ErrInvalidMetadata = errors.New("invalid additionalPodMetadata")
+var (
+	ErrTemplateNotFound                      = errors.New("SandboxTemplate not found")
+	ErrInvalidMetadata                       = errors.New("invalid additionalPodMetadata")
+	ErrSandboxNotOwned                       = errors.New("sandbox not owned by this claim")
+	ErrWarmPoolNotFound                      = errors.New("SandboxWarmPool not found")
+	ErrCrossNamespaceAdoption                = errors.New("cross-namespace adoption forbidden")
+	ErrEnvVarsInjectionRejected              = errors.New("environment variable injection rejected")
+	ErrVolumeClaimTemplatesDisallowed        = errors.New("volume claim templates are disallowed by the template")
+	ErrVolumeClaimTemplatesOverrideForbidden = errors.New("overriding volume claim templates is forbidden by the template")
+	ErrVolumeClaimTemplatesInvalid           = errors.New("invalid volume claim templates")
 
-// ErrSandboxNotOwned indicates the Sandbox exists but is not controlled by this claim.
-var ErrSandboxNotOwned = errors.New("sandbox not owned by this claim")
+	// errAdoptionTriggeredRetry is a sentinel so Reconcile can requeue instead of returning an error: the failure rate limiter would compound backoff on every pass until the informer cache converges (#1107).
+	errAdoptionTriggeredRetry = errors.New("triggered adoption completion, retry")
 
-// ErrWarmPoolNotFound is a sentinel error indicating a SandboxWarmPool was not found.
-var ErrWarmPoolNotFound = errors.New("SandboxWarmPool not found")
+	restrictedDomains = []string{"kubernetes.io", "k8s.io", "agents.x-k8s.io"}
 
-// errAdoptionTriggeredRetry signals that warm-pool adoption was just completed for a
-// sandbox and the claim must be requeued so a later pass observes the sandbox as
-// controlled by this claim once the informer cache converges. It is a sentinel (not a
-// generic error) so Reconcile can convert it into a bounded requeue instead
-// of returning an error: an error would route through the exponential failure rate
-// limiter, and because the same retry recurs each pass until the cache catches up the
-// backoff compounds and, under concurrent claims, adoption tail latency balloons
-// (#1107).
-var errAdoptionTriggeredRetry = errors.New("triggered adoption completion, retry")
-
-// adoptionCacheLagRequeueDelay is how long to wait before re-checking that a
-// just-completed adoption is visible in the informer cache. It is deliberately
-// small: it sets the latency floor for a warm-pool claim (the claim is only
-// marked Bound on the pass that observes the adopted Sandbox), so a large value
-// dominates claim tail latency. Redundant adoption patches during cache lag are
-// already prevented by triggeredAdoptions dedup, so this only needs to be long
-// enough to avoid a hot requeue loop while the watch converges (a few ms on a
-// healthy apiserver).
-const adoptionCacheLagRequeueDelay = 5 * time.Millisecond
-
-var restrictedDomains = []string{"kubernetes.io", "k8s.io", "agents.x-k8s.io"}
-
-var ErrCrossNamespaceAdoption = errors.New("cross-namespace adoption forbidden")
-
-// ErrEnvVarsInjectionRejected is a sentinel error indicating environment variable injection was rejected.
-var ErrEnvVarsInjectionRejected = errors.New("environment variable injection rejected")
-
-// ErrVolumeClaimTemplatesDisallowed is a sentinel error indicating that volumeClaimTemplates are disallowed by the template.
-var ErrVolumeClaimTemplatesDisallowed = errors.New("volume claim templates are disallowed by the template")
-
-// ErrVolumeClaimTemplatesOverrideForbidden is a sentinel error indicating that overriding volume claim templates by name is forbidden.
-var ErrVolumeClaimTemplatesOverrideForbidden = errors.New("overriding volume claim templates is forbidden by the template")
-
-// ErrVolumeClaimTemplatesInvalid is a sentinel error indicating that the volumeClaimTemplates configuration is invalid.
-var ErrVolumeClaimTemplatesInvalid = errors.New("invalid volume claim templates")
-
-var suppressErrors = []error{
-	ErrInvalidMetadata,
-	ErrSandboxNotOwned,
-	ErrEnvVarsInjectionRejected,
-	ErrVolumeClaimTemplatesDisallowed,
-	ErrVolumeClaimTemplatesOverrideForbidden,
-	ErrVolumeClaimTemplatesInvalid,
-}
+	suppressErrors = []error{
+		ErrInvalidMetadata,
+		ErrSandboxNotOwned,
+		ErrEnvVarsInjectionRejected,
+		ErrVolumeClaimTemplatesDisallowed,
+		ErrVolumeClaimTemplatesOverrideForbidden,
+		ErrVolumeClaimTemplatesInvalid,
+	}
+)
 
 // observedTimeEntry stores the first observed timestamp and the UID of the SandboxClaim.
 // We store the UID to protect against stale data when a claim is deleted and a new one

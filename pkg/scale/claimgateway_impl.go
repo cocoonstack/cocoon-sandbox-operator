@@ -19,6 +19,21 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 )
 
+const (
+	// Selector keys a ClaimRequest may carry to override the ClaimSpec axes.
+	SelectorTemplateKey = "sandbox.cocoonstack.io/template"
+	SelectorNetKey      = "sandbox.cocoonstack.io/net"
+	SelectorSizeKey     = "sandbox.cocoonstack.io/size"
+
+	// BoundConditionType marks a SandboxClaim whose warm sandbox has been delivered.
+	BoundConditionType = "Bound"
+
+	// RequestUserSelectorKey names the Selector entry carrying the caller identity the
+	// default Authorizer evaluates in its SubjectAccessReview. Absent, the default
+	// Authorizer fails closed.
+	RequestUserSelectorKey = "authorization.cocoonstack.io/user"
+)
+
 // ErrNoNodeCapacity is the sentinel Claim returns when the node has no warm VM to
 // hand over (sandboxd answered 429/draining, or redirected to a peer). The caller
 // falls back to the L1 Kubernetes path (create a new Sandbox). Test it with
@@ -97,13 +112,6 @@ type GatewayConfig struct {
 	// heals). The zero logr.Logger discards.
 	Logger logr.Logger
 }
-
-// Selector keys a ClaimRequest may carry to override the ClaimSpec axes.
-const (
-	SelectorTemplateKey = "sandbox.cocoonstack.io/template"
-	SelectorNetKey      = "sandbox.cocoonstack.io/net"
-	SelectorSizeKey     = "sandbox.cocoonstack.io/size"
-)
 
 // delivered is the ownership credential the gateway holds for a sandbox it handed
 // over: the sandboxd id and the sandbox's own token, both required to Release it.
@@ -287,9 +295,6 @@ type clientClaimRecorder struct {
 // (a cache-fed client in production, the fake client in tests).
 func NewClaimRecorder(c client.Client) ClaimRecorder { return &clientClaimRecorder{c: c} }
 
-// BoundConditionType marks a SandboxClaim whose warm sandbox has been delivered.
-const BoundConditionType = "Bound"
-
 func (r *clientClaimRecorder) RecordBound(ctx context.Context, claimNS, claimName string, a Assignment) error {
 	cur := &extv1beta1.SandboxClaim{}
 	if err := r.c.Get(ctx, types.NamespacedName{Namespace: claimNS, Name: claimName}, cur); err != nil {
@@ -408,11 +413,6 @@ func notFoundName(err error) string {
 }
 
 // --- Default Authorizer ------------------------------------------------------
-
-// RequestUserSelectorKey names the Selector entry carrying the caller identity the
-// default Authorizer evaluates in its SubjectAccessReview. Absent, the default
-// Authorizer fails closed.
-const RequestUserSelectorKey = "authorization.cocoonstack.io/user"
 
 // SubjectAccessReviewer creates a SubjectAccessReview and returns the decided
 // object — the shape of client-go's

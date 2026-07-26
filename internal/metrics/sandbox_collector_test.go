@@ -30,12 +30,6 @@ import (
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
-func newFakeClient(objects ...runtime.Object) *fake.ClientBuilder {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1beta1.AddToScheme(scheme)
-	return fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...)
-}
-
 func TestSandboxCollector(t *testing.T) {
 	trueVal := true
 	testCases := []struct {
@@ -373,4 +367,10 @@ func TestSandboxCollector(t *testing.T) {
 			require.Equal(t, tc.expectedLabels, actualLabels)
 		})
 	}
+}
+
+func newFakeClient(objects ...runtime.Object) *fake.ClientBuilder {
+	scheme := runtime.NewScheme()
+	_ = sandboxv1beta1.AddToScheme(scheme)
+	return fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...)
 }

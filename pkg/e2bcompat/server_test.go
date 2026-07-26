@@ -19,98 +19,6 @@ import (
 
 const testKey = "e2b_testkey"
 
-// fakeStore records what the compat layer asked of the store and replays canned
-// answers, so the tests assert the translation rather than the node behavior.
-type fakeStore struct {
-	claimPool scale.PoolKey
-	claimNS   string
-	claimName string
-	claimErr  error
-	assign    scale.Assignment
-
-	items []sandboxv1beta1.Sandbox
-
-	releasedNode string
-	releasedID   string
-	releaseErr   error
-	listErr      error
-}
-
-func (f *fakeStore) List(context.Context, scale.ListOptions) (*sandboxv1beta1.SandboxList, error) {
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	return &sandboxv1beta1.SandboxList{Items: f.items}, nil
-}
-
-func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbox, error) {
-	return nil, nil
-}
-
-func (f *fakeStore) Watch(context.Context, scale.ListOptions) (watch.Interface, error) {
-	return nil, nil
-}
-
-func (f *fakeStore) Claim(_ context.Context, ns, name string, pool scale.PoolKey) (scale.Assignment, error) {
-	f.claimNS, f.claimName, f.claimPool = ns, name, pool
-	if f.claimErr != nil {
-		return scale.Assignment{}, f.claimErr
-	}
-	return f.assign, nil
-}
-
-func (f *fakeStore) Release(_ context.Context, node, id string) error {
-	f.releasedNode, f.releasedID = node, id
-	return f.releaseErr
-}
-
-func newTestServer(t *testing.T, store scale.SandboxStore, opts ...func(*Options)) http.Handler {
-	t.Helper()
-	o := Options{Namespace: "sandboxes", APIKeys: []string{testKey}, Log: logr.Discard()}
-	for _, fn := range opts {
-		fn(&o)
-	}
-	s, err := NewServer(store, o)
-	if err != nil {
-		t.Fatalf("NewServer: %v", err)
-	}
-	return s.Handler()
-}
-
-func do(t *testing.T, h http.Handler, method, path, body, key string) *httptest.ResponseRecorder {
-	t.Helper()
-	var r *http.Request
-	if body == "" {
-		r = httptest.NewRequest(method, path, nil)
-	} else {
-		r = httptest.NewRequest(method, path, strings.NewReader(body))
-	}
-	if key != "" {
-		r.Header.Set(apiKeyHeader, key)
-	}
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	return w
-}
-
-// liveSandbox builds a sandbox as the store's scatter-gather read reports it.
-func liveSandbox(name, claimID, node, image, token string) sandboxv1beta1.Sandbox {
-	sb := sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              name,
-			Namespace:         "sandboxes",
-			CreationTimestamp: metav1.Now(),
-			Annotations: map[string]string{
-				scale.ClaimIDAnnotation: claimID,
-				tokenAnnotation:         token,
-			},
-		},
-	}
-	sb.Spec.PodTemplate.Spec.Containers = []corev1.Container{{Name: "c", Image: image}}
-	sb.Status.NodeName = node
-	return sb
-}
-
 // TestCreateClaimsFromTemplatePool is the core contract: an e2b create is the
 // same node-local claim, keyed on the template the caller asked for, and the
 // response carries the fields the SDK requires.
@@ -368,24 +276,124 @@ func TestErrorBodyCarriesMessage(t *testing.T) {
 	}
 }
 
+// fakeStore records what the compat layer asked of the store and replays canned
+// answers, so the tests assert the translation rather than the node behavior.
+type fakeStore struct {
+	claimPool scale.PoolKey
+	claimNS   string
+	claimName string
+	claimErr  error
+	assign    scale.Assignment
+
+	items []sandboxv1beta1.Sandbox
+
+	releasedNode string
+	releasedID   string
+	releaseErr   error
+	listErr      error
+}
+
+func (f *fakeStore) List(context.Context, scale.ListOptions) (*sandboxv1beta1.SandboxList, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return &sandboxv1beta1.SandboxList{Items: f.items}, nil
+}
+
+func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbox, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) Watch(context.Context, scale.ListOptions) (watch.Interface, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) Claim(_ context.Context, ns, name string, pool scale.PoolKey) (scale.Assignment, error) {
+	f.claimNS, f.claimName, f.claimPool = ns, name, pool
+	if f.claimErr != nil {
+		return scale.Assignment{}, f.claimErr
+	}
+	return f.assign, nil
+}
+
+func (f *fakeStore) Release(_ context.Context, node, id string) error {
+	f.releasedNode, f.releasedID = node, id
+	return f.releaseErr
+}
+
+func newTestServer(t *testing.T, store scale.SandboxStore, opts ...func(*Options)) http.Handler {
+	t.Helper()
+	o := Options{Namespace: "sandboxes", APIKeys: []string{testKey}, Log: logr.Discard()}
+	for _, fn := range opts {
+		fn(&o)
+	}
+	s, err := NewServer(store, o)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	return s.Handler()
+}
+
+func do(t *testing.T, h http.Handler, method, path, body, key string) *httptest.ResponseRecorder {
+	t.Helper()
+	var r *http.Request
+	if body == "" {
+		r = httptest.NewRequest(method, path, nil)
+	} else {
+		r = httptest.NewRequest(method, path, strings.NewReader(body))
+	}
+	if key != "" {
+		r.Header.Set(apiKeyHeader, key)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
+}
+
+// liveSandbox builds a sandbox as the store's scatter-gather read reports it.
+func liveSandbox(name, claimID, node, image, token string) sandboxv1beta1.Sandbox {
+	sb := sandboxv1beta1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              name,
+			Namespace:         "sandboxes",
+			CreationTimestamp: metav1.Now(),
+			Annotations: map[string]string{
+				scale.ClaimIDAnnotation: claimID,
+				tokenAnnotation:         token,
+			},
+		},
+	}
+	sb.Spec.PodTemplate.Spec.Containers = []corev1.Container{{Name: "c", Image: image}}
+	sb.Status.NodeName = node
+	return sb
+}
+
 // The lifecycle verbs are not exercised by these tests; they satisfy the
 // SandboxStore contract so the fake stays a drop-in.
-func (f *fakeStore) Pause(context.Context, string, string) error  { return nil }
+func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
+
 func (f *fakeStore) Resume(context.Context, string, string) error { return nil }
+
 func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
 	return nil, nil
 }
+
 func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Snapshot, error) {
 	return scale.Snapshot{}, nil
 }
+
 func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }
-func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error        { return nil }
+
+func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
+
 func (f *fakeStore) ClaimSnapshot(context.Context, string, string, int) (scale.Assignment, error) {
 	return scale.Assignment{}, nil
 }
+
 func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, error) {
 	return scale.PoolKey{}, nil
 }
+
 func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
 	return scale.SandboxStats{}, nil
 }

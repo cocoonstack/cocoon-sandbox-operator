@@ -40,27 +40,7 @@ import (
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
-func newFakeClient(initialObjs ...runtime.Object) client.WithWatch {
-	return fake.NewClientBuilder().
-		WithScheme(Scheme).
-		WithStatusSubresource(&sandboxv1beta1.Sandbox{}).
-		WithIndex(&corev1.Pod{}, podSandboxNameHashIndex, podSandboxNameHashIndexer).
-		WithRuntimeObjects(initialObjs...).
-		Build()
-}
-
 const sandboxUID = types.UID("test-sandbox-uid")
-
-func sandboxControllerRef(name string) metav1.OwnerReference {
-	return metav1.OwnerReference{
-		APIVersion:         "agents.x-k8s.io/v1beta1",
-		Kind:               "Sandbox",
-		Name:               name,
-		UID:                sandboxUID,
-		Controller:         new(true),
-		BlockOwnerDeletion: new(true),
-	}
-}
 
 func TestComputeConditions(t *testing.T) {
 	r := &SandboxReconciler{}
@@ -3667,28 +3647,6 @@ func TestSandboxReconcile_ConditionsDoNotAccumulate(t *testing.T) {
 		"conditions slice must not grow across %d reconcile iterations — controller must upsert not append", iters)
 }
 
-type mockTracer struct {
-	asmetrics.Instrumenter
-	capturedAttrs map[string]string
-}
-
-func (m *mockTracer) StartSpan(ctx context.Context, _ metav1.Object, _ string, attrs map[string]string) (context.Context, func()) {
-	if len(attrs) > 0 {
-		m.capturedAttrs = attrs
-	}
-	return ctx, func() {}
-}
-
-func (m *mockTracer) GetTraceContext(_ context.Context) string {
-	return ""
-}
-
-func (m *mockTracer) IsRecording(_ context.Context) bool {
-	return true
-}
-
-func (m *mockTracer) AddEvent(_ context.Context, _ string, _ map[string]string) {}
-
 func TestReconcile_TracingNormalization(t *testing.T) {
 	sbName := "tracing-test-sandbox"
 	sbNs := "default"
@@ -3733,3 +3691,45 @@ func TestReconcile_TracingNormalization(t *testing.T) {
 	require.NotNil(t, mt.capturedAttrs)
 	require.Equal(t, "unknown", mt.capturedAttrs[sandboxv1beta1.CreatedByLabel], "created-by label must be normalized in span attributes")
 }
+
+func newFakeClient(initialObjs ...runtime.Object) client.WithWatch {
+	return fake.NewClientBuilder().
+		WithScheme(Scheme).
+		WithStatusSubresource(&sandboxv1beta1.Sandbox{}).
+		WithIndex(&corev1.Pod{}, podSandboxNameHashIndex, podSandboxNameHashIndexer).
+		WithRuntimeObjects(initialObjs...).
+		Build()
+}
+
+func sandboxControllerRef(name string) metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion:         "agents.x-k8s.io/v1beta1",
+		Kind:               "Sandbox",
+		Name:               name,
+		UID:                sandboxUID,
+		Controller:         new(true),
+		BlockOwnerDeletion: new(true),
+	}
+}
+
+type mockTracer struct {
+	asmetrics.Instrumenter
+	capturedAttrs map[string]string
+}
+
+func (m *mockTracer) StartSpan(ctx context.Context, _ metav1.Object, _ string, attrs map[string]string) (context.Context, func()) {
+	if len(attrs) > 0 {
+		m.capturedAttrs = attrs
+	}
+	return ctx, func() {}
+}
+
+func (m *mockTracer) GetTraceContext(_ context.Context) string {
+	return ""
+}
+
+func (m *mockTracer) IsRecording(_ context.Context) bool {
+	return true
+}
+
+func (m *mockTracer) AddEvent(_ context.Context, _ string, _ map[string]string) {}

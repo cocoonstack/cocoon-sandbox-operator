@@ -20,11 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// ConditionType is a type of condition for a resource.
-type ConditionType string
-
-func (c ConditionType) String() string { return string(c) }
-
 const (
 	// SandboxConditionSuspended indicates the sandbox is administratively suspended.
 	SandboxConditionSuspended ConditionType = "Suspended"
@@ -81,7 +76,23 @@ const (
 	SandboxWarmPoolLabel = "agents.x-k8s.io/warm-pool-sandbox"
 	// SandboxTemplateRefHashLabel identifies which SandboxTemplate a Sandbox originated from.
 	SandboxTemplateRefHashLabel = "agents.x-k8s.io/sandbox-template-ref-hash"
+
+	// SandboxOperatingModeRunning indicates the sandbox should be actively running.
+	SandboxOperatingModeRunning SandboxOperatingMode = "Running"
+	// SandboxOperatingModeSuspended indicates the sandbox should be suspended.
+	SandboxOperatingModeSuspended SandboxOperatingMode = "Suspended"
+
+	// ShutdownPolicyDelete deletes the Sandbox when expired.
+	ShutdownPolicyDelete ShutdownPolicy = "Delete"
+
+	// ShutdownPolicyRetain keeps the Sandbox when expired (Status will show Expired).
+	ShutdownPolicyRetain ShutdownPolicy = "Retain"
 )
+
+// ConditionType is a type of condition for a resource.
+type ConditionType string
+
+func (c ConditionType) String() string { return string(c) }
 
 type PodMetadata struct {
 	// labels defines the map of string keys and values that can be used to organize and categorize
@@ -147,13 +158,6 @@ type PersistentVolumeClaimTemplate struct {
 // SandboxOperatingMode defines the desired operational state of the Sandbox.
 type SandboxOperatingMode string
 
-const (
-	// SandboxOperatingModeRunning indicates the sandbox should be actively running.
-	SandboxOperatingModeRunning SandboxOperatingMode = "Running"
-	// SandboxOperatingModeSuspended indicates the sandbox should be suspended.
-	SandboxOperatingModeSuspended SandboxOperatingMode = "Suspended"
-)
-
 // NOTE: When adding, removing, or renaming a field in SandboxBlueprint,
 // also update compareSandboxBlueprint() in extensions/controllers/sandboxwarmpool_controller.go
 // so the SandboxWarmPool staleness check accounts for it. A field left out of that comparison
@@ -213,14 +217,6 @@ type SandboxSpec struct {
 // ShutdownPolicy describes the policy for deleting the Sandbox when it expires.
 // +kubebuilder:validation:Enum=Delete;Retain
 type ShutdownPolicy string
-
-const (
-	// ShutdownPolicyDelete deletes the Sandbox when expired.
-	ShutdownPolicyDelete ShutdownPolicy = "Delete"
-
-	// ShutdownPolicyRetain keeps the Sandbox when expired (Status will show Expired).
-	ShutdownPolicyRetain ShutdownPolicy = "Retain"
-)
 
 // Lifecycle defines the lifecycle management for the Sandbox.
 type Lifecycle struct {

@@ -19,15 +19,21 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// NOTE: json tags are required. Any new fields you add must have json tags for the fields to be serialized.
-// Important: Run "make" to regenerate code after modifying this file
-
 const (
 	// TemplateRefField is the field used for indexing SandboxWarmPools by their template reference name.
 	// Warning: This path must exactly match the JSON tag path of SandboxWarmPoolSpec.TemplateRef.Name.
 	// If the JSON tags are changed, this constant must be updated to avoid indexer failures.
 	TemplateRefField = ".spec.sandboxTemplateRef.name"
+
+	// RecreateSandboxWarmPoolUpdateStrategyType indicates that stale sandboxes are deleted immediately to ensure the pool only contains fresh sandboxes.
+	// Note: This applies to changes in the template's SandboxBlueprint only. Changes to annotations, labels, or template-level policies do not trigger recreate.
+	RecreateSandboxWarmPoolUpdateStrategyType SandboxWarmPoolUpdateStrategyType = "Recreate"
+	// OnReplenishSandboxWarmPoolUpdateStrategyType indicates that stale sandboxes are only replaced when they are manually deleted or when these stale sandboxes are adopted by sandboxclaims and hence replaced by fresh sandboxes.
+	OnReplenishSandboxWarmPoolUpdateStrategyType SandboxWarmPoolUpdateStrategyType = "OnReplenish"
 )
+
+// NOTE: json tags are required. Any new fields you add must have json tags for the fields to be serialized.
+// Important: Run "make" to regenerate code after modifying this file
 
 // SandboxTemplateRef references a SandboxTemplate.
 type SandboxTemplateRef struct {
@@ -59,14 +65,6 @@ type SandboxWarmPoolSpec struct {
 // all possible update strategies for the SandboxWarmPool controller.
 // +kubebuilder:validation:Enum=Recreate;OnReplenish
 type SandboxWarmPoolUpdateStrategyType string
-
-const (
-	// RecreateSandboxWarmPoolUpdateStrategyType indicates that stale sandboxes are deleted immediately to ensure the pool only contains fresh sandboxes.
-	// Note: This applies to changes in the template's SandboxBlueprint only. Changes to annotations, labels, or template-level policies do not trigger recreate.
-	RecreateSandboxWarmPoolUpdateStrategyType SandboxWarmPoolUpdateStrategyType = "Recreate"
-	// OnReplenishSandboxWarmPoolUpdateStrategyType indicates that stale sandboxes are only replaced when they are manually deleted or when these stale sandboxes are adopted by sandboxclaims and hence replaced by fresh sandboxes.
-	OnReplenishSandboxWarmPoolUpdateStrategyType SandboxWarmPoolUpdateStrategyType = "OnReplenish"
-)
 
 // SandboxWarmPoolUpdateStrategy defines the update strategy for the SandboxWarmPool.
 type SandboxWarmPoolUpdateStrategy struct {

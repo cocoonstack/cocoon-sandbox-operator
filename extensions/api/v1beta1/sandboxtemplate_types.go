@@ -21,16 +21,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-// Important: Run "make" to regenerate code after modifying this file
-
-// NetworkPolicyManagement defines whether the controller automatically generates
-// and manages a shared NetworkPolicy for this template.
-type NetworkPolicyManagement string
-
-// EnvVarsInjectionPolicy defines whether a SandboxClaim is allowed to inject or override environment variables.
-type EnvVarsInjectionPolicy string
-
 const (
 	// SandboxIDLabel is the label key applied to the Pod to identify the owning Claim UID.
 	// The SandboxClaim controller injects this label into the Pod
@@ -54,12 +44,7 @@ const (
 
 	// EnvVarsInjectionPolicyDisallowed prevents a SandboxClaim from injecting any environment variables.
 	EnvVarsInjectionPolicyDisallowed EnvVarsInjectionPolicy = "Disallowed"
-)
 
-// VolumeClaimTemplatesPolicy defines whether a SandboxClaim is allowed to inject or override volume claim templates.
-type VolumeClaimTemplatesPolicy string
-
-const (
 	// VolumeClaimTemplatesPolicyDisallowed prevents a SandboxClaim from specifying any volume claim templates.
 	VolumeClaimTemplatesPolicyDisallowed VolumeClaimTemplatesPolicy = "Disallowed"
 
@@ -69,6 +54,19 @@ const (
 	// VolumeClaimTemplatesPolicyOverrides allows a SandboxClaim to inject new and override existing volume claim templates.
 	VolumeClaimTemplatesPolicyOverrides VolumeClaimTemplatesPolicy = "Overrides"
 )
+
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// Important: Run "make" to regenerate code after modifying this file
+
+// NetworkPolicyManagement defines whether the controller automatically generates
+// and manages a shared NetworkPolicy for this template.
+type NetworkPolicyManagement string
+
+// EnvVarsInjectionPolicy defines whether a SandboxClaim is allowed to inject or override environment variables.
+type EnvVarsInjectionPolicy string
+
+// VolumeClaimTemplatesPolicy defines whether a SandboxClaim is allowed to inject or override volume claim templates.
+type VolumeClaimTemplatesPolicy string
 
 // NetworkPolicySpec defines the desired state of the NetworkPolicy.
 type NetworkPolicySpec struct {

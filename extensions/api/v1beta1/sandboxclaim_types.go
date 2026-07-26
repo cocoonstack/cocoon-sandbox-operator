@@ -20,9 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-// Important: Run "make" to regenerate code after modifying this file
-
 const (
 	// ClaimExpiredReason is the reason used in conditions/events when a claim expires.
 	ClaimExpiredReason = "ClaimExpired"
@@ -36,13 +33,7 @@ const (
 
 	// WarmPoolRefField is the field used for indexing SandboxClaims by their warm pool reference name.
 	WarmPoolRefField = ".spec.warmPoolRef.name"
-)
 
-// ShutdownPolicy describes the policy for shutting down the underlying Sandbox when the SandboxClaim expires.
-// +kubebuilder:validation:Enum=Delete;DeleteForeground;Retain
-type ShutdownPolicy string
-
-const (
 	// ShutdownPolicyDelete deletes the SandboxClaim (and cascadingly the Sandbox) when expired.
 	ShutdownPolicyDelete ShutdownPolicy = "Delete"
 
@@ -57,6 +48,13 @@ const (
 	// but the SandboxClaim object itself remains.
 	ShutdownPolicyRetain ShutdownPolicy = "Retain"
 )
+
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// Important: Run "make" to regenerate code after modifying this file
+
+// ShutdownPolicy describes the policy for shutting down the underlying Sandbox when the SandboxClaim expires.
+// +kubebuilder:validation:Enum=Delete;DeleteForeground;Retain
+type ShutdownPolicy string
 
 // Lifecycle defines the lifecycle management for the SandboxClaim.
 type Lifecycle struct {
