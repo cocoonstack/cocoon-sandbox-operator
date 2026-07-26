@@ -390,7 +390,8 @@ func soonerRequeue(pending, proposed time.Duration) time.Duration {
 // stageAnnotations records the observability and trace annotations on claim in
 // memory and returns the writer that persists them. Adoption writes the whole
 // claim, so on the warm path its Update carries them and the writer costs
-// nothing; every other pass pays one metadata patch, as before.
+// nothing; every other pass pays one metadata patch, as before. Every return in
+// Reconcile after this point runs the writer first.
 func (r *SandboxClaimReconciler) stageAnnotations(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) func() error {
 	traceContext := r.Tracer.GetTraceContext(ctx)
 	needObservability := claim.Annotations[asmetrics.ObservabilityAnnotation] == ""
@@ -419,8 +420,8 @@ func (r *SandboxClaimReconciler) stageAnnotations(ctx context.Context, claim *ex
 		// Every write decodes the server's copy back into claim, so a partial
 		// patch by another step (legacy-label migration, stale-reference clearing)
 		// strips the staged values even though it advanced the resourceVersion.
-		// Only "values survived AND something wrote" proves a full-object write
-		// carried them; anything else still needs this patch.
+		// A newer object that still carries every staged value is what matters —
+		// whichever write put them there, they are on the server.
 		if claim.ResourceVersion != startRV && stagedAnnotationsSurvived(claim, staged) {
 			return nil
 		}
