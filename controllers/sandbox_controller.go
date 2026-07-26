@@ -982,166 +982,138 @@ func (r *SandboxReconciler) reconcilePod(ctx context.Context, sandbox *sandboxv1
 
 func (r *SandboxReconciler) updatePodMetadata(ctx context.Context, pod *corev1.Pod, sandbox *sandboxv1beta1.Sandbox, nameHash string) bool {
 	logger := log.FromContext(ctx)
-	updated := false
 	if pod.Labels == nil {
 		pod.Labels = make(map[string]string)
 	}
-	if pod.Labels[sandboxLabel] != nameHash {
-		pod.Labels[sandboxLabel] = nameHash
-		updated = true
-	}
-	// Propagate pod template labels to the existing pod (e.g., after warm pool adoption),
-	// skipping system-reserved keys so a user-supplied template cannot override them.
-	var managedLabelKeys []string
-	for k, v := range sandbox.Spec.PodTemplate.ObjectMeta.Labels {
-		if isSystemLabel(k) {
-			logger.V(1).Info("Ignoring system-reserved label in Sandbox PodTemplate", "pod", pod.Name, "key", k)
-			continue
-		}
-		if pod.Labels[k] != v {
-			pod.Labels[k] = v
-			updated = true
-		}
-		managedLabelKeys = append(managedLabelKeys, k)
-	}
-	// Handle deletion of labels removed from the template. System keys recorded in the
-	// propagated list by an older (vulnerable) controller are also scrubbed, except the
-	// controller-owned name-hash label.
-	propagatedLabelsStr := pod.Annotations[sandboxv1beta1.SandboxPropagatedLabelsAnnotation]
-	if propagatedLabelsStr != "" {
-		propagatedLabels := strings.SplitSeq(propagatedLabelsStr, ",")
-		for k := range propagatedLabels {
-			if k == "" {
-				continue
-			}
-			if isSystemLabel(k) {
-				if k == sandboxLabel {
-					continue
-				}
-				if _, exists := pod.Labels[k]; exists {
-					delete(pod.Labels, k)
-					updated = true
-					logger.V(1).Info("Removed unauthorized system label from Pod", "pod", pod.Name, "key", k)
-				}
-				continue
-			}
-			if _, ok := sandbox.Spec.PodTemplate.ObjectMeta.Labels[k]; !ok {
-				delete(pod.Labels, k)
-				updated = true
-			}
-		}
-	}
-	// Reconcile extension-owned labels based on Sandbox ownership.
-	var expectedWarmPoolHash string
-	var expectedTemplateRefHash string
-	if ref := metav1.GetControllerOf(sandbox); ref != nil {
-		gvk := schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind)
-		if gvk.Group == extensionsv1beta1.GroupVersion.Group {
-			if gvk.Kind == "SandboxWarmPool" {
-				expectedWarmPoolHash = sandbox.Labels[sandboxv1beta1.SandboxWarmPoolLabel]
-			}
-			expectedTemplateRefHash = sandbox.Labels[sandboxv1beta1.SandboxTemplateRefHashLabel]
-		}
-	}
-	if expectedWarmPoolHash != "" {
-		if pod.Labels[sandboxv1beta1.SandboxWarmPoolLabel] != expectedWarmPoolHash {
-			pod.Labels[sandboxv1beta1.SandboxWarmPoolLabel] = expectedWarmPoolHash
-			updated = true
-		}
-	} else {
-		if _, exists := pod.Labels[sandboxv1beta1.SandboxWarmPoolLabel]; exists {
-			delete(pod.Labels, sandboxv1beta1.SandboxWarmPoolLabel)
-			updated = true
-		}
-	}
-	if expectedTemplateRefHash != "" {
-		if pod.Labels[sandboxv1beta1.SandboxTemplateRefHashLabel] != expectedTemplateRefHash {
-			pod.Labels[sandboxv1beta1.SandboxTemplateRefHashLabel] = expectedTemplateRefHash
-			updated = true
-		}
-	} else {
-		if _, exists := pod.Labels[sandboxv1beta1.SandboxTemplateRefHashLabel]; exists {
-			delete(pod.Labels, sandboxv1beta1.SandboxTemplateRefHashLabel)
-			updated = true
-		}
-	}
-
-	// Ensure the created-by label is present on the Pod if it is present on the Sandbox.
-	// We normalize it to a known allow-list to prevent invalid values or high cardinality on the Pod.
-	var expectedCreatedBy string
-	if val, ok := sandbox.Labels[sandboxv1beta1.CreatedByLabel]; ok && val != "" {
-		expectedCreatedBy = asmetrics.NormalizeCreatedBy(val)
-	}
-	if expectedCreatedBy != "" {
-		if pod.Labels[sandboxv1beta1.CreatedByLabel] != expectedCreatedBy {
-			pod.Labels[sandboxv1beta1.CreatedByLabel] = expectedCreatedBy
-			updated = true
-		}
-	} else {
-		if _, exists := pod.Labels[sandboxv1beta1.CreatedByLabel]; exists {
-			delete(pod.Labels, sandboxv1beta1.CreatedByLabel)
-			updated = true
-		}
-	}
-	// Propagate pod template annotations to the existing pod
-	var managedAnnotationKeys []string
-	if sandbox.Spec.PodTemplate.ObjectMeta.Annotations != nil {
-		if pod.Annotations == nil {
-			pod.Annotations = make(map[string]string)
-		}
-		for k, v := range sandbox.Spec.PodTemplate.ObjectMeta.Annotations {
-			if isSystemAnnotation(k) {
-				logger.V(1).Info("Ignoring system-reserved annotation in Sandbox PodTemplate", "pod", pod.Name, "key", k)
-				continue
-			}
-			if pod.Annotations[k] != v {
-				pod.Annotations[k] = v
-				updated = true
-			}
-			managedAnnotationKeys = append(managedAnnotationKeys, k)
-		}
-	}
-	// Handle deletion of annotations. System annotations that an older controller may
-	// have recorded in the propagated list are scrubbed, except those the controller
-	// itself manages on the Pod.
-	propagatedAnnotationsStr := pod.Annotations[sandboxv1beta1.SandboxPropagatedAnnotationsAnnotation]
-	if propagatedAnnotationsStr != "" {
-		propagatedAnnotations := strings.SplitSeq(propagatedAnnotationsStr, ",")
-		for k := range propagatedAnnotations {
-			if k == "" {
-				continue
-			}
-			if isSystemAnnotation(k) {
-				if isControllerManagedPodAnnotation(k) {
-					continue
-				}
-				if _, exists := pod.Annotations[k]; exists {
-					delete(pod.Annotations, k)
-					updated = true
-				}
-				continue
-			}
-			if _, ok := sandbox.Spec.PodTemplate.ObjectMeta.Annotations[k]; !ok {
-				delete(pod.Annotations, k)
-				updated = true
-			}
-		}
-	}
-	// Update tracked annotations on the pod
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
-	slices.Sort(managedLabelKeys)
-	newLabelsStr := strings.Join(managedLabelKeys, ",")
-	if pod.Annotations[sandboxv1beta1.SandboxPropagatedLabelsAnnotation] != newLabelsStr {
-		pod.Annotations[sandboxv1beta1.SandboxPropagatedLabelsAnnotation] = newLabelsStr
-		updated = true
+	updated := setOrDelete(pod.Labels, sandboxLabel, nameHash)
+
+	tmpl := sandbox.Spec.PodTemplate.ObjectMeta
+	managedLabels, labelsUpdated := propagateKeys(pod.Labels, tmpl.Labels, isSystemLabel, func(k string) {
+		logger.V(1).Info("Ignoring system-reserved label in Sandbox PodTemplate", "pod", pod.Name, "key", k)
+	})
+	updated = labelsUpdated || updated
+	updated = prunePropagated(pod.Labels, pod.Annotations[sandboxv1beta1.SandboxPropagatedLabelsAnnotation],
+		tmpl.Labels, isSystemLabel,
+		func(k string) bool { return k == sandboxLabel },
+		func(k string) {
+			logger.V(1).Info("Removed unauthorized system label from Pod", "pod", pod.Name, "key", k)
+		}) || updated
+
+	warmPoolHash, templateRefHash := extensionOwnedHashes(sandbox)
+	updated = setOrDelete(pod.Labels, sandboxv1beta1.SandboxWarmPoolLabel, warmPoolHash) || updated
+	updated = setOrDelete(pod.Labels, sandboxv1beta1.SandboxTemplateRefHashLabel, templateRefHash) || updated
+
+	// The created-by value is normalized to the known allow-list so an arbitrary
+	// Sandbox label cannot put unbounded cardinality on the Pod.
+	var createdBy string
+	if val := sandbox.Labels[sandboxv1beta1.CreatedByLabel]; val != "" {
+		createdBy = asmetrics.NormalizeCreatedBy(val)
 	}
-	slices.Sort(managedAnnotationKeys)
-	newAnnotationsStr := strings.Join(managedAnnotationKeys, ",")
-	if pod.Annotations[sandboxv1beta1.SandboxPropagatedAnnotationsAnnotation] != newAnnotationsStr {
-		pod.Annotations[sandboxv1beta1.SandboxPropagatedAnnotationsAnnotation] = newAnnotationsStr
-		updated = true
+	updated = setOrDelete(pod.Labels, sandboxv1beta1.CreatedByLabel, createdBy) || updated
+
+	managedAnnotations, annotationsUpdated := propagateKeys(pod.Annotations, tmpl.Annotations, isSystemAnnotation, func(k string) {
+		logger.V(1).Info("Ignoring system-reserved annotation in Sandbox PodTemplate", "pod", pod.Name, "key", k)
+	})
+	updated = annotationsUpdated || updated
+	updated = prunePropagated(pod.Annotations, pod.Annotations[sandboxv1beta1.SandboxPropagatedAnnotationsAnnotation],
+		tmpl.Annotations, isSystemAnnotation, isControllerManagedPodAnnotation, func(string) {}) || updated
+
+	slices.Sort(managedLabels)
+	slices.Sort(managedAnnotations)
+	updated = setEntry(pod.Annotations, sandboxv1beta1.SandboxPropagatedLabelsAnnotation, strings.Join(managedLabels, ",")) || updated
+	updated = setEntry(pod.Annotations, sandboxv1beta1.SandboxPropagatedAnnotationsAnnotation, strings.Join(managedAnnotations, ",")) || updated
+	return updated
+}
+
+// extensionOwnedHashes returns the warm-pool and template-ref hashes the Pod should
+// carry, which are only meaningful while an extensions controller owns the Sandbox.
+func extensionOwnedHashes(sandbox *sandboxv1beta1.Sandbox) (warmPool, templateRef string) {
+	ref := metav1.GetControllerOf(sandbox)
+	if ref == nil {
+		return "", ""
+	}
+	gvk := schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind)
+	if gvk.Group != extensionsv1beta1.GroupVersion.Group {
+		return "", ""
+	}
+	if gvk.Kind == "SandboxWarmPool" {
+		warmPool = sandbox.Labels[sandboxv1beta1.SandboxWarmPoolLabel]
+	}
+	return warmPool, sandbox.Labels[sandboxv1beta1.SandboxTemplateRefHashLabel]
+}
+
+// setOrDelete forces m[key] to want, removing the entry when want is empty.
+// It reports whether m changed.
+func setOrDelete(m map[string]string, key, want string) bool {
+	if want == "" {
+		_, exists := m[key]
+		delete(m, key)
+		return exists
+	}
+	if m[key] == want {
+		return false
+	}
+	m[key] = want
+	return true
+}
+
+// setEntry writes m[key] = want, keeping an empty value as an empty entry rather
+// than removing it. It reports whether m changed.
+func setEntry(m map[string]string, key, want string) bool {
+	if m[key] == want {
+		return false
+	}
+	m[key] = want
+	return true
+}
+
+// propagateKeys copies template into live, skipping system-reserved keys, and
+// returns the keys it now manages plus whether live changed.
+func propagateKeys(live, template map[string]string, isSystem func(string) bool, onSkip func(string)) ([]string, bool) {
+	var managed []string
+	updated := false
+	for k, v := range template {
+		if isSystem(k) {
+			onSkip(k)
+			continue
+		}
+		if live[k] != v {
+			live[k] = v
+			updated = true
+		}
+		managed = append(managed, k)
+	}
+	return managed, updated
+}
+
+// prunePropagated drops previously propagated keys the template no longer carries.
+// A system key recorded by an older controller is scrubbed unless keep claims it.
+func prunePropagated(live map[string]string, recorded string, template map[string]string, isSystem, keep func(string) bool, onScrub func(string)) bool {
+	updated := false
+	for k := range strings.SplitSeq(recorded, ",") {
+		if k == "" {
+			continue
+		}
+		if isSystem(k) {
+			if keep(k) {
+				continue
+			}
+			if _, exists := live[k]; exists {
+				delete(live, k)
+				updated = true
+				onScrub(k)
+			}
+			continue
+		}
+		if _, ok := template[k]; !ok {
+			if _, exists := live[k]; exists {
+				delete(live, k)
+				updated = true
+			}
+		}
 	}
 	return updated
 }
