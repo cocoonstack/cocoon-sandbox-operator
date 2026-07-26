@@ -383,6 +383,71 @@ delivery curve, scaled linearly.*
 The full methodology, per-round raw sampling, and the memory-accounting ledger
 are in [PERFORMANCE.md](PERFORMANCE.md).
 
+### Lifecycle latency across both surfaces
+
+Everything above measures one verb: claim. Orchestrating a sandbox also means
+pausing, resuming, snapshotting and forking it, and the cluster serves that whole
+set on two surfaces at once — the Kubernetes API, and an e2b-compatible REST
+surface that lets an unmodified e2b SDK drive the same warm pools by pointing
+`E2B_API_URL` at it.
+
+The two differ in expression, not capability. On the Kubernetes side, claim,
+query and release are upstream `agent-sandbox` Sandbox semantics; the four verbs
+upstream does not define are action subresources on Sandbox (the `pods/eviction`
+shape), so they stay in the ordinary Kubernetes request pipeline with authz,
+audit and admission intact. The e2b side answers the e2b REST contract exactly,
+down to the semantics its SDKs depend on: a repeated pause returns 409 rather
+than an error, and `connect` returns 201 when it actually restored from a
+snapshot versus 200 when the sandbox was already running.
+
+| Verb | Kubernetes API | e2b-compatible REST |
+|---|---|---|
+| Claim / release | standard Sandbox `create` / `delete` | `POST /sandboxes`, `DELETE /sandboxes/{id}` |
+| Query | standard `get` / `list`, label and field selectors | `GET /sandboxes`, `GET /sandboxes/{id}` |
+| Pause | `sandboxes/pause` subresource | `POST /sandboxes/{id}/pause`, 409 on repeat |
+| Resume | `sandboxes/resume` subresource, idempotent | `POST /sandboxes/{id}/connect`, 201 restored / 200 already running |
+| Snapshot | `sandboxes/snapshot` subresource | `POST /sandboxes/{id}/snapshots`, `GET /snapshots` |
+| Fork | `sandboxes/fork` subresource | `POST /sandboxes/{id}/fork` |
+| Templates | `SandboxTemplate` CRD | `GET /templates` |
+| Metrics | node-side Prometheus endpoint | `GET /sandboxes/{id}/metrics` |
+| Keepalive | sandbox TTL and `SandboxClaim` | `POST /sandboxes/{id}/timeout`, `/refreshes` |
+
+**Measurement caliber.** The client below sits on a developer machine reaching
+the cluster over the public internet, so every number includes one client↔cluster
+round trip: these are latencies *as observed from outside the cluster*, not the
+in-cluster figures quoted earlier.
+
+| Verb | e2b p50 | e2b p95 | K8s p50 | K8s p95 |
+|---|---|---|---|---|
+| **Resume** (mmap fast path) | **183 ms** | 202 ms | **209 ms** | 222 ms |
+| Pause (writes guest memory out) | 456 ms | 510 ms | 447 ms | 566 ms |
+| Fork (includes one snapshot) | 474 ms | 514 ms | — | — |
+| Release | 230 ms | 415 ms | 283 ms | 298 ms |
+
+**Resume is more than twice as fast as pause, and the asymmetry is deliberate.**
+Pause writes the guest's memory out to a snapshot, so it costs in proportion to
+memory size. Resume takes cocoon's mmap copy-on-write path: it does not read
+memory back, it establishes the mapping and lets faults pull pages from local
+NVMe on demand — so resume is close to independent of guest memory, and net of
+the client round trip it lands in the same order as the clone cost. Fork is
+slightly dearer than pause because it saves a snapshot and *then* clones a child
+from it, two costs stacked inside one synchronous call.
+
+**One current constraint.** A sandbox is usable the moment it is created — the
+create response carries the sandbox id, its node, and access credentials, and the
+SDK reaches the sandbox directly without going through the control plane. But the
+control plane's read view is synthesized from a per-node `NodeInventory`
+published every 30 s (the price of keeping per-sandbox objects out of etcd), so a
+just-created sandbox does not appear in `list` / `get` until the next publish —
+median ~29 s measured. Pause and resume resolve the sandbox through that read
+view today, so inside that window they answer 404. In practice: executing inside
+a freshly created sandbox is fine, but pausing one right after creating it means
+polling until it is visible, which is what the upstream client and
+[`examples/lifecycle`](examples/lifecycle) both do. This is not architectural —
+the claim already handed the server both routing values it needs, the node and
+the claim id — and closing it is tracked in
+[L3 follow-up](#l3-follow-up-resolve-a-sandbox-without-the-summary-todo) below.
+
 ## Scaling design: decentralized sandbox scheduling on Kubernetes semantics
 
 Modal's ["1M concurrent sandboxes"](https://modal.com/blog/scaling-to-1-million-concurrent-sandboxes-in-seconds)
