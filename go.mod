@@ -123,8 +123,4 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-require github.com/cocoonstack/sandbox/sdk/go v0.0.0-00010101000000-000000000000
-
-replace github.com/cocoonstack/sandbox/sdk/go => ../sandbox/sdk/go
-
-replace github.com/cocoonstack/sandbox/protocol/wire => ../sandbox/protocol/wire
+require github.com/cocoonstack/sandbox/sdk/go v0.1.3
