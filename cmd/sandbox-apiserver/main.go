@@ -187,10 +187,6 @@ func run() error {
 		return err
 	}
 
-	cfg, err := o.serverConfig()
-	if err != nil {
-		return err
-	}
 	// Route controller-runtime logs (the warm-pool driver's) through klog so they
 	// land in the apiserver's own log stream instead of being silently discarded.
 	ctrl.SetLogger(klog.NewKlogr())
@@ -226,21 +222,17 @@ func run() error {
 	// process alongside the NodeInventory cache — one component polls node state
 	// and writes back CR status. It is pool-level (O(pools+nodes)); there is no
 	// per-sandbox reconcile, so the apiserver never carries per-sandbox load.
-	if o.WarmPoolDriver {
-		if err := startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval); err != nil {
-			return err
-		}
-	}
-
 	// The e2b-compatible surface is a translation layer over the same store, on
 	// its own listener: an e2b SDK Create becomes the identical node-local claim,
 	// and what it creates stays visible to `kubectl get sandboxes`.
-	if o.E2BAPI {
-		if err := startE2BServer(ctx, o, store, invSource); err != nil {
-			return err
-		}
+	if err = o.startSidecars(ctx, restCfg, token, store, invSource); err != nil {
+		return err
 	}
 
+	cfg, err := o.serverConfig()
+	if err != nil {
+		return err
+	}
 	server, err := cfg.Complete(nil).New("cocoon-sandbox-apiserver", genericapiserver.NewEmptyDelegate())
 	if err != nil {
 		return fmt.Errorf("build generic apiserver: %w", err)
@@ -296,6 +288,22 @@ func startInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache
 // in under a second). Leader election makes exactly one of the apiserver replicas
 // drive the pools. The manager's own metrics/health servers are disabled; the
 // aggregated apiserver owns the serving port.
+// startSidecars launches the optional in-process components that share the
+// apiserver's inventory cache: the warm-pool driver and the e2b REST surface.
+func (o *options) startSidecars(ctx context.Context, restCfg *restclient.Config, token string, store scale.SandboxStore, invSource scale.InventorySource) error {
+	if o.WarmPoolDriver {
+		if err := startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval); err != nil {
+			return err
+		}
+	}
+	if o.E2BAPI {
+		if err := startE2BServer(ctx, o, store, invSource); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token string, interval time.Duration) error {
 	scheme := runtime.NewScheme()
 	if err := extv1beta1.AddToScheme(scheme); err != nil {

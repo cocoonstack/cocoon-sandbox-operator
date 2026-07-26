@@ -39,6 +39,10 @@ import (
 const (
 	webhookSecretName = "cocoon-sandbox-webhook-certs"
 	certValidity      = 365 * 24 * time.Hour
+
+	caCertKey     = "ca.crt"
+	tlsCertKey    = "tls.crt"
+	tlsPrivateKey = "tls.key"
 )
 
 // generateWebhookCerts generates a self-signed CA and a server certificate signed by that CA,
@@ -69,7 +73,7 @@ func generateWebhookCerts(ctx context.Context, c client.Client, certDir string, 
 
 // adoptSecretCerts validates the shared Secret's material and installs it in certDir.
 func adoptSecretCerts(secret *corev1.Secret, certDir string) ([]byte, error) {
-	caPEM, serverPEM, serverKeyPEM := secret.Data["ca.crt"], secret.Data["tls.crt"], secret.Data["tls.key"]
+	caPEM, serverPEM, serverKeyPEM := secret.Data[caCertKey], secret.Data[tlsCertKey], secret.Data[tlsPrivateKey]
 	if err := validatePEMBytes(caPEM, serverPEM, serverKeyPEM); err != nil {
 		return nil, fmt.Errorf("shared Secret %s has invalid certificate data: %w", webhookSecretName, err)
 	}
@@ -140,9 +144,9 @@ func publishSharedSecret(ctx context.Context, c client.Client, namespace, certDi
 		ObjectMeta: metav1.ObjectMeta{Name: webhookSecretName, Namespace: namespace},
 		Type:       corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
-			"ca.crt":  caPEM,
-			"tls.crt": serverPEM,
-			"tls.key": serverKeyPEM,
+			caCertKey:     caPEM,
+			tlsCertKey:    serverPEM,
+			tlsPrivateKey: serverKeyPEM,
 		},
 	})
 	if err == nil {
@@ -183,8 +187,8 @@ func writeCertFiles(certDir string, serverPEM, serverKeyPEM []byte) error {
 		return err
 	}
 
-	certPath := filepath.Join(certDir, "tls.crt")
-	keyPath := filepath.Join(certDir, "tls.key")
+	certPath := filepath.Join(certDir, tlsCertKey)
+	keyPath := filepath.Join(certDir, tlsPrivateKey)
 
 	if err := os.WriteFile(certPath, serverPEM, 0o600); err != nil {
 		return err

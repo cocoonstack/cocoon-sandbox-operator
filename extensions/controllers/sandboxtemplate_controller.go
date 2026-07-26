@@ -90,24 +90,8 @@ func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		management = extensionsv1beta1.NetworkPolicyManagementManaged
 	}
 
-	// 3. Handle "Unmanaged" Opt-Out
 	if management == extensionsv1beta1.NetworkPolicyManagementUnmanaged {
-		existingNP := &networkingv1.NetworkPolicy{}
-		err := r.Get(ctx, types.NamespacedName{Name: npName, Namespace: npNamespace}, existingNP)
-		if err == nil {
-			if !metav1.IsControlledBy(existingNP, template) {
-				logger.Info("Skipping deletion of NetworkPolicy not owned by template", "name", npName)
-				return ctrl.Result{}, nil
-			}
-			if err := r.Delete(ctx, existingNP); err != nil {
-				logger.Error(err, "Failed to clean up unmanaged NetworkPolicy")
-				return ctrl.Result{}, err
-			}
-			logger.Info("Deleted unmanaged NetworkPolicy", "name", existingNP.Name)
-		} else if !k8errors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("failed to get NetworkPolicy: %w", err)
-		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, r.dropManagedNetworkPolicy(ctx, template, npName, npNamespace)
 	}
 
 	// 4. Construct Desired NetworkPolicy Spec
@@ -130,11 +114,9 @@ func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	// 5. Reconcile Existing vs Desired
 	existingNP := &networkingv1.NetworkPolicy{}
-	err := r.Get(ctx, types.NamespacedName{Name: npName, Namespace: npNamespace}, existingNP)
-
-	if err == nil {
+	getErr := r.Get(ctx, types.NamespacedName{Name: npName, Namespace: npNamespace}, existingNP)
+	if getErr == nil {
 		if !metav1.IsControlledBy(existingNP, template) {
 			return ctrl.Result{}, fmt.Errorf("refusing to update NetworkPolicy %q as it is not controlled by SandboxTemplate %q", npName, template.Name)
 		}
@@ -152,11 +134,10 @@ func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 
-	if !k8errors.IsNotFound(err) {
-		return ctrl.Result{}, fmt.Errorf("failed to get NetworkPolicy: %w", err)
+	if !k8errors.IsNotFound(getErr) {
+		return ctrl.Result{}, fmt.Errorf("failed to get NetworkPolicy: %w", getErr)
 	}
 
-	// 6. Create New Policy
 	np := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: npName, Namespace: npNamespace},
 		Spec:       desiredSpec,
@@ -200,6 +181,30 @@ func (r *SandboxTemplateReconciler) ensureTemplateRefHashLabel(ctx context.Conte
 // buildDefaultNetworkPolicySpec generates the "Secure by Default" network policy.
 // routerNamespace is the namespace the sandbox-router runs in (the operator
 // install namespace); ingress is admitted only from that namespace.
+// dropManagedNetworkPolicy removes the NetworkPolicy this controller previously
+// created for a template that has since opted out. A policy someone else owns is
+// left in place.
+func (r *SandboxTemplateReconciler) dropManagedNetworkPolicy(ctx context.Context, template *extensionsv1beta1.SandboxTemplate, npName, npNamespace string) error {
+	logger := log.FromContext(ctx)
+	existingNP := &networkingv1.NetworkPolicy{}
+	if err := r.Get(ctx, types.NamespacedName{Name: npName, Namespace: npNamespace}, existingNP); err != nil {
+		if k8errors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to get NetworkPolicy: %w", err)
+	}
+	if !metav1.IsControlledBy(existingNP, template) {
+		logger.Info("Skipping deletion of NetworkPolicy not owned by template", "name", npName)
+		return nil
+	}
+	if err := r.Delete(ctx, existingNP); err != nil {
+		logger.Error(err, "Failed to clean up unmanaged NetworkPolicy")
+		return err
+	}
+	logger.Info("Deleted unmanaged NetworkPolicy", "name", existingNP.Name)
+	return nil
+}
+
 func buildDefaultNetworkPolicySpec(templateName, routerNamespace string) networkingv1.NetworkPolicySpec {
 	if routerNamespace == "" {
 		routerNamespace = defaultRouterNamespace

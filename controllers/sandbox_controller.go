@@ -52,6 +52,12 @@ const (
 	resourceUnowned
 	resourceOwnedByOther
 
+	warmPoolKind = "SandboxWarmPool"
+
+	msgPodSucceeded   = "Pod completed successfully"
+	msgPodFailed      = "Pod failed"
+	msgSandboxExpired = "Sandbox has expired"
+
 	sandboxLabel = "agents.x-k8s.io/sandbox-name-hash"
 	// podSandboxNameHashIndex is a cache field index, so per-reconcile pod lookups are O(1).
 	podSandboxNameHashIndex     = ".metadata.labels[" + sandboxLabel + "]"
@@ -370,11 +376,11 @@ func (r *SandboxReconciler) computeReadyCondition(sandbox *sandboxv1beta1.Sandbo
 		switch pod.Status.Phase {
 		case corev1.PodSucceeded:
 			readyCondition.Reason = sandboxv1beta1.SandboxReasonPodSucceeded
-			readyCondition.Message = "Pod completed successfully"
+			readyCondition.Message = msgPodSucceeded
 			return readyCondition
 		case corev1.PodFailed:
 			readyCondition.Reason = sandboxv1beta1.SandboxReasonPodFailed
-			readyCondition.Message = "Pod failed"
+			readyCondition.Message = msgPodFailed
 			return readyCondition
 		}
 	}
@@ -425,10 +431,10 @@ func (r *SandboxReconciler) computeFinishedCondition(sandbox *sandboxv1beta1.San
 	switch pod.Status.Phase {
 	case corev1.PodSucceeded:
 		condition.Reason = sandboxv1beta1.SandboxReasonPodSucceeded
-		condition.Message = "Pod completed successfully"
+		condition.Message = msgPodSucceeded
 	case corev1.PodFailed:
 		condition.Reason = sandboxv1beta1.SandboxReasonPodFailed
-		condition.Message = "Pod failed"
+		condition.Message = msgPodFailed
 	default:
 		return nil
 	}
@@ -1016,7 +1022,7 @@ func extensionOwnedHashes(sandbox *sandboxv1beta1.Sandbox) (warmPool, templateRe
 	if gvk.Group != extensionsv1beta1.GroupVersion.Group {
 		return "", ""
 	}
-	if gvk.Kind == "SandboxWarmPool" {
+	if gvk.Kind == warmPoolKind {
 		warmPool = sandbox.Labels[sandboxv1beta1.SandboxWarmPoolLabel]
 	}
 	return warmPool, sandbox.Labels[sandboxv1beta1.SandboxTemplateRefHashLabel]
@@ -1247,7 +1253,7 @@ func (r *SandboxReconciler) handleSandboxExpiry(ctx context.Context, sandbox *sa
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: sandbox.Generation,
 			Reason:             sandboxv1beta1.SandboxReasonExpired,
-			Message:            "Sandbox has expired",
+			Message:            msgSandboxExpired,
 		})
 	}
 
@@ -1281,7 +1287,7 @@ func setSandboxExpiredCondition(sandbox *sandboxv1beta1.Sandbox) {
 		Status:             metav1.ConditionFalse,
 		ObservedGeneration: sandbox.Generation,
 		Reason:             sandboxv1beta1.SandboxReasonExpired,
-		Message:            "Sandbox has expired",
+		Message:            msgSandboxExpired,
 	})
 }
 

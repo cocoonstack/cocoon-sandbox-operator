@@ -69,6 +69,12 @@ linters:
           - goconst
           - gocyclo
           - nestif
+      # Table-driven subtests re-declare err per case; the outer one is fixture setup.
+      - path: _test\.go
+        linters:
+          - govet
+        text: "shadow"
+
       # kubebuilder API packages register their types through SchemeBuilder in init.
       - path: (api|extensions/api)/.*\.go
         linters:
@@ -81,6 +87,10 @@ linters:
       # cluster's own nodes publish; they are not caller-supplied URLs.
       - linters: [gosec]
         text: "G704"
+      # OpenAPI schema field names, Kubernetes label keys/values and Prometheus
+      # label names read worse behind an identifier than as the literal they are.
+      - linters: [goconst]
+        text: "string `(kind|object|apiVersion|app|name|namespace|true|None|controller|timeout|launch_type|v1beta1|1\\.1\\.1\\.1|8\\.8\\.8\\.8|sandbox-router|sandbox_template|warmpool_name|sandboxes\\.agents\\.x-k8s\\.io)`"
       # The renamed sandbox-template-hash and assigned-sandbox-name keys are still
       # read, cleared and dual-written so objects from older operators keep working.
       - linters: [staticcheck]

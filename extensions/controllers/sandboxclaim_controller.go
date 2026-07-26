@@ -55,6 +55,13 @@ import (
 )
 
 const (
+	reasonTemplateNotFound         = "TemplateNotFound"
+	reasonInvalidMetadata          = "InvalidMetadata"
+	reasonEnvVarsInjectionRejected = "EnvVarsInjectionRejected"
+	reasonReconcilerError          = "ReconcilerError"
+	reasonSandboxNotReady          = "SandboxNotReady"
+	msgSandboxNotReady             = "Sandbox is not ready"
+
 	claimKind    = "SandboxClaim"
 	warmPoolKind = "SandboxWarmPool"
 
@@ -587,120 +594,65 @@ func (r *SandboxClaimReconciler) updateStatus(ctx context.Context, oldStatus *ex
 	return nil
 }
 
+// failure is the reason/message pair behind a not-Ready claim.
+type failure struct {
+	reason  string
+	message string
+}
+
+// notReady builds the Ready=False condition for f.
+func notReady(claim *extensionsv1beta1.SandboxClaim, f failure) metav1.Condition {
+	return metav1.Condition{
+		Type:               string(v1beta1.SandboxConditionReady),
+		Status:             metav1.ConditionFalse,
+		Reason:             f.reason,
+		Message:            f.message,
+		ObservedGeneration: claim.Generation,
+	}
+}
+
+// readyFailure classifies a reconcile error into the reason the claim surfaces.
+func readyFailure(claim *extensionsv1beta1.SandboxClaim, err error) failure {
+	switch {
+	case errors.Is(err, ErrTemplateNotFound):
+		return failure{reasonTemplateNotFound, strings.TrimSuffix(err.Error(), ": "+ErrTemplateNotFound.Error())}
+	case errors.Is(err, ErrWarmPoolNotFound):
+		return failure{"WarmPoolNotFound", fmt.Sprintf("SandboxWarmPool %q not found", claim.Spec.WarmPoolRef.Name)}
+	case errors.Is(err, errAdoptionTriggeredRetry):
+		// Benign: adoption was patched and we are only waiting for the informer
+		// cache to converge before finalizing.
+		return failure{"AdoptionPending", "Warm-pool sandbox adoption triggered; waiting for cache to converge"}
+	case errors.Is(err, ErrInvalidMetadata):
+		return failure{reasonInvalidMetadata, err.Error()}
+	case errors.Is(err, ErrEnvVarsInjectionRejected):
+		return failure{reasonEnvVarsInjectionRejected, err.Error()}
+	case errors.Is(err, ErrSandboxNotOwned):
+		return failure{extensionsv1beta1.ClaimExpiredReason, fmt.Sprintf("Claim expired. %v; deletion skipped.", err)}
+	case errors.Is(err, ErrVolumeClaimTemplatesDisallowed),
+		errors.Is(err, ErrVolumeClaimTemplatesOverrideForbidden),
+		errors.Is(err, ErrVolumeClaimTemplatesInvalid):
+		return failure{"VolumeClaimTemplatesError", err.Error()}
+	}
+	return failure{reasonReconcilerError, "Error seen: " + err.Error()}
+}
+
 func (r *SandboxClaimReconciler) computeReadyCondition(claim *extensionsv1beta1.SandboxClaim, sandbox *v1beta1.Sandbox, err error, isClaimExpired bool) metav1.Condition {
 	if err != nil {
-		reason := "ReconcilerError"
-		if errors.Is(err, ErrTemplateNotFound) {
-			reason = "TemplateNotFound"
-			msg := strings.TrimSuffix(err.Error(), ": "+ErrTemplateNotFound.Error())
-			return metav1.Condition{
-				Type:               string(v1beta1.SandboxConditionReady),
-				Status:             metav1.ConditionFalse,
-				Reason:             reason,
-				Message:            msg,
-				ObservedGeneration: claim.Generation,
-			}
-		}
-		if errors.Is(err, ErrWarmPoolNotFound) {
-			reason = "WarmPoolNotFound"
-			return metav1.Condition{
-				Type:               string(v1beta1.SandboxConditionReady),
-				Status:             metav1.ConditionFalse,
-				Reason:             reason,
-				Message:            fmt.Sprintf("SandboxWarmPool %q not found", claim.Spec.WarmPoolRef.Name),
-				ObservedGeneration: claim.Generation,
-			}
-		}
-		if errors.Is(err, errAdoptionTriggeredRetry) {
-			// Benign retry signal, not a claim failure: adoption was patched and we
-			// are only waiting for the informer cache to converge before finalizing.
-			return metav1.Condition{
-				Type:               string(v1beta1.SandboxConditionReady),
-				Status:             metav1.ConditionFalse,
-				Reason:             "AdoptionPending",
-				Message:            "Warm-pool sandbox adoption triggered; waiting for cache to converge",
-				ObservedGeneration: claim.Generation,
-			}
-		}
-		if errors.Is(err, ErrInvalidMetadata) {
-			reason = "InvalidMetadata"
-			return metav1.Condition{
-				Type:               string(v1beta1.SandboxConditionReady),
-				Status:             metav1.ConditionFalse,
-				Reason:             reason,
-				Message:            err.Error(),
-				ObservedGeneration: claim.Generation,
-			}
-		}
-		if errors.Is(err, ErrEnvVarsInjectionRejected) {
-			reason = "EnvVarsInjectionRejected"
-			return metav1.Condition{
-				Type:               string(v1beta1.SandboxConditionReady),
-				Status:             metav1.ConditionFalse,
-				Reason:             reason,
-				Message:            err.Error(),
-				ObservedGeneration: claim.Generation,
-			}
-		}
-		if errors.Is(err, ErrSandboxNotOwned) {
-			return metav1.Condition{
-				Type:               string(v1beta1.SandboxConditionReady),
-				Status:             metav1.ConditionFalse,
-				Reason:             extensionsv1beta1.ClaimExpiredReason,
-				Message:            fmt.Sprintf("Claim expired. %v; deletion skipped.", err),
-				ObservedGeneration: claim.Generation,
-			}
-		}
-		if errors.Is(err, ErrVolumeClaimTemplatesDisallowed) ||
-			errors.Is(err, ErrVolumeClaimTemplatesOverrideForbidden) ||
-			errors.Is(err, ErrVolumeClaimTemplatesInvalid) {
-			return metav1.Condition{
-				Type:               string(v1beta1.SandboxConditionReady),
-				Status:             metav1.ConditionFalse,
-				Reason:             "VolumeClaimTemplatesError",
-				Message:            err.Error(),
-				ObservedGeneration: claim.Generation,
-			}
-		}
-		return metav1.Condition{
-			Type:               string(v1beta1.SandboxConditionReady),
-			Status:             metav1.ConditionFalse,
-			Reason:             reason,
-			Message:            "Error seen: " + err.Error(),
-			ObservedGeneration: claim.Generation,
-		}
+		return notReady(claim, readyFailure(claim, err))
 	}
 
 	if isClaimExpired {
-		return metav1.Condition{
-			Type:               string(v1beta1.SandboxConditionReady),
-			Status:             metav1.ConditionFalse,
-			Reason:             extensionsv1beta1.ClaimExpiredReason,
-			Message:            "Claim expired. Sandbox cleanup initiated.",
-			ObservedGeneration: claim.Generation,
-		}
+		return notReady(claim, failure{reason: extensionsv1beta1.ClaimExpiredReason, message: "Claim expired. Sandbox cleanup initiated."})
 	}
 
 	if sandbox == nil {
 		// Only handle genuine missing sandbox here (expired case is handled above)
-		return metav1.Condition{
-			Type:               string(v1beta1.SandboxConditionReady),
-			Status:             metav1.ConditionFalse,
-			Reason:             "SandboxMissing",
-			Message:            "Sandbox does not exist",
-			ObservedGeneration: claim.Generation,
-		}
+		return notReady(claim, failure{reason: "SandboxMissing", message: "Sandbox does not exist"})
 	}
 
 	// Check if Core Controller marked it as Expired
 	if hasSandboxExpiredCondition(sandbox.Status.Conditions) {
-		return metav1.Condition{
-			Type:               string(v1beta1.SandboxConditionReady),
-			Status:             metav1.ConditionFalse,
-			Reason:             v1beta1.SandboxReasonExpired,
-			Message:            "Underlying Sandbox resource has expired independently of the Claim.",
-			ObservedGeneration: claim.Generation,
-		}
+		return notReady(claim, failure{reason: v1beta1.SandboxReasonExpired, message: "Underlying Sandbox resource has expired independently of the Claim."})
 	}
 
 	// Forward the condition from Sandbox Status
@@ -713,8 +665,8 @@ func (r *SandboxClaimReconciler) computeReadyCondition(claim *extensionsv1beta1.
 	return metav1.Condition{
 		Type:               string(v1beta1.SandboxConditionReady),
 		Status:             metav1.ConditionFalse,
-		Reason:             "SandboxNotReady",
-		Message:            "Sandbox is not ready",
+		Reason:             reasonSandboxNotReady,
+		Message:            msgSandboxNotReady,
 		ObservedGeneration: claim.Generation,
 	}
 }
@@ -920,66 +872,7 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 			return nil, nil // Warm pool is truly empty, fall completely to cold start
 		}
 
-		// Wrap the API logic in a closure
-		success, err := func() (bool, error) {
-			poolName := "none"
-			if wpName := getWarmPoolName(adopted); wpName != "" {
-				poolName = wpName
-			}
-
-			logger.Info("Attempting sandbox adoption", "sandbox candidate", adopted.Name, "warm pool", poolName, "claim", claim.Name)
-
-			// Update claim to record adoption (optimistic lock)
-			if claim.Annotations == nil {
-				claim.Annotations = make(map[string]string)
-			}
-			claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation] = adopted.Name
-			if err := r.Update(ctx, claim); err != nil {
-				r.WarmSandboxQueue.Add(namespacedWarmPoolNameForQueue, adoptedKey)
-				if k8errors.IsConflict(err) {
-					// Conflict means someone else updated the claim. We fail and retry.
-					return false, err
-				}
-				logger.Error(err, "Failed to update claim for adoption", "claim", claim.Name, "sandbox", adopted.Name)
-				return false, err
-			}
-
-			// Call helper to complete adoption (patch sandbox)
-			if err := r.completeAdoption(ctx, claim, adopted); err != nil {
-				if k8errors.IsNotFound(err) {
-					return false, nil
-				}
-				r.WarmSandboxQueue.Add(namespacedWarmPoolNameForQueue, adoptedKey)
-				if k8errors.IsConflict(err) {
-					return false, nil
-				}
-				logger.Error(err, "Failed to complete adoption for candidate sandbox", "sandbox candidate", adopted.Name, "claim", claim.Name)
-				return false, err
-			}
-
-			logger.Info("Successfully adopted sandbox from warm pool", "sandbox", adopted.Name, "claim", claim.Name)
-
-			// Record the completed adoption so a later pass that still sees the
-			// stale warm-pool-owned view (informer cache lag) waits via the
-			// bounded requeue instead of re-sending the adoption patch.
-			r.triggeredAdoptions.Store(
-				types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace},
-				triggeredAdoptionEntry{uid: claim.UID, sandbox: adopted.Name},
-			)
-
-			if r.Recorder != nil {
-				r.Recorder.Eventf(claim, nil, corev1.EventTypeNormal, "SandboxAdopted", "Adoption", "Adopted warm pool Sandbox %q", adopted.Name)
-			}
-
-			podCondition := "not_ready"
-			if isSandboxReady(adopted) {
-				podCondition = "ready"
-			}
-			templateName := r.resolveTemplateName(adopted)
-			asmetrics.RecordSandboxClaimCreation(claim.Namespace, templateName, asmetrics.LaunchTypeWarm, poolName, podCondition, claim.Labels[v1beta1.CreatedByLabel])
-
-			return true, nil
-		}()
+		success, err := r.tryAdopt(ctx, claim, adopted, adoptedKey, namespacedWarmPoolNameForQueue)
 		if err != nil {
 			return nil, err
 		}
@@ -991,6 +884,61 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 
 	logger.Info("Failed to adopt sandbox after max retries", "claim", claim.Name)
 	return nil, nil
+}
+
+// tryAdopt records the assignment on the claim and hands the Sandbox over. It
+// reports false when the candidate was lost to a competing claim or vanished,
+// which the caller answers by trying the next candidate. The claim Update is a
+// full-object CAS on purpose: it is what keeps one claim from adopting twice.
+func (r *SandboxClaimReconciler) tryAdopt(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, adopted *v1beta1.Sandbox, adoptedKey queue.SandboxKey, queueName string) (bool, error) {
+	logger := log.FromContext(ctx)
+	poolName := "none"
+	if wpName := getWarmPoolName(adopted); wpName != "" {
+		poolName = wpName
+	}
+	logger.Info("Attempting sandbox adoption", "sandbox candidate", adopted.Name, "warm pool", poolName, "claim", claim.Name)
+
+	if claim.Annotations == nil {
+		claim.Annotations = make(map[string]string)
+	}
+	claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation] = adopted.Name
+	if updateErr := r.Update(ctx, claim); updateErr != nil {
+		r.WarmSandboxQueue.Add(queueName, adoptedKey)
+		if !k8errors.IsConflict(updateErr) {
+			logger.Error(updateErr, "Failed to update claim for adoption", "claim", claim.Name, "sandbox", adopted.Name)
+		}
+		return false, updateErr
+	}
+
+	if adoptErr := r.completeAdoption(ctx, claim, adopted); adoptErr != nil {
+		if k8errors.IsNotFound(adoptErr) {
+			return false, nil
+		}
+		r.WarmSandboxQueue.Add(queueName, adoptedKey)
+		if k8errors.IsConflict(adoptErr) {
+			return false, nil
+		}
+		logger.Error(adoptErr, "Failed to complete adoption for candidate sandbox", "sandbox candidate", adopted.Name, "claim", claim.Name)
+		return false, adoptErr
+	}
+
+	logger.Info("Successfully adopted sandbox from warm pool", "sandbox", adopted.Name, "claim", claim.Name)
+	// Recorded so a later pass still seeing the stale warm-pool-owned view waits
+	// out the bounded requeue instead of re-sending the adoption patch.
+	r.triggeredAdoptions.Store(
+		types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace},
+		triggeredAdoptionEntry{uid: claim.UID, sandbox: adopted.Name},
+	)
+	if r.Recorder != nil {
+		r.Recorder.Eventf(claim, nil, corev1.EventTypeNormal, "SandboxAdopted", "Adoption", "Adopted warm pool Sandbox %q", adopted.Name)
+	}
+
+	podCondition := "not_ready"
+	if isSandboxReady(adopted) {
+		podCondition = "ready"
+	}
+	asmetrics.RecordSandboxClaimCreation(claim.Namespace, r.resolveTemplateName(adopted), asmetrics.LaunchTypeWarm, poolName, podCondition, claim.Labels[v1beta1.CreatedByLabel])
+	return true, nil
 }
 
 func (r *SandboxClaimReconciler) completeAdoption(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, adopted *v1beta1.Sandbox) error {
@@ -1052,40 +1000,26 @@ func (r *SandboxClaimReconciler) completeAdoption(ctx context.Context, claim *ex
 		adopted.Labels[sandboxTemplateRefHash] = templateHash
 	}
 
+	// Without a template there is nothing to reset to, so the pre-warmed pod
+	// metadata is amended in place instead of replaced.
+	target := &adopted.Spec.PodTemplate.ObjectMeta
 	if templateErr == nil && template != nil {
 		var mergedMeta v1beta1.PodMetadata
 		template.Spec.PodTemplate.ObjectMeta.DeepCopyInto(&mergedMeta)
-
 		if mergedMeta.Labels == nil {
 			mergedMeta.Labels = make(map[string]string)
 		}
 		mergedMeta.Labels[extensionsv1beta1.SandboxIDLabel] = string(claim.UID)
-		if templateHash != "" {
-			mergedMeta.Labels[sandboxTemplateRefHash] = templateHash
-		}
-		// Propagate created-by label to the Pod template during adoption. If absent,
-		// explicitly delete it to ensure it is not kept from the pre-warmed sandbox.
-		if val, ok := claim.Labels[v1beta1.CreatedByLabel]; ok && val != "" {
-			mergedMeta.Labels[v1beta1.CreatedByLabel] = val
-		} else {
-			delete(mergedMeta.Labels, v1beta1.CreatedByLabel)
-		}
-
-		if err := r.mergePodMetadata(&mergedMeta, &claim.Spec.AdditionalPodMetadata); err != nil {
-			return err
-		}
-
-		// Force an exact match
+		// A claim without created-by must clear it, so the label is never inherited
+		// from whoever held this pre-warmed sandbox before.
+		setOrDeleteLabel(mergedMeta.Labels, v1beta1.CreatedByLabel, claim.Labels[v1beta1.CreatedByLabel])
 		adopted.Spec.PodTemplate.ObjectMeta = mergedMeta
-	} else {
-		// Fallback (just in case template is somehow missing)
-		if templateHash != "" {
-			adopted.Spec.PodTemplate.ObjectMeta.Labels[sandboxTemplateRefHash] = templateHash
-		}
-
-		if err := r.mergePodMetadata(&adopted.Spec.PodTemplate.ObjectMeta, &claim.Spec.AdditionalPodMetadata); err != nil {
-			return err
-		}
+	}
+	if templateHash != "" {
+		target.Labels[sandboxTemplateRefHash] = templateHash
+	}
+	if err := r.mergePodMetadata(target, &claim.Spec.AdditionalPodMetadata); err != nil {
+		return err
 	}
 
 	if err := r.Patch(ctx, adopted, client.MergeFrom(originalAdopted)); err != nil {

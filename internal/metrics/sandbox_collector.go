@@ -31,6 +31,9 @@ import (
 )
 
 const (
+	kindSandboxClaim    = "SandboxClaim"
+	kindSandboxWarmPool = "SandboxWarmPool"
+
 	metricsCollectTimeout = 5 * time.Second
 )
 
@@ -140,10 +143,10 @@ func (c *SandboxCollector) Collect(ch chan<- prometheus.Metric) {
 		if controllerRef := metav1.GetControllerOf(&sandbox); controllerRef != nil {
 			if controllerRef.APIVersion == apiVersion {
 				switch controllerRef.Kind {
-				case "SandboxClaim":
-					ownedByStr = "SandboxClaim"
-				case "SandboxWarmPool":
-					ownedByStr = "SandboxWarmPool"
+				case kindSandboxClaim:
+					ownedByStr = kindSandboxClaim
+				case kindSandboxWarmPool:
+					ownedByStr = kindSandboxWarmPool
 				}
 			}
 		}

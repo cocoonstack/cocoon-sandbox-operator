@@ -234,8 +234,8 @@ func (r *CocoonSandboxController) releaseFailedClaim(ctx context.Context, ownerA
 func (r *CocoonSandboxController) upsertTokenSecret(ctx context.Context, sb *cocoonsandboxv1.CocoonSandbox, name, token string) error {
 	secret := &corev1.Secret{}
 	key := types.NamespacedName{Namespace: sb.Namespace, Name: name}
-	err := r.Client.Get(ctx, key, secret)
-	if apierrors.IsNotFound(err) {
+	getErr := r.Client.Get(ctx, key, secret)
+	if apierrors.IsNotFound(getErr) {
 		secret = &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: sb.Namespace},
 			Type:       corev1.SecretTypeOpaque,
@@ -249,8 +249,8 @@ func (r *CocoonSandboxController) upsertTokenSecret(ctx context.Context, sb *coc
 		}
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("get sandbox token secret: %w", err)
+	if getErr != nil {
+		return fmt.Errorf("get sandbox token secret: %w", getErr)
 	}
 	if secret.Data == nil {
 		secret.Data = map[string][]byte{}

@@ -187,23 +187,7 @@ func main() {
 	if o.concurrency <= 0 {
 		fatalf("--concurrency must be > 0 (got %d)", o.concurrency)
 	}
-	if o.waveSize > 0 {
-		if o.target <= 0 {
-			fatalf("--target is required and must be > 0 in cycle mode (got %d)", o.target)
-		}
-		if o.deleteConcurrency <= 0 {
-			fatalf("--delete-concurrency must be > 0 (got %d)", o.deleteConcurrency)
-		}
-		// Claims must persist until the cycle's delete phase.
-		o.cleanup = false
-	} else {
-		if o.total <= 0 {
-			fatalf("--total is required and must be > 0 (got %d): this loadgen issues exactly --total creates and refuses to run unbounded", o.total)
-		}
-		if o.concurrency > o.total {
-			o.concurrency = o.total
-		}
-	}
+	o.validateMode()
 
 	buildInfo.WithLabelValues(version).Set(1)
 	for _, r := range failReasons {
@@ -316,16 +300,16 @@ func runCycles(ctx context.Context, cl client.Client, o *options) {
 // drawing names from seq. Failures consume their slot and are not retried.
 func createBatch(ctx context.Context, cl client.Client, o *options, seq *int64, n int) runSummary {
 	var s runSummary
-	var issued int64
+	var issued atomic.Int64
 	start := time.Now()
 	var wg sync.WaitGroup
-	for w := 0; w < o.concurrency; w++ {
+	for range o.concurrency {
 		wg.Go(func() {
 			for {
 				if ctx.Err() != nil {
 					return
 				}
-				if atomic.AddInt64(&issued, 1) > int64(n) {
+				if issued.Add(1) > int64(n) {
 					return
 				}
 				name := fmt.Sprintf("%s-%d", o.namegen, atomic.AddInt64(seq, 1))
@@ -341,7 +325,7 @@ func createBatch(ctx context.Context, cl client.Client, o *options, seq *int64, 
 		})
 	}
 	wg.Wait()
-	s.issued = min64(atomic.LoadInt64(&issued), int64(n))
+	s.issued = min(issued.Load(), int64(n))
 	s.elapsed = time.Since(start)
 	return s
 }
@@ -410,7 +394,7 @@ func (s runSummary) String() string {
 // would exceed the requested count).
 func run(ctx context.Context, cl client.Client, o *options) runSummary {
 	var s runSummary
-	var issued int64
+	var issued atomic.Int64
 	start := time.Now()
 	var wg sync.WaitGroup
 	for range o.concurrency {
@@ -419,24 +403,13 @@ func run(ctx context.Context, cl client.Client, o *options) runSummary {
 				if ctx.Err() != nil {
 					return
 				}
-				slot := atomic.AddInt64(&issued, 1)
+				slot := issued.Add(1)
 				if slot > int64(o.total) {
 					return
 				}
 				name := fmt.Sprintf("%s-%d", o.namegen, slot)
 				sb, err := createOne(ctx, cl, o, name)
-				if err != nil {
-					atomic.AddInt64(&s.failed, 1)
-				} else {
-					atomic.AddInt64(&s.created, 1)
-					if o.cleanup {
-						if releaseWithRetry(ctx, cl, o, sb) {
-							atomic.AddInt64(&s.released, 1)
-						} else {
-							atomic.AddInt64(&s.leaked, 1)
-						}
-					}
-				}
+				recordOutcome(ctx, cl, o, &s, sb, err)
 				if o.interval > 0 {
 					select {
 					case <-ctx.Done():
@@ -448,13 +421,50 @@ func run(ctx context.Context, cl client.Client, o *options) runSummary {
 		})
 	}
 	wg.Wait()
-	s.issued = min64(atomic.LoadInt64(&issued), int64(o.total))
+	s.issued = min(issued.Load(), int64(o.total))
 	s.elapsed = time.Since(start)
 	return s
 }
 
 // createOne issues a single Create, records latency and outcome, and returns
 // the created object (for cleanup) or the error.
+// recordOutcome tallies one create attempt and, with --cleanup, its release. A
+// release that could not be confirmed counts as leaked, never as released.
+// validateMode enforces the flags each run mode requires and settles the
+// derived ones. Cycle mode owns deletion itself, so per-create cleanup is off.
+func (o *options) validateMode() {
+	if o.waveSize > 0 {
+		if o.target <= 0 {
+			fatalf("--target is required and must be > 0 in cycle mode (got %d)", o.target)
+		}
+		if o.deleteConcurrency <= 0 {
+			fatalf("--delete-concurrency must be > 0 (got %d)", o.deleteConcurrency)
+		}
+		o.cleanup = false
+		return
+	}
+	if o.total <= 0 {
+		fatalf("--total is required and must be > 0 (got %d): this loadgen issues exactly --total creates and refuses to run unbounded", o.total)
+	}
+	o.concurrency = min(o.concurrency, o.total)
+}
+
+func recordOutcome(ctx context.Context, cl client.Client, o *options, s *runSummary, sb *sandboxv1beta1.Sandbox, err error) {
+	if err != nil {
+		atomic.AddInt64(&s.failed, 1)
+		return
+	}
+	atomic.AddInt64(&s.created, 1)
+	if !o.cleanup {
+		return
+	}
+	if releaseWithRetry(ctx, cl, o, sb) {
+		atomic.AddInt64(&s.released, 1)
+		return
+	}
+	atomic.AddInt64(&s.leaked, 1)
+}
+
 func createOne(ctx context.Context, cl client.Client, o *options, name string) (*sandboxv1beta1.Sandbox, error) {
 	sb := newSandbox(o.namespace, name, o.image)
 
@@ -589,13 +599,6 @@ func logSampledf(key, format string, args ...any) {
 	}
 	lastLog[key] = time.Now()
 	fmt.Printf(format+"\n", args...)
-}
-
-func min64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func fatalf(format string, args ...any) {

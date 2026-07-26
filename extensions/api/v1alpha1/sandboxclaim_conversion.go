@@ -101,35 +101,8 @@ func (s *SandboxClaim) ConvertFrom(srcRaw conversion.Hub) error {
 		return err
 	}
 
-	// Restore original v1alpha1 state if present to ensure lossless conversion
-	if stateJSON, ok := s.Annotations[v1alpha1SandboxClaimStateAnnotation]; ok {
-		// Strip the state annotation so it doesn't leak to clients and get sent back on updates
-		delete(s.Annotations, v1alpha1SandboxClaimStateAnnotation)
-
-		var original SandboxClaim
-		if err := json.Unmarshal([]byte(stateJSON), &original); err != nil {
-			return fmt.Errorf("failed to unmarshal v1alpha1 SandboxClaim state: %w", err)
-		}
-
-		// If the warm pool ref in the hub hasn't changed (or matches the restored value),
-		// we restore the original templateRef and warmpool fields.
-		expectedWarmPoolRefName := ""
-		if original.Spec.WarmPool != nil && original.Spec.WarmPool.IsSpecificPool() {
-			expectedWarmPoolRefName = string(*original.Spec.WarmPool)
-		} else {
-			expectedWarmPoolRefName = original.Spec.TemplateRef.Name
-		}
-
-		if isWarmPoolRefMatching(src.Spec.WarmPoolRef.Name, expectedWarmPoolRefName, src.Status.SandboxStatus.Name) {
-			s.Spec.TemplateRef = original.Spec.TemplateRef
-			s.Spec.WarmPool = original.Spec.WarmPool
-		} else {
-			// The warm pool was updated in v1beta1, so we reflect it in v1alpha1
-			policy := WarmPoolPolicy(src.Spec.WarmPoolRef.Name)
-			s.Spec.WarmPool = &policy
-			// We can't know the new template ref easily, so we keep the original one as a fallback
-			s.Spec.TemplateRef = original.Spec.TemplateRef
-		}
+	if err := restoreV1alpha1Spec(s, src); err != nil {
+		return err
 	}
 
 	// Preserve the v1beta1-only volumeClaimTemplates across the v1alpha1 hop.
@@ -148,6 +121,38 @@ func (s *SandboxClaim) ConvertFrom(srcRaw conversion.Hub) error {
 		delete(s.Annotations, v1beta1SandboxClaimVolumeClaimTemplatesAnnotation)
 	}
 
+	return nil
+}
+
+// restoreV1alpha1Spec replays the v1alpha1 spec stashed on the way up, so a
+// round trip through the hub is lossless. The stash annotation is consumed here
+// rather than returned to clients, who would send it back on the next update.
+func restoreV1alpha1Spec(s *SandboxClaim, src *v1beta1.SandboxClaim) error {
+	stateJSON, ok := s.Annotations[v1alpha1SandboxClaimStateAnnotation]
+	if !ok {
+		return nil
+	}
+	delete(s.Annotations, v1alpha1SandboxClaimStateAnnotation)
+
+	var original SandboxClaim
+	if err := json.Unmarshal([]byte(stateJSON), &original); err != nil {
+		return fmt.Errorf("failed to unmarshal v1alpha1 SandboxClaim state: %w", err)
+	}
+
+	// The template ref is kept either way: when the hub's warm pool changed there
+	// is no way to derive the new one, so the stashed value is the best fallback.
+	s.Spec.TemplateRef = original.Spec.TemplateRef
+
+	expected := original.Spec.TemplateRef.Name
+	if original.Spec.WarmPool != nil && original.Spec.WarmPool.IsSpecificPool() {
+		expected = string(*original.Spec.WarmPool)
+	}
+	if isWarmPoolRefMatching(src.Spec.WarmPoolRef.Name, expected, src.Status.SandboxStatus.Name) {
+		s.Spec.WarmPool = original.Spec.WarmPool
+		return nil
+	}
+	policy := WarmPoolPolicy(src.Spec.WarmPoolRef.Name)
+	s.Spec.WarmPool = &policy
 	return nil
 }
 

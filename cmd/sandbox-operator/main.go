@@ -321,7 +321,7 @@ func (o *options) prepareWebhookCerts(ctx context.Context, restConfig *rest.Conf
 	if !o.manageWebhookCerts {
 		setupLog.Info("Webhook cert management and CRD conversion caBundle patching disabled; expecting existing tls.crt/tls.key in certDir and CRDs patched externally",
 			"certDir", o.webhookCertDir, "serviceName", o.webhookServiceName, "namespace", o.webhookNamespace)
-		for _, f := range []string{"tls.crt", "tls.key"} {
+		for _, f := range []string{tlsCertKey, tlsPrivateKey} {
 			p := filepath.Join(o.webhookCertDir, f)
 			if _, err := os.Stat(p); err != nil {
 				return fmt.Errorf("required webhook cert file %s missing: %w (pre-provision tls.crt/tls.key via cert-manager, GKE, or similar)", p, err)
