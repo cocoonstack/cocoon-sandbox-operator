@@ -403,14 +403,17 @@ func (r *SandboxClaimReconciler) stageAnnotations(ctx context.Context, claim *ex
 	if claim.Annotations == nil {
 		claim.Annotations = make(map[string]string)
 	}
+	// Only the keys staged here, so a replay says exactly what it means. Replaying
+	// the whole map happens to be safe — every other key is also in `before`, so
+	// the merge patch for it is empty — but it reads like it could undo a clear.
+	staged := map[string]string{}
 	if needObservability {
-		claim.Annotations[asmetrics.ObservabilityAnnotation] = r.getOrRecordObservedTime(claim).Format(time.RFC3339Nano)
+		staged[asmetrics.ObservabilityAnnotation] = r.getOrRecordObservedTime(claim).Format(time.RFC3339Nano)
 	}
 	if needTraceContext {
-		claim.Annotations[asmetrics.TraceContextAnnotation] = traceContext
+		staged[asmetrics.TraceContextAnnotation] = traceContext
 	}
-
-	staged := maps.Clone(claim.Annotations)
+	maps.Copy(claim.Annotations, staged)
 	startRV := claim.ResourceVersion
 	return func() error {
 		// Every write decodes the server's copy back into claim, so a partial
@@ -421,22 +424,21 @@ func (r *SandboxClaimReconciler) stageAnnotations(ctx context.Context, claim *ex
 		if claim.ResourceVersion != startRV && stagedAnnotationsSurvived(claim, staged) {
 			return nil
 		}
-		restage := claim.DeepCopy()
-		for k, v := range staged {
-			if restage.Annotations == nil {
-				restage.Annotations = make(map[string]string)
-			}
-			restage.Annotations[k] = v
+		// A partial patch may have stripped them from the decoded object; put them
+		// back on claim itself so the caller keeps the server's response.
+		if claim.Annotations == nil {
+			claim.Annotations = make(map[string]string)
 		}
-		return r.Patch(ctx, restage, client.MergeFrom(before))
+		maps.Copy(claim.Annotations, staged)
+		return r.Patch(ctx, claim, client.MergeFrom(before))
 	}
 }
 
 // stagedAnnotationsSurvived reports whether every staged annotation is still on
 // the claim after the writes this pass made.
 func stagedAnnotationsSurvived(claim *extensionsv1beta1.SandboxClaim, staged map[string]string) bool {
-	for _, k := range []string{asmetrics.ObservabilityAnnotation, asmetrics.TraceContextAnnotation} {
-		if want, ok := staged[k]; ok && claim.Annotations[k] != want {
+	for k, want := range staged {
+		if claim.Annotations[k] != want {
 			return false
 		}
 	}

@@ -5291,6 +5291,36 @@ func TestStagedAnnotationsSurviveAPartialClaimPatch(t *testing.T) {
 		"the migration's own change must survive too")
 }
 
+func TestFlushDoesNotResurrectAClearedAnnotation(t *testing.T) {
+	// The writer replays what it staged. Replaying the whole annotation map would
+	// undo a stale assigned-sandbox reference another step just cleared.
+	scheme := newScheme(t)
+	claim := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "c", Namespace: "default", UID: "c-uid",
+			Annotations: map[string]string{
+				extensionsv1beta1.AssignedSandboxNameAnnotation: "sb-stale",
+			},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(claim).Build()
+	r := &SandboxClaimReconciler{Client: fakeClient, Scheme: scheme, Tracer: asmetrics.NewNoOp()}
+
+	live := &extensionsv1beta1.SandboxClaim{}
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, live))
+
+	flush := r.stageAnnotations(t.Context(), live)
+	require.NoError(t, r.clearAssignedSandboxName(t.Context(), live, false))
+	require.NoError(t, flush())
+
+	stored := &extensionsv1beta1.SandboxClaim{}
+	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, stored))
+	require.Empty(t, stored.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation],
+		"the flush replayed a stale assigned-sandbox reference that was just cleared")
+	require.NotEmpty(t, stored.Annotations[asmetrics.ObservabilityAnnotation],
+		"the staged observability annotation still has to land")
+}
+
 func newScheme(t *testing.T) *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
