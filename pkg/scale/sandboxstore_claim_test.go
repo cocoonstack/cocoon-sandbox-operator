@@ -168,3 +168,27 @@ func TestStoreClaimRelease_FailClosedWithoutRouting(t *testing.T) {
 
 	require.Error(t, store.Release(context.Background(), "n1", "sb-1"))
 }
+
+// The lifecycle verbs are not exercised here; they satisfy the SandboxdClient
+// port so the recorder stays a drop-in.
+func (c *recordingClient) Hibernate(context.Context, string) error { return nil }
+func (c *recordingClient) Wake(context.Context, string) error      { return nil }
+func (c *recordingClient) Fork(context.Context, string, sandboxd.ForkSpec) (sandboxd.ForkResult, error) {
+	return sandboxd.ForkResult{}, nil
+}
+func (c *recordingClient) Checkpoint(context.Context, string, sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error) {
+	return sandboxd.Checkpoint{}, nil
+}
+func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, error) {
+	return nil, nil
+}
+func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { return nil }
+func (c *recordingClient) ClaimCheckpoint(context.Context, string, sandboxd.CheckpointClaimSpec) (sandboxd.ClaimResult, error) {
+	return sandboxd.ClaimResult{}, nil
+}
+func (c *recordingClient) Promote(context.Context, string, sandboxd.PromoteSpec) (sandboxd.PoolKey, error) {
+	return sandboxd.PoolKey{}, nil
+}
+func (c *recordingClient) Stats(context.Context, string) (sandboxd.SandboxStats, error) {
+	return sandboxd.SandboxStats{}, nil
+}
