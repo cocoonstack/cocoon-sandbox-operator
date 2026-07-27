@@ -112,9 +112,6 @@ consistent and a just-created sandbox is briefly invisible. Callers poll.
 - [Snapshot placement](snapshot-placement.md) — where a checkpoint lives, how a
   branch reaches it from another node (local hit, gossip + redirect, peer heal),
   why shared filesystems are ruled out, and the durability this does *not* give
-- [Migration from MindOS](migration-from-mindos.md) — the never-two-active-writers
-  invariant, the safe rollout and rollback order, Helm CRD ownership, and
-  storage-version migration
 
 ## Repository
 

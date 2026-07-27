@@ -50,11 +50,12 @@ type SandboxStore interface {
 	Watch(ctx context.Context, opts ListOptions) (watch.Interface, error)
 	// Claim delivers a warm microVM for namespace/name from a node advertising warm
 	// capacity for pool, returning the node-local assignment (claim id, node,
-	// connection address). It writes NO per-sandbox etcd object: the claim is a
-	// synchronous node-local ownership transfer via the owning node's sandboxd.
+	// connection address). ttlSeconds sets the claim's lease; 0 means the node
+	// default. It writes NO per-sandbox etcd object: the claim is a synchronous
+	// node-local ownership transfer via the owning node's sandboxd.
 	// When no node has a warm microVM for the pool it returns an error for which
 	// IsNoWarmCapacity is true, so the caller can surface a retryable 503.
-	Claim(ctx context.Context, namespace, name string, pool PoolKey) (Assignment, error)
+	Claim(ctx context.Context, namespace, name string, pool PoolKey, ttlSeconds int) (Assignment, error)
 	// Release returns the claimed microVM id to its owning node's pool. It is
 	// owner-authorized teardown only (the Sandbox resource itself being deleted);
 	// it never destroys a VM on pod state alone. The node's sandboxd address is

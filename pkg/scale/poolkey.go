@@ -12,6 +12,8 @@ const (
 
 	// NetDefault is the mode used when none is annotated: the NIC-less Firecracker lane.
 	NetDefault = "none"
+	// NetEgress is the egress-capable network lane.
+	NetEgress = "egress"
 )
 
 // Coarse, documented t-shirt-size thresholds mapping a container's CPU/memory

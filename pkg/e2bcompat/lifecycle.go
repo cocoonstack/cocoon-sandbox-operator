@@ -106,6 +106,10 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("count must be >= 1, got %d", count))
 		return
 	}
+	if req.Timeout != nil && *req.Timeout < 0 {
+		writeError(w, http.StatusBadRequest, "timeout must be >= 0")
+		return
+	}
 	id := r.PathValue("sandboxID")
 	sb, err := s.lookup(r, id)
 	if err != nil {

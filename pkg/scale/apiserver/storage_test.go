@@ -81,7 +81,7 @@ func (f *fakeStore) Watch(context.Context, scale.ListOptions) (watch.Interface, 
 	return watch.NewFake(), nil
 }
 
-func (f *fakeStore) Claim(context.Context, string, string, scale.PoolKey) (scale.Assignment, error) {
+func (f *fakeStore) Claim(context.Context, string, string, scale.PoolKey, int) (scale.Assignment, error) {
 	return scale.Assignment{}, nil
 }
 

@@ -205,6 +205,20 @@ func TestDrainOnZeroReplicas(t *testing.T) {
 	}
 }
 
+// TestApplyBoundsEachNodeCall pins the sandboxd client contract: the client has
+// no HTTP timeout, so the driver must bound every SetPools with a deadline or a
+// connected-but-silent node wedges the global reconcile forever.
+func TestApplyBoundsEachNodeCall(t *testing.T) {
+	d, setter, inv, _ := newTestDriver(t, warmPool("p", 3), template())
+	putNodes(inv, 2)
+	if err := d.reconcileOnce(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if !setter.sawDeadline {
+		t.Fatal("SetPools ran without a context deadline; a silent node would block reconcile forever")
+	}
+}
+
 // fakeSetter records the last pools set per node address and plays back the warm
 // counts a node reports in its PUT response — the driver's status source.
 type fakeSetter struct {
@@ -215,6 +229,8 @@ type fakeSetter struct {
 	warm map[string]int
 	// failAddr, when set, makes that node's PUT fail.
 	failAddr string
+	// sawDeadline records whether the most recent PUT carried a context deadline.
+	sawDeadline bool
 }
 
 // reportWarm makes addr answer every PUT reporting n warm for each pool it holds.
@@ -236,9 +252,10 @@ type fakeNode struct {
 	parent *fakeSetter
 }
 
-func (n *fakeNode) SetPools(_ context.Context, pools []sandboxd.PoolSpec) (*sandboxd.NodeInfo, error) {
+func (n *fakeNode) SetPools(ctx context.Context, pools []sandboxd.PoolSpec) (*sandboxd.NodeInfo, error) {
 	n.parent.mu.Lock()
 	defer n.parent.mu.Unlock()
+	_, n.parent.sawDeadline = ctx.Deadline()
 	if n.parent.failAddr == n.addr {
 		return nil, errors.New("node unreachable")
 	}

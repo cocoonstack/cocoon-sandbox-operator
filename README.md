@@ -185,8 +185,7 @@ kustomize build k8s | sed 's#ko://.*/sandbox-operator#ghcr.io/cocoonstack/sandbo
 
 The default (standard-kubelet) backend needs no special nodes. The `vk-cocoon`
 backend requires [vk-cocoon](https://github.com/cocoonstack/vk-cocoon) virtual
-nodes. See [docs/migration-from-mindos.md](docs/migration-from-mindos.md) for a
-safe, no-double-write rollout alongside an existing installation.
+nodes.
 
 ## Runtime backends
 

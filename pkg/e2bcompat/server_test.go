@@ -63,6 +63,9 @@ func TestCreateClaimsFromTemplatePool(t *testing.T) {
 	if !strings.HasPrefix(store.claimName, namePrefix) {
 		t.Errorf("claim name = %q, want the %q prefix so compat claims are recognizable", store.claimName, namePrefix)
 	}
+	if store.claimTTL != 300 {
+		t.Errorf("claim ttl = %d, want the requested timeout passed through to the node", store.claimTTL)
+	}
 }
 
 // TestCreateNetworkLane checks e2b's internet flag selects the pool's net axis.
@@ -105,6 +108,14 @@ func TestCreateRejectsMissingTemplate(t *testing.T) {
 	h := newTestServer(t, &fakeStore{})
 	if w := do(t, h, http.MethodPost, "/sandboxes", `{}`, testKey); w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for a body with no templateID", w.Code)
+	}
+}
+
+func TestCreateRejectsNegativeTimeout(t *testing.T) {
+	h := newTestServer(t, &fakeStore{})
+	body := `{"templateID":"img","timeout":-1}`
+	if w := do(t, h, http.MethodPost, "/sandboxes", body, testKey); w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a negative timeout", w.Code)
 	}
 }
 
@@ -282,6 +293,7 @@ type fakeStore struct {
 	claimPool scale.PoolKey
 	claimNS   string
 	claimName string
+	claimTTL  int
 	claimErr  error
 	assign    scale.Assignment
 
@@ -308,8 +320,8 @@ func (f *fakeStore) Watch(context.Context, scale.ListOptions) (watch.Interface, 
 	return nil, nil
 }
 
-func (f *fakeStore) Claim(_ context.Context, ns, name string, pool scale.PoolKey) (scale.Assignment, error) {
-	f.claimNS, f.claimName, f.claimPool = ns, name, pool
+func (f *fakeStore) Claim(_ context.Context, ns, name string, pool scale.PoolKey, ttlSeconds int) (scale.Assignment, error) {
+	f.claimNS, f.claimName, f.claimPool, f.claimTTL = ns, name, pool, ttlSeconds
 	if f.claimErr != nil {
 		return scale.Assignment{}, f.claimErr
 	}

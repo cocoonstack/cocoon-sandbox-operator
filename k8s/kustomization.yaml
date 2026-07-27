@@ -24,11 +24,6 @@ resources:
   - crds/extensions.agents.x-k8s.io_sandboxclaims.yaml
   - crds/extensions.agents.x-k8s.io_sandboxtemplates.yaml
   - crds/extensions.agents.x-k8s.io_sandboxwarmpools.yaml
-  # Cocoon sandboxd direct-claim compatibility API
-  - crds/sandbox.cocoonstack.io_cocoonsandboxes.yaml
-  - crds/sandbox.cocoonstack.io_cocoonsandboxnodes.yaml
-  - crds/sandbox.cocoonstack.io_cocoonsandboxpools.yaml
-  - crds/sandbox.cocoonstack.io_cocoonsandboxtemplates.yaml
 
 patches:
   # Enable the extensions controllers on the single controller Deployment, and

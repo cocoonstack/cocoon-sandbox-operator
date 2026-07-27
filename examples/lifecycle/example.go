@@ -422,7 +422,7 @@ func runE2B(ctx context.Context, o options) error {
 	} else if code/100 != 2 {
 		return fmt.Errorf("timeout returned %d", code)
 	}
-	stepf("timeout", "extended")
+	stepf("timeout", "acknowledged (the TTL is fixed at claim time)")
 
 	if code, err := e.status(ctx, http.MethodPost, "/sandboxes/"+id+"/refreshes",
 		map[string]any{"duration": 60}); err != nil {

@@ -1,7 +1,7 @@
 # sandbox-operator Helm chart
 
-This chart installs the operator, all upstream agent-sandbox CRDs, the Cocoon
-compatibility CRDs, RBAC, conversion webhook, and certificate management.
+This chart installs the operator, all upstream agent-sandbox CRDs, RBAC, the
+conversion webhook, and certificate management.
 
 ## Install
 

@@ -30,7 +30,6 @@ import (
 
 	"github.com/go-logr/logr"
 
-	cocoonv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
@@ -105,7 +104,7 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 		opts.EnvdVersion = DefaultEnvdVersion
 	}
 	if opts.SizeClass == "" {
-		opts.SizeClass = string(cocoonv1.SizeSmall)
+		opts.SizeClass = scale.SizeClassSmall
 	}
 	keys := make(map[string]struct{}, len(opts.APIKeys))
 	for _, k := range opts.APIKeys {
@@ -189,6 +188,10 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "templateID is required")
 		return
 	}
+	if req.Timeout != nil && *req.Timeout < 0 {
+		writeError(w, http.StatusBadRequest, "timeout must be >= 0")
+		return
+	}
 
 	name := generateName()
 	pool := scale.PoolKey{
@@ -196,7 +199,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 		Net:      netFor(req.AllowInternetAccess),
 		Size:     s.opts.SizeClass,
 	}
-	assignment, err := s.store.Claim(r.Context(), s.opts.Namespace, name, pool)
+	assignment, err := s.store.Claim(r.Context(), s.opts.Namespace, name, pool, timeoutSeconds(req.Timeout))
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
 			// Retryable: warm capacity refills asynchronously on the node.
@@ -363,7 +366,7 @@ func templateOf(sb *sandboxv1beta1.Sandbox) string {
 // netFor maps e2b's allow_internet_access onto the pool's network axis.
 func netFor(allowInternet *bool) string {
 	if allowInternet != nil && *allowInternet {
-		return string(cocoonv1.NetEgress)
+		return scale.NetEgress
 	}
 	return scale.NetDefault
 }

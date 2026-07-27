@@ -43,9 +43,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	cocoonsandboxv1 "github.com/cocoonstack/sandbox-operator/api/cocoon/v1"
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	cocooncontroller "github.com/cocoonstack/sandbox-operator/cocoon/controller"
 	"github.com/cocoonstack/sandbox-operator/controllers"
 	extensionsv1alpha1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1alpha1"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
@@ -196,7 +194,6 @@ func (o *options) run() error {
 
 	scheme := controllers.Scheme
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
-	utilruntime.Must(cocoonsandboxv1.AddToScheme(scheme))
 	if o.extensions {
 		utilruntime.Must(extensionsv1alpha1.AddToScheme(scheme))
 		utilruntime.Must(extensionsv1beta1.AddToScheme(scheme))
@@ -358,18 +355,6 @@ func (o *options) setupControllers(mgr ctrl.Manager, instrumenter asmetrics.Inst
 	}
 	if err := ctrl.NewWebhookManagedBy(mgr, &sandboxv1beta1.Sandbox{}).Complete(); err != nil {
 		return fmt.Errorf("webhook Sandbox: %w", err)
-	}
-	if err := (&cocooncontroller.CocoonSandboxNodeController{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("controller CocoonSandboxNode: %w", err)
-	}
-	if err := (&cocooncontroller.CocoonSandboxPoolController{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("controller CocoonSandboxPool: %w", err)
-	}
-	if err := (&cocooncontroller.CocoonSandboxController{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("controller CocoonSandbox: %w", err)
 	}
 	if !o.extensions {
 		return nil

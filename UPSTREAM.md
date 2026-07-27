@@ -21,15 +21,13 @@ Local deltas are deliberately narrow:
    functional after installation.
 3. A Pod mutation seam keeps standard kubelet as the rollout default and
    supports explicit `vk-cocoon` selection per Sandbox.
-4. The legacy `sandbox.cocoonstack.io/v1` direct-sandboxd controllers and CRDs
-   moved here from MindOS for compatibility.
-5. Kubernetes object names and the default namespace use the Cocoon operator
+4. Kubernetes object names and the default namespace use the Cocoon operator
    identity.
 
 When updating from upstream, import the same source trees, reapply the local
 deltas above, run `make generate`, and require
-`make all` plus conversion/controller tests to pass. Do not replace the Cocoon
-compatibility API or Pod runtime adapter with upstream files.
+`make all` plus conversion/controller tests to pass. Do not replace the Pod
+runtime adapter with upstream files.
 
 ## Licensing
 

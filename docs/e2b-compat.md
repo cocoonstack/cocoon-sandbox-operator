@@ -53,7 +53,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 
 | e2b endpoint | Maps to | Notes |
 |---|---|---|
-| `POST /sandboxes` | `store.Claim` | `templateID` → pool template; `allow_internet_access` → `egress` lane, else the hardened `none` lane. `201` on success, `503` when the pool is drained (retryable). |
+| `POST /sandboxes` | `store.Claim` | `templateID` → pool template; `timeout` → the claim's TTL; `allow_internet_access` → `egress` lane, else the hardened `none` lane. `201` on success, `503` when the pool is drained (retryable). |
 | `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the compat namespace. |
 | `GET /sandboxes/{id}` | `store.List` + id match | `404` when no live sandbox carries the id. |
 | `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`. |

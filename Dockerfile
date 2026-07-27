@@ -13,7 +13,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY api/ ./api/
 COPY cmd/ ./cmd/
-COPY cocoon/ ./cocoon/
 COPY controllers/ ./controllers/
 COPY extensions/ ./extensions/
 COPY internal/ ./internal/

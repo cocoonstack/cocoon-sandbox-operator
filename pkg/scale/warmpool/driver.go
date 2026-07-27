@@ -48,6 +48,12 @@ const (
 
 	// maxNodeConcurrency bounds the per-node PUT /v1/pools fan-out per tick.
 	maxNodeConcurrency = 16
+
+	// setPoolsTimeout bounds each node's PUT: the sandboxd client has no HTTP
+	// timeout (callers bound with the context), and applyToNodes waits on every
+	// node, so a connected-but-silent node would otherwise wedge the global
+	// reconcile forever.
+	setPoolsTimeout = 10 * time.Second
 )
 
 // PoolSetter is the sandboxd surface the driver needs: replace a node's whole
@@ -275,7 +281,9 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 		sem <- struct{}{}
 		wg.Go(func() {
 			defer func() { <-sem }()
-			info, err := d.factory(node.addr, d.token).SetPools(ctx, specs)
+			callCtx, cancel := context.WithTimeout(ctx, setPoolsTimeout)
+			defer cancel()
+			info, err := d.factory(node.addr, d.token).SetPools(callCtx, specs)
 			if err != nil {
 				d.log.Error(err, "set node warm pools", "node", node.name, "addr", node.addr)
 				return

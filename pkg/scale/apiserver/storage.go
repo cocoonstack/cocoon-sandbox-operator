@@ -122,7 +122,7 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 	}
 
 	pool := poolKeyForSandbox(sb)
-	assignment, err := r.store.Claim(ctx, namespace, name, pool)
+	assignment, err := r.store.Claim(ctx, namespace, name, pool, 0)
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
 			// Retryable: warm capacity refills asynchronously (the node's sandboxd

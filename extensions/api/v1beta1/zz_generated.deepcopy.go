@@ -7,7 +7,7 @@ package v1beta1
 import (
 	apiv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	networkingv1 "k8s.io/api/networking/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 

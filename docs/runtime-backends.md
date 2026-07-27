@@ -54,7 +54,3 @@ untouched. It can use the cluster default runtime or an explicit RuntimeClass
 such as Kata Containers or gVisor. This path implements the upstream
 agent-sandbox Kubernetes semantics, but Cocoon-specific hot-MicroVM behavior is
 available only when the selected standard-kubelet runtime handler implements it.
-
-The independent `sandbox.cocoonstack.io/v1` compatibility API is separate from
-both Pod paths: its controllers claim and release hot MicroVMs directly through
-node-local `sandboxd`.

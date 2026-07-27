@@ -284,7 +284,7 @@ func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*
 // its already-running microVMs via that node's sandboxd, returning the assignment.
 // No per-sandbox object is written to etcd. It fails closed if claim routing is
 // not configured, and returns ErrNoWarmCapacity when no warm node is available.
-func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, pool PoolKey) (Assignment, error) {
+func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, pool PoolKey, ttlSeconds int) (Assignment, error) {
 	if s.sandboxdFactory == nil {
 		return Assignment{}, fmt.Errorf("scale: claim routing not configured (call WithClaimRouting)")
 	}
@@ -300,9 +300,10 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 	for len(candidates) > 0 {
 		best, idx := pickPowerOfTwo(candidates)
 		res, claimErr := s.sandboxdFactory(best.addr, s.sandboxdToken).Claim(ctx, sandboxd.ClaimSpec{
-			Template: pool.Template,
-			Net:      pool.Net,
-			Size:     pool.Size,
+			Template:   pool.Template,
+			Net:        pool.Net,
+			Size:       pool.Size,
+			TTLSeconds: ttlSeconds,
 			// Name the claim by the k8s object so the node's operator index echoes
 			// it back and the aggregated read path (List/Get) resolves this sandbox
 			// by "<namespace>/<name>".
