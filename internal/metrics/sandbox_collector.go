@@ -65,8 +65,8 @@ func NewAgentSandboxesConstMetric(count int, key AgentSandboxesMetricKey) promet
 }
 
 // RegisterSandboxCollector registers the custom Prometheus collector for sandbox counts.
-func RegisterSandboxCollector(c client.Client, logger logr.Logger) {
-	collector := NewSandboxCollector(c, logger)
+func RegisterSandboxCollector(ctx context.Context, c client.Client, logger logr.Logger) {
+	collector := NewSandboxCollector(ctx, c, logger)
 	if err := metrics.Registry.Register(collector); err != nil {
 		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
 			logger.Error(err, "Failed to register SandboxCollector")
@@ -78,14 +78,18 @@ func RegisterSandboxCollector(c client.Client, logger logr.Logger) {
 
 // SandboxCollector is a custom Prometheus collector that dynamically fetches sandbox counts.
 type SandboxCollector struct {
+	// baseCtx is the process lifetime context; Collect derives its scrape
+	// timeout from it because the prometheus.Collector interface carries none.
+	baseCtx            context.Context
 	client             client.Client
 	logger             logr.Logger
 	agentSandboxesDesc *prometheus.Desc
 }
 
 // NewSandboxCollector initializes a SandboxCollector.
-func NewSandboxCollector(c client.Client, logger logr.Logger) *SandboxCollector {
+func NewSandboxCollector(ctx context.Context, c client.Client, logger logr.Logger) *SandboxCollector {
 	return &SandboxCollector{
+		baseCtx:            ctx,
 		client:             c,
 		logger:             logger,
 		agentSandboxesDesc: AgentSandboxesDesc,
@@ -104,7 +108,7 @@ func (c *SandboxCollector) Describe(ch chan<- *prometheus.Desc) {
 // but this is a known trade-off to keep the Reconcile loop simpler.
 func (c *SandboxCollector) Collect(ch chan<- prometheus.Metric) {
 	var sandboxList sandboxv1beta1.SandboxList
-	ctx, cancel := context.WithTimeout(context.Background(), metricsCollectTimeout)
+	ctx, cancel := context.WithTimeout(c.baseCtx, metricsCollectTimeout)
 	defer cancel()
 
 	if err := c.client.List(ctx, &sandboxList, client.UnsafeDisableDeepCopy); err != nil {

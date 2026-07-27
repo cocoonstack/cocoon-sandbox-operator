@@ -230,10 +230,15 @@ func execInPod(ctx context.Context, pod, container string, cmd []string) (string
 	return stdout.String() + stderr.String(), err
 }
 
-// Background: cleanup defers run after the scenario ctx's timeout.
-func deleteSandbox(name string) {
+// WithoutCancel: cleanup defers run after the scenario ctx's timeout.
+func deleteSandbox(ctx context.Context, name string) {
 	s := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: *ns}}
-	_ = cl.Delete(context.Background(), s)
+	_ = cl.Delete(context.WithoutCancel(ctx), s)
+}
+
+func deleteClaim(ctx context.Context, name string) {
+	c := &extv1beta1.SandboxClaim{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: *ns}}
+	_ = cl.Delete(context.WithoutCancel(ctx), c)
 }
 
 func podForSandbox(ctx context.Context, name string) (*corev1.Pod, error) {
@@ -245,7 +250,7 @@ func podForSandbox(ctx context.Context, name string) (*corev1.Pod, error) {
 
 func scCoreCreateReady(ctx context.Context) (string, error) {
 	name := "e2e-core"
-	deleteSandbox(name)
+	deleteSandbox(ctx, name)
 	time.Sleep(2 * time.Second)
 	if err := cl.Create(ctx, newSandbox(name, "echo up; sleep 3600", true)); err != nil {
 		return "", err
@@ -337,13 +342,13 @@ func scNoVKInjection(ctx context.Context) (string, error) {
 
 func scSuspendResume(ctx context.Context) (string, error) {
 	name := "e2e-suspend"
-	deleteSandbox(name)
+	deleteSandbox(ctx, name)
 	time.Sleep(2 * time.Second)
 	sb := newSandbox(name, "sleep 3600", false)
 	if err := cl.Create(ctx, sb); err != nil {
 		return "", err
 	}
-	defer deleteSandbox(name)
+	defer deleteSandbox(ctx, name)
 	if _, err := waitSandboxReady(ctx, name); err != nil {
 		return "", err
 	}
@@ -387,7 +392,7 @@ func waitPodGone(ctx context.Context, name string, d time.Duration) error {
 
 func scShutdownRetain(ctx context.Context) (string, error) {
 	name := "e2e-shutdown"
-	deleteSandbox(name)
+	deleteSandbox(ctx, name)
 	time.Sleep(2 * time.Second)
 	sb := newSandbox(name, "sleep 3600", false)
 	retain := sandboxv1beta1.ShutdownPolicyRetain
@@ -397,7 +402,7 @@ func scShutdownRetain(ctx context.Context) (string, error) {
 	if err := cl.Create(ctx, sb); err != nil {
 		return "", err
 	}
-	defer deleteSandbox(name)
+	defer deleteSandbox(ctx, name)
 	// With Retain + past shutdownTime, the sandbox should end up Expired (not deleted).
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
@@ -420,7 +425,7 @@ func scShutdownRetain(ctx context.Context) (string, error) {
 
 func scPVC(ctx context.Context) (string, error) {
 	name := "e2e-pvc"
-	deleteSandbox(name)
+	deleteSandbox(ctx, name)
 	time.Sleep(2 * time.Second)
 	sb := newSandbox(name, "sleep 3600", false)
 	sb.Spec.VolumeClaimTemplates = []sandboxv1beta1.PersistentVolumeClaimTemplate{{
@@ -435,7 +440,7 @@ func scPVC(ctx context.Context) (string, error) {
 	if err := cl.Create(ctx, sb); err != nil {
 		return "", err
 	}
-	defer deleteSandbox(name)
+	defer deleteSandbox(ctx, name)
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
 		pvcs := &corev1.PersistentVolumeClaimList{}
@@ -453,7 +458,7 @@ func scPVC(ctx context.Context) (string, error) {
 
 func scDeleteCleanup(ctx context.Context) (string, error) {
 	name := "e2e-core"
-	deleteSandbox(name)
+	deleteSandbox(ctx, name)
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		s := &sandboxv1beta1.Sandbox{}
@@ -557,7 +562,7 @@ func scClaimWarmHit(ctx context.Context) (string, error) {
 	if err := cl.Create(ctx, claim); err != nil {
 		return "", err
 	}
-	defer cl.Delete(context.Background(), claim)
+	defer deleteClaim(ctx, name)
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
 		got := &extv1beta1.SandboxClaim{}
@@ -592,7 +597,7 @@ func scConversion(ctx context.Context) (string, error) {
 	if err := cl.Create(ctx, a); err != nil {
 		return "", fmt.Errorf("create v1alpha1: %w", err)
 	}
-	defer cl.Delete(context.Background(), &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: *ns}})
+	defer deleteSandbox(ctx, name)
 	// read back as v1beta1 (conversion webhook)
 	b := &sandboxv1beta1.Sandbox{}
 	if err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, b); err != nil {

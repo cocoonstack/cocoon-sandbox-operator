@@ -658,14 +658,12 @@ func (r *SandboxWarmPoolReconciler) SetupWithManager(mgr ctrl.Manager, concurren
 		r.MaxBatchSize = sandboxCreateDeleteMaxBatchSize
 	}
 
-	// Index sandboxes by the warm pool label value
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &sandboxv1beta1.Sandbox{},
+	ctx := context.Background()
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &sandboxv1beta1.Sandbox{},
 		sandboxWarmPoolLabelIndex, sandboxWarmPoolLabelIndexer); err != nil {
 		return fmt.Errorf("failed to index sandboxes by warm pool label: %w", err)
 	}
-
-	// Index warm pools by the template reference name
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &extensionsv1beta1.SandboxWarmPool{},
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &extensionsv1beta1.SandboxWarmPool{},
 		extensionsv1beta1.TemplateRefField, sandboxTemplateRefNameIndexer); err != nil {
 		return fmt.Errorf("failed to index warm pools by template reference name: %w", err)
 	}

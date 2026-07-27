@@ -226,7 +226,7 @@ func (o *options) run() error {
 		return fmt.Errorf("start manager: %w", err)
 	}
 
-	asmetrics.RegisterSandboxCollector(mgr.GetClient(), mgr.GetLogger().WithName("sandbox-collector"))
+	asmetrics.RegisterSandboxCollector(ctx, mgr.GetClient(), mgr.GetLogger().WithName("sandbox-collector"))
 
 	if err := o.setupControllers(mgr, instrumenter, podMutator); err != nil {
 		return err

@@ -340,7 +340,7 @@ func TestSandboxCollector(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeClient := newFakeClient(tc.sandboxes...).Build()
-			collector := NewSandboxCollector(fakeClient, logr.Discard())
+			collector := NewSandboxCollector(t.Context(), fakeClient, logr.Discard())
 			registry := prometheus.NewRegistry()
 			registry.MustRegister(collector)
 			count, err := testutil.GatherAndCount(registry, "agent_sandboxes")

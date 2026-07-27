@@ -142,5 +142,5 @@ func SetupOTel(ctx context.Context, serviceName string) (Instrumenter, func(), e
 		tracer:     tp.Tracer("sandbox-operator"),
 		propagator: otel.GetTextMapPropagator(),
 		logger:     log.FromContext(ctx).WithName("tracing"),
-	}, func() { _ = tp.Shutdown(context.Background()) }, nil
+	}, func() { _ = tp.Shutdown(context.WithoutCancel(ctx)) }, nil
 }
