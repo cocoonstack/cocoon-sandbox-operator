@@ -86,6 +86,13 @@ type Options struct {
 	Log logr.Logger
 }
 
+// claimIDResolver is the store fast path resolving one sandbox by node-local
+// claim id without materializing the fleet; the scatter-gather store
+// implements it, and lookup falls back to a List scan for stores that don't.
+type claimIDResolver interface {
+	GetByClaimID(ctx context.Context, namespace string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error)
+}
+
 // Server translates e2b REST calls onto a scale.SandboxStore.
 type Server struct {
 	store scale.SandboxStore
@@ -306,13 +313,6 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// claimIDResolver is the store fast path resolving one sandbox by node-local
-// claim id without materializing the fleet; *scale.NewScatterGatherStore's
-// concrete type implements it.
-type claimIDResolver interface {
-	GetByClaimID(ctx context.Context, namespace string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error)
 }
 
 // lookup finds the sandbox whose sandboxd claim id matches id. The id is the

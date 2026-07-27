@@ -261,58 +261,23 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 // is the authoritative view available, so Get returns from it directly rather
 // than from an eventually-consistent cluster-wide summary.
 func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
-	nodes, err := s.src.ListNodes(ctx)
+	found, err := s.findEntry(ctx, "get", func(inv *NodeInventory, i int) bool {
+		ens, ename := splitNamespacedName(inv.Entries[i].Name)
+		return ens == namespace && ename == name
+	})
 	if err != nil {
-		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
+		return nil, err
 	}
-	gctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	g := &errgroup.Group{}
-	if s.concurrency > 0 {
-		g.SetLimit(s.concurrency)
-	}
-	var (
-		mu    sync.Mutex
-		found *sandboxv1beta1.Sandbox
-	)
-	for _, node := range nodes {
-		g.Go(func() error {
-			if gctx.Err() != nil {
-				return nil
-			}
-			inv, err := s.src.NodeInventory(gctx, node)
-			if err != nil {
-				s.log.V(1).Info("node inventory unavailable during get; skipping node",
-					"node", node, "err", err.Error())
-				return nil
-			}
-			for i := range inv.Entries {
-				ens, ename := splitNamespacedName(inv.Entries[i].Name)
-				if ens == namespace && ename == name {
-					mu.Lock()
-					if found == nil {
-						found = entryToSandbox(inv.Node, inv.Entries[i])
-					}
-					mu.Unlock()
-					cancel()
-					return nil
-				}
-			}
-			return nil
-		})
-	}
-	_ = g.Wait()
 	if found == nil {
 		return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), name)
 	}
 	return found, nil
 }
 
-// GetByClaimID resolves the sandbox whose node-local claim id satisfies match,
-// fanning out per node and canceling on the first hit. Only the matching entry
-// is materialized, so an id-keyed caller (the e2b compat surface) does not pay
-// a fleet-wide List per request. An empty namespace matches every namespace.
-func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error) {
+// findEntry sweeps every node inventory with List's bounded fan-out and returns
+// the first entry matching match synthesized as a Sandbox, canceling the rest
+// of the sweep on the hit. Nil with a nil error means no entry matched.
+func (s *scatterGatherStore) findEntry(ctx context.Context, op string, match func(inv *NodeInventory, i int) bool) (*sandboxv1beta1.Sandbox, error) {
 	nodes, err := s.src.ListNodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
@@ -334,15 +299,12 @@ func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace string,
 			}
 			inv, err := s.src.NodeInventory(gctx, node)
 			if err != nil {
-				s.log.V(1).Info("node inventory unavailable during claim-id get; skipping node",
+				s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
 					"node", node, "err", err.Error())
 				return nil
 			}
 			for i := range inv.Entries {
-				if inv.Entries[i].ID == "" || !match(inv.Entries[i].ID) {
-					continue
-				}
-				if ns, _ := splitNamespacedName(inv.Entries[i].Name); namespace != "" && ns != namespace {
+				if !match(inv, i) {
 					continue
 				}
 				mu.Lock()
@@ -357,6 +319,24 @@ func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace string,
 		})
 	}
 	_ = g.Wait()
+	return found, nil
+}
+
+// GetByClaimID resolves the sandbox whose node-local claim id satisfies match,
+// fanning out per node and canceling on the first hit. Only the matching entry
+// is materialized, so an id-keyed caller (the e2b compat surface) does not pay
+// a fleet-wide List per request. An empty namespace matches every namespace.
+func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error) {
+	found, err := s.findEntry(ctx, "claim-id get", func(inv *NodeInventory, i int) bool {
+		if inv.Entries[i].ID == "" || !match(inv.Entries[i].ID) {
+			return false
+		}
+		ns, _ := splitNamespacedName(inv.Entries[i].Name)
+		return namespace == "" || ns == namespace
+	})
+	if err != nil {
+		return nil, err
+	}
 	if found == nil {
 		return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), "")
 	}
