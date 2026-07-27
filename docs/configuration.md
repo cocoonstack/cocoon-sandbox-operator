@@ -23,7 +23,7 @@ The defaults are the configuration [PERFORMANCE.md](https://github.com/cocoonsta
 was measured with, so an out-of-box install reproduces the published numbers.
 
 - `--sandbox-concurrent-workers` (16)
-- `--sandbox-claim-concurrent-workers` (20)
+- `--sandbox-claim-concurrent-workers` (50)
 - `--sandbox-warm-pool-concurrent-workers` (8)
 - `--sandbox-template-concurrent-workers` (1)
 - `--sandbox-warm-pool-max-batch-size` (300)

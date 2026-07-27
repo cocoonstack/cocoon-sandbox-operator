@@ -128,7 +128,7 @@ func (o *options) bindFlags() {
 	flag.Float64Var(&o.kubeAPIQPS, "kube-api-qps", 200, "Client-side QPS limit for the Kubernetes API client; a negative value disables client-side rate limiting entirely, which also makes --kube-api-burst meaningless.")
 	flag.IntVar(&o.kubeAPIBurst, "kube-api-burst", 400, "Burst for client-side throttling of the Kubernetes API client. Ignored when --kube-api-qps is negative.")
 	flag.IntVar(&o.sandboxWorkers, "sandbox-concurrent-workers", 16, "Max concurrent reconciles for the Sandbox controller")
-	flag.IntVar(&o.claimWorkers, "sandbox-claim-concurrent-workers", 20, "Max concurrent reconciles for the SandboxClaim controller")
+	flag.IntVar(&o.claimWorkers, "sandbox-claim-concurrent-workers", 50, "Max concurrent reconciles for the SandboxClaim controller")
 	flag.IntVar(&o.warmPoolWorkers, "sandbox-warm-pool-concurrent-workers", 8, "Max concurrent reconciles for the SandboxWarmPool controller")
 	flag.IntVar(&o.templateWorkers, "sandbox-template-concurrent-workers", 1, "Max concurrent reconciles for the SandboxTemplate controller")
 	flag.IntVar(&o.warmPoolMaxBatchSize, "sandbox-warm-pool-max-batch-size", 300, "Max batch size for parallel sandbox creation and deletion in SandboxWarmPool controller. Default is 300.")

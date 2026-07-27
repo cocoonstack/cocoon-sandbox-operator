@@ -45,7 +45,7 @@ controller:
   # kubeApiBurst: 400
   # sandboxConcurrentWorkers: 16
   ##### The following are only active when controller.extensions=true.
-  # sandboxClaimConcurrentWorkers: 20
+  # sandboxClaimConcurrentWorkers: 50
   # sandboxWarmPoolConcurrentWorkers: 8
   # sandboxTemplateConcurrentWorkers: 1
   # sandboxWarmPoolMaxBatchSize: 300  # max parallel sandbox create/delete batch in the SandboxWarmPool controller
