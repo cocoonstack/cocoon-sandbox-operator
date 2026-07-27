@@ -25,7 +25,6 @@ import (
 	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -215,10 +214,9 @@ func TestSandboxTemplateReconcileNetworkPolicy(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tc.existingObjects...).Build()
 
 			reconciler := &SandboxTemplateReconciler{
-				Client:   client,
-				Scheme:   scheme,
-				Recorder: events.NewFakeRecorder(10),
-				Tracer:   asmetrics.NewNoOp(),
+				Client: client,
+				Scheme: scheme,
+				Tracer: asmetrics.NewNoOp(),
 			}
 
 			req := reconcile.Request{
@@ -294,10 +292,9 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 
 		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(template, unownedNP).Build()
 		reconciler := &SandboxTemplateReconciler{
-			Client:   client,
-			Scheme:   scheme,
-			Recorder: events.NewFakeRecorder(10),
-			Tracer:   asmetrics.NewNoOp(),
+			Client: client,
+			Scheme: scheme,
+			Tracer: asmetrics.NewNoOp(),
 		}
 
 		req := reconcile.Request{
@@ -342,10 +339,9 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 
 		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(template, unownedNP).Build()
 		reconciler := &SandboxTemplateReconciler{
-			Client:   client,
-			Scheme:   scheme,
-			Recorder: events.NewFakeRecorder(10),
-			Tracer:   asmetrics.NewNoOp(),
+			Client: client,
+			Scheme: scheme,
+			Tracer: asmetrics.NewNoOp(),
 		}
 
 		req := reconcile.Request{

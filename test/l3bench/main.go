@@ -47,6 +47,7 @@ import (
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	sandboxapiserver "github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
+	"github.com/cocoonstack/sandbox-operator/test/benchutil"
 )
 
 var (
@@ -57,12 +58,7 @@ var (
 	namespacesFlag = flag.Int("namespaces", 3, "number of namespaces to spread sandboxes across")
 )
 
-func must(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
-		os.Exit(2)
-	}
-}
+func must(err error) { benchutil.Must(err) }
 
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "FAIL: "+format+"\n", args...)

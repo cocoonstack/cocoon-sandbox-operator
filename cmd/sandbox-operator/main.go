@@ -380,7 +380,6 @@ func (o *options) setupExtensionControllers(mgr ctrl.Manager, instrumenter asmet
 	if err := (&extensionscontrollers.SandboxTemplateReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
-		Recorder:        mgr.GetEventRecorder("sandboxtemplate-controller"),
 		Tracer:          instrumenter,
 		RouterNamespace: o.webhookNamespace,
 	}).SetupWithManager(mgr, o.templateWorkers); err != nil {

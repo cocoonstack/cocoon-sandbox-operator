@@ -16,7 +16,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -34,6 +32,7 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/test/benchutil"
 )
 
 const image = "m.daocloud.io/docker.io/library/alpine:3.20"
@@ -63,12 +62,7 @@ const (
 	poolName = "poolbench-pool"
 )
 
-func must(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
-		os.Exit(2)
-	}
-}
+func must(err error) { benchutil.Must(err) }
 
 func main() {
 	flag.Parse()
@@ -181,47 +175,11 @@ func ensureTemplate(ctx context.Context) {
 }
 
 func ensurePool(ctx context.Context, replicas int32) {
-	p := &extv1beta1.SandboxWarmPool{ObjectMeta: metav1.ObjectMeta{Name: poolName, Namespace: *ns}}
-	err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: poolName}, p)
-	if apierrors.IsNotFound(err) {
-		p = &extv1beta1.SandboxWarmPool{
-			ObjectMeta: metav1.ObjectMeta{Name: poolName, Namespace: *ns},
-			Spec: extv1beta1.SandboxWarmPoolSpec{
-				Replicas:    &replicas,
-				TemplateRef: extv1beta1.SandboxTemplateRef{Name: tmplName},
-			},
-		}
-		must(cl.Create(ctx, p))
-		return
-	}
-	must(err)
-	p.Spec.Replicas = &replicas
-	must(cl.Update(ctx, p))
+	benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, replicas, nil)
 }
 
 func readySandboxes(ctx context.Context) (total, ready int) {
-	sl := &sandboxv1beta1.SandboxList{}
-	if err := cl.List(ctx, sl, ctrlclient.InNamespace(*ns)); err != nil {
-		return 0, 0
-	}
-	for i := range sl.Items {
-		owned := false
-		for _, o := range sl.Items[i].OwnerReferences {
-			if o.Kind == "SandboxWarmPool" && o.Name == poolName {
-				owned = true
-			}
-		}
-		if !owned {
-			continue
-		}
-		total++
-		for _, c := range sl.Items[i].Status.Conditions {
-			if c.Type == "Ready" && c.Status == metav1.ConditionTrue {
-				ready++
-			}
-		}
-	}
-	return
+	return benchutil.ReadySandboxes(ctx, cl, *ns, poolName)
 }
 
 func fillPool(ctx context.Context, target int) map[string]any {
@@ -263,8 +221,8 @@ func fillPool(ctx context.Context, target int) map[string]any {
 	}
 	return map[string]any{
 		"reachedReady":     lastReady,
-		"elapsedSec":       round1(elapsed),
-		"throughputPerSec": round2(thr),
+		"elapsedSec":       benchutil.Round1(elapsed),
+		"throughputPerSec": benchutil.Round2(thr),
 		"p50Ms":            pct(c2r, 50),
 		"p95Ms":            pct(c2r, 95),
 		"p99Ms":            pct(c2r, 99),
@@ -394,16 +352,4 @@ func claimLatency(ctx context.Context, n, conc int) map[string]any {
 	}
 }
 
-func pct(xs []float64, p float64) float64 {
-	if len(xs) == 0 {
-		return 0
-	}
-	s := append([]float64(nil), xs...)
-	sort.Float64s(s)
-	if p >= 100 {
-		return round1(s[len(s)-1])
-	}
-	return round1(s[int(float64(len(s)-1)*p/100)])
-}
-func round1(f float64) float64 { return float64(int(f*10)) / 10 }
-func round2(f float64) float64 { return float64(int(f*100)) / 100 }
+func pct(xs []float64, p float64) float64 { return benchutil.Pct(xs, p, benchutil.Round1) }

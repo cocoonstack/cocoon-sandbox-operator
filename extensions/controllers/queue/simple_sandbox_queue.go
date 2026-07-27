@@ -25,17 +25,7 @@ type SandboxKey struct {
 	NodeName  string
 }
 
-// SandboxQueue defines the interface for managing a thread-safe,
-// highly concurrent queue of adoptable warm pool sandboxes.
-type SandboxQueue interface {
-	Add(namespacedWarmPoolName string, item SandboxKey)
-	Get(namespacedWarmPoolName string) (SandboxKey, bool)
-	GetWithStrategy(namespacedWarmPoolName string, pick func([]SandboxKey) (SandboxKey, bool)) (SandboxKey, bool)
-	RemoveQueue(namespacedWarmPoolName string)
-	RemoveItem(namespacedWarmPoolName string, item SandboxKey)
-}
-
-// SimpleSandboxQueue implements SandboxQueue using simple synchronized slices.
+// SimpleSandboxQueue is a thread-safe queue of adoptable warm pool sandboxes.
 type SimpleSandboxQueue struct {
 	// queues is a thread-safe dictionary from warm pool name to a synchronizedQueue
 	queues sync.Map

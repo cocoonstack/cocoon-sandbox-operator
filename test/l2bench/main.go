@@ -28,7 +28,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -44,6 +43,7 @@ import (
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
+	"github.com/cocoonstack/sandbox-operator/test/benchutil"
 )
 
 const (
@@ -57,12 +57,7 @@ var (
 	orphansFlag = flag.Int("orphans", 200, "orphan bindings to inject and reconcile")
 )
 
-func must(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
-		os.Exit(2)
-	}
-}
+func must(err error) { benchutil.Must(err) }
 
 // fakeSandboxd is an httptest-backed sandboxd: /v1/claim hands over a fresh
 // sandbox fast; /v1/sandboxes/{id}/release counts VM destroys (must stay 0).
@@ -134,19 +129,7 @@ func newClaim(name string) *extv1beta1.SandboxClaim {
 	}
 }
 
-func pct(xs []float64, p float64) float64 {
-	if len(xs) == 0 {
-		return 0
-	}
-	s := append([]float64(nil), xs...)
-	sort.Float64s(s)
-	if p >= 100 {
-		return round4(s[len(s)-1])
-	}
-	return round4(s[int(float64(len(s)-1)*p/100)])
-}
-
-func round4(f float64) float64 { return float64(int(f*10000)) / 10000 }
+func pct(xs []float64, p float64) float64 { return benchutil.Pct(xs, p, benchutil.Round4) }
 
 // claimWaiter is the gateway surface the latency loop needs: Claim plus Wait to
 // drain async Bound records. The value scale.NewGateway returns satisfies it.

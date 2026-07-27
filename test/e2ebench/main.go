@@ -48,6 +48,7 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/test/benchutil"
 )
 
 var (
@@ -73,12 +74,7 @@ const (
 	runVal   = "g0131-phase-d"
 )
 
-func must(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
-		os.Exit(2)
-	}
-}
+func must(err error) { benchutil.Must(err) }
 
 func main() {
 	flag.Parse()
@@ -197,64 +193,16 @@ func ensureTemplate(ctx context.Context) {
 }
 
 func ensurePool(ctx context.Context, replicas int32) {
-	p := &extv1beta1.SandboxWarmPool{}
-	err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: poolName}, p)
-	if apierrors.IsNotFound(err) {
-		must(cl.Create(ctx, &extv1beta1.SandboxWarmPool{
-			ObjectMeta: metav1.ObjectMeta{Name: poolName, Namespace: *ns, Labels: map[string]string{runLabel: runVal}},
-			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: &replicas, TemplateRef: extv1beta1.SandboxTemplateRef{Name: tmplName}},
-		}))
-		return
-	}
-	must(err)
-	p.Spec.Replicas = &replicas
-	must(cl.Update(ctx, p))
+	benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, replicas, map[string]string{runLabel: runVal})
 }
 
 // ourSandboxes returns the Sandbox CRs this run's pool owns and how many are Ready.
 func ourSandboxes(ctx context.Context) (total, ready int) {
-	sl := &sandboxv1beta1.SandboxList{}
-	if err := cl.List(ctx, sl, ctrlclient.InNamespace(*ns)); err != nil {
-		return 0, 0
-	}
-	for i := range sl.Items {
-		if !ownedByPool(&sl.Items[i]) {
-			continue
-		}
-		total++
-		for _, c := range sl.Items[i].Status.Conditions {
-			if c.Type == "Ready" && c.Status == metav1.ConditionTrue {
-				ready++
-			}
-		}
-	}
-	return
-}
-
-func ownedByPool(sb *sandboxv1beta1.Sandbox) bool {
-	for _, o := range sb.OwnerReferences {
-		if o.Kind == "SandboxWarmPool" && o.Name == poolName {
-			return true
-		}
-	}
-	return false
+	return benchutil.ReadySandboxes(ctx, cl, *ns, poolName)
 }
 
 func waitReady(ctx context.Context, target, timeoutSec int) int {
-	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
-	last := 0
-	for time.Now().Before(deadline) {
-		_, ready := ourSandboxes(ctx)
-		if ready > last {
-			last = ready
-		}
-		if ready >= target {
-			return ready
-		}
-		time.Sleep(3 * time.Second)
-	}
-	_, ready := ourSandboxes(ctx)
-	return ready
+	return benchutil.WaitReady(ctx, cl, *ns, poolName, target, timeoutSec)
 }
 
 func crossCheck(ctx context.Context) (readyReplicas, sandboxCR, pods int) {

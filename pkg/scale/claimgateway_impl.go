@@ -66,7 +66,7 @@ type SandboxdClient interface {
 	Stats(ctx context.Context, id string) (sandboxd.SandboxStats, error)
 }
 
-// Authorizer runs the inline policy check (SubjectAccessReview + ResourceQuota)
+// Authorizer runs the inline policy check (SubjectAccessReview)
 // before a claim is delivered. Policy is the part of Kubernetes that stays
 // centralized; only the ownership-transfer transaction moves to the node. A
 // non-nil error rejects the claim inline before any delivery and is NOT a
@@ -380,20 +380,12 @@ type SubjectAccessReviewer interface {
 	Create(ctx context.Context, sar *authzv1.SubjectAccessReview, opts metav1.CreateOptions) (*authzv1.SubjectAccessReview, error)
 }
 
-// QuotaChecker admits a claim against namespace ResourceQuota. Injected so tests
-// need no live quota tracker; nil skips the quota gate.
-type QuotaChecker interface {
-	Admit(ctx context.Context, namespace string) error
-}
-
 // ReviewAuthorizer is the default Authorizer. It authorizes a claim with a central
 // SubjectAccessReview against the SandboxClaim resource — the policy check the L2
-// design deliberately keeps on the apiserver — and then an optional ResourceQuota
-// admission. Both dependencies are injected, so it exercises the real decision
-// path without a live cluster.
+// design deliberately keeps on the apiserver. The reviewer is injected, so it
+// exercises the real decision path without a live cluster.
 type ReviewAuthorizer struct {
 	Reviewer SubjectAccessReviewer
-	Quota    QuotaChecker
 	// Group/Resource/Verb default to the SandboxClaim create check when empty.
 	Group    string
 	Resource string
@@ -401,7 +393,7 @@ type ReviewAuthorizer struct {
 }
 
 // Authorize denies fail-closed when the caller identity is absent, then runs the
-// SubjectAccessReview and (if configured) the quota check.
+// SubjectAccessReview.
 func (a *ReviewAuthorizer) Authorize(ctx context.Context, req ClaimRequest) error {
 	user := req.Selector[RequestUserSelectorKey]
 	if user == "" {
@@ -425,11 +417,6 @@ func (a *ReviewAuthorizer) Authorize(ctx context.Context, req ClaimRequest) erro
 	}
 	if got.Status.Denied || !got.Status.Allowed {
 		return fmt.Errorf("user %q may not claim in %s: %s", user, req.Namespace, got.Status.Reason)
-	}
-	if a.Quota != nil {
-		if err := a.Quota.Admit(ctx, req.Namespace); err != nil {
-			return fmt.Errorf("quota: %w", err)
-		}
 	}
 	return nil
 }

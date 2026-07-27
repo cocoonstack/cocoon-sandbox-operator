@@ -114,11 +114,6 @@ func WithLogger(log logr.Logger) StoreOption {
 	return func(s *scatterGatherStore) { s.log = log }
 }
 
-// WithConcurrency bounds the per-node fan-out. Values <=0 leave it unbounded.
-func WithConcurrency(n int) StoreOption {
-	return func(s *scatterGatherStore) { s.concurrency = n }
-}
-
 // WithWatchPollInterval sets how often Watch re-derives node inventory to emit
 // deltas. Defaults to one second.
 func WithWatchPollInterval(d time.Duration) StoreOption {
@@ -764,25 +759,6 @@ func (p *NodeInventoryPublisher) Publish(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("scale: apply node %q inventory: %w", p.node, err)
 	}
 	return len(entries), nil
-}
-
-// PublishPeriodically runs Publish on interval until ctx is canceled. Publish
-// failures are logged, not fatal — the next tick rebuilds from live state.
-func (p *NodeInventoryPublisher) PublishPeriodically(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		if n, err := p.Publish(ctx); err != nil {
-			p.log.Error(err, "node inventory publish failed; will retry on next tick", "node", p.node)
-		} else {
-			p.log.V(1).Info("published node inventory", "node", p.node, "entries", n)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
 }
 
 var _ InventoryApplier = (*ssaInventoryApplier)(nil)

@@ -47,3 +47,9 @@ hermes-sandbox-knowledge.md
 /sandbox-loadgen
 /sandbox-apiserver
 /sandbox-sdk-loadgen
+/e2ebench
+/l2bench
+/l3bench
+/poolbench
+/scalebench
+/scalestress

@@ -15,9 +15,6 @@
 package v1alpha1
 
 import (
-	"encoding/json"
-	"fmt"
-
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 
 	v1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
@@ -29,52 +26,20 @@ const v1alpha1SandboxWarmPoolStateAnnotation = "api.agents.x-k8s.io/v1alpha1-san
 func (s *SandboxWarmPool) ConvertTo(dstRaw conversion.Hub) error {
 	dst := dstRaw.(*v1beta1.SandboxWarmPool)
 
-	// Copy object metadata
 	s.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
+	convertWarmPoolSpecTo(&s.Spec, &dst.Spec)
+	convertWarmPoolStatusTo(&s.Status, &dst.Status)
 
-	// Convert Spec
-	if err := convertWarmPoolSpecTo(&s.Spec, &dst.Spec); err != nil {
-		return err
-	}
-
-	// Convert Status
-	if err := convertWarmPoolStatusTo(&s.Status, &dst.Status); err != nil {
-		return err
-	}
-
-	// Preserve the original v1alpha1 object state for lossless round-tripping
-	if dst.Annotations == nil {
-		dst.Annotations = make(map[string]string)
-	}
-	sCopy := s.DeepCopy()
-	if sCopy.Annotations != nil {
-		delete(sCopy.Annotations, v1alpha1SandboxWarmPoolStateAnnotation)
-	}
-	stateJSON, err := json.Marshal(sCopy)
-	if err != nil {
-		return fmt.Errorf("failed to marshal v1alpha1 SandboxWarmPool state: %w", err)
-	}
-	dst.Annotations[v1alpha1SandboxWarmPoolStateAnnotation] = string(stateJSON)
-
-	return nil
+	return stashV1alpha1State(dst, v1alpha1SandboxWarmPoolStateAnnotation, "SandboxWarmPool", s.DeepCopy())
 }
 
 // ConvertFrom converts from the Hub version (v1beta1) to this SandboxWarmPool.
 func (s *SandboxWarmPool) ConvertFrom(srcRaw conversion.Hub) error {
 	src := srcRaw.(*v1beta1.SandboxWarmPool)
 
-	// Copy object metadata
 	src.ObjectMeta.DeepCopyInto(&s.ObjectMeta)
-
-	// Convert Spec
-	if err := convertWarmPoolSpecFrom(&src.Spec, &s.Spec); err != nil {
-		return err
-	}
-
-	// Convert Status
-	if err := convertWarmPoolStatusFrom(&src.Status, &s.Status); err != nil {
-		return err
-	}
+	convertWarmPoolSpecFrom(&src.Spec, &s.Spec)
+	convertWarmPoolStatusFrom(&src.Status, &s.Status)
 
 	// Strip the state annotation if present so it doesn't leak to clients and get sent back on updates
 	delete(s.Annotations, v1alpha1SandboxWarmPoolStateAnnotation)
@@ -82,11 +47,8 @@ func (s *SandboxWarmPool) ConvertFrom(srcRaw conversion.Hub) error {
 	return nil
 }
 
-// Helper functions for SandboxWarmPool conversion
-
-func convertWarmPoolSpecTo(src *SandboxWarmPoolSpec, dst *v1beta1.SandboxWarmPoolSpec) error {
-	replicas := src.Replicas
-	dst.Replicas = &replicas
+func convertWarmPoolSpecTo(src *SandboxWarmPoolSpec, dst *v1beta1.SandboxWarmPoolSpec) {
+	dst.Replicas = new(src.Replicas)
 	dst.TemplateRef = v1beta1.SandboxTemplateRef{
 		Name: src.TemplateRef.Name,
 	}
@@ -98,11 +60,9 @@ func convertWarmPoolSpecTo(src *SandboxWarmPoolSpec, dst *v1beta1.SandboxWarmPoo
 	} else {
 		dst.UpdateStrategy = nil
 	}
-
-	return nil
 }
 
-func convertWarmPoolSpecFrom(src *v1beta1.SandboxWarmPoolSpec, dst *SandboxWarmPoolSpec) error {
+func convertWarmPoolSpecFrom(src *v1beta1.SandboxWarmPoolSpec, dst *SandboxWarmPoolSpec) {
 	if src.Replicas != nil {
 		dst.Replicas = *src.Replicas
 	} else {
@@ -119,20 +79,16 @@ func convertWarmPoolSpecFrom(src *v1beta1.SandboxWarmPoolSpec, dst *SandboxWarmP
 	} else {
 		dst.UpdateStrategy = nil
 	}
-
-	return nil
 }
 
-func convertWarmPoolStatusTo(src *SandboxWarmPoolStatus, dst *v1beta1.SandboxWarmPoolStatus) error {
+func convertWarmPoolStatusTo(src *SandboxWarmPoolStatus, dst *v1beta1.SandboxWarmPoolStatus) {
 	dst.Replicas = src.Replicas
 	dst.ReadyReplicas = src.ReadyReplicas
 	dst.Selector = src.Selector
-	return nil
 }
 
-func convertWarmPoolStatusFrom(src *v1beta1.SandboxWarmPoolStatus, dst *SandboxWarmPoolStatus) error {
+func convertWarmPoolStatusFrom(src *v1beta1.SandboxWarmPoolStatus, dst *SandboxWarmPoolStatus) {
 	dst.Replicas = src.Replicas
 	dst.ReadyReplicas = src.ReadyReplicas
 	dst.Selector = src.Selector
-	return nil
 }

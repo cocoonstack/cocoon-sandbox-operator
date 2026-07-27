@@ -18,10 +18,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -259,8 +259,8 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 		d.log.Info("warm-pool driver has no sandboxd token; skipping pool apply (fail-closed)")
 		return
 	}
-	sem := make(chan struct{}, maxNodeConcurrency)
-	var wg sync.WaitGroup
+	var g errgroup.Group
+	g.SetLimit(maxNodeConcurrency)
 	for i := range nodes {
 		node := nodes[i]
 		// Aggregate targets BY KEY: two SandboxWarmPools may resolve to the same
@@ -281,18 +281,16 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 				cmp.Compare(a.Size, b.Size),
 			)
 		})
-		sem <- struct{}{}
-		wg.Go(func() {
-			defer func() { <-sem }()
+		g.Go(func() error {
 			callCtx, cancel := context.WithTimeout(ctx, setPoolsTimeout)
 			defer cancel()
 			info, err := d.factory(node.addr, d.token).SetPools(callCtx, specs)
 			if err != nil {
 				d.log.Error(err, "set node warm pools", "node", node.name, "addr", node.addr)
-				return
+				return nil
 			}
 			if info == nil {
-				return
+				return nil
 			}
 			// The PUT response carries this node's live per-pool warm, so adopt it
 			// as the status source: NodeInventory lags by up to one publish
@@ -301,9 +299,10 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 			// failed keeps its inventory-derived counts. Only this goroutine
 			// touches nodes[i], so no lock is needed.
 			nodes[i].warmBy = warmByFrom(info)
+			return nil
 		})
 	}
-	wg.Wait()
+	_ = g.Wait()
 }
 
 // writeStatus updates a SandboxWarmPool's status.replicas/readyReplicas from the
