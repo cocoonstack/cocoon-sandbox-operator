@@ -25,10 +25,9 @@ import (
 
 const v1alpha1SandboxStateAnnotation = "api.agents.x-k8s.io/v1alpha1-sandbox-state"
 
-// v1alpha1State is the round-trip payload: exactly the fields v1beta1 cannot
-// represent (replica counts collapse into OperatingMode). Objects written by
-// older operators carry a full v1alpha1 Sandbox JSON under the same annotation;
-// that decodes into this shape too, so reads stay compatible both ways.
+// v1alpha1State is the round-trip payload: the fields v1beta1 cannot represent
+// (replica counts collapse into OperatingMode). Legacy annotations carrying a
+// full v1alpha1 Sandbox JSON decode into this shape too.
 type v1alpha1State struct {
 	Spec struct {
 		Replicas *int32 `json:"replicas,omitempty"`

@@ -703,10 +703,9 @@ func (r *SandboxWarmPoolReconciler) SetupWithManager(mgr ctrl.Manager, concurren
 }
 
 // poolMemberChangePredicate passes the non-label member transitions
-// reconcilePool reads — ownership, deletion, Ready flips, and spec edits (the
-// generation bump re-triggers orphan blueprint vetting) — and is composed with
-// LabelChangedPredicate at registration. Every other member update (PodIPs,
-// other conditions, annotations) re-scanned the whole pool for nothing.
+// reconcilePool reads — ownership, deletion, Ready flips, and generation bumps
+// (orphan blueprint re-vetting); LabelChangedPredicate joins it at registration.
+// Anything else (PodIPs, other conditions) would re-scan the pool for nothing.
 func poolMemberChangePredicate() predicate.Funcs {
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {

@@ -144,11 +144,9 @@ func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
 	enqueueAll := handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
 		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: "sync"}}}
 	})
-	// Generation-filtered: the loop's own writeStatus must not re-trigger it —
-	// under claim churn the warm counts change every pass and the 5s cadence
-	// would degrade into a continuous back-to-back loop. Spec edits bump the
-	// generation, create/delete pass the predicate, and NodeInventory events
-	// plus the RequeueAfter tick cover everything else status sampling needs.
+	// Generation-filtered so the loop's own writeStatus cannot re-trigger it
+	// into a continuous back-to-back loop under claim churn; create/delete,
+	// spec edits, NodeInventory events, and the RequeueAfter tick keep coverage.
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&extv1beta1.SandboxWarmPool{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&extv1beta1.NodeInventory{}, enqueueAll).

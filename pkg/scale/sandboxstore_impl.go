@@ -328,9 +328,8 @@ func (s *scatterGatherStore) findEntry(ctx context.Context, op string, match fun
 }
 
 // GetByClaimID resolves the sandbox whose node-local claim id satisfies match,
-// fanning out per node and canceling on the first hit. Only the matching entry
-// is materialized, so an id-keyed caller (the e2b compat surface) does not pay
-// a fleet-wide List per request. An empty namespace matches every namespace.
+// fanning out per node and canceling on the first hit; only the matching entry
+// is materialized. An empty namespace matches every namespace.
 func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error) {
 	found, err := s.findEntry(ctx, "claim-id get", func(inv *NodeInventory, i int) bool {
 		if inv.Entries[i].ID == "" || !match(inv.Entries[i].ID) {

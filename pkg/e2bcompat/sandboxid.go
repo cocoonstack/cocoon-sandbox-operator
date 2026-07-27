@@ -35,10 +35,9 @@ func publicID(claimID string) string {
 }
 
 // matchesID reports whether a live sandbox's claim id is the one a client asked
-// for, accepting both the raw claim id and its published DNS-safe rendering so
-// an id observed through either surface keeps working. The rendering is
-// compared in place — the id-keyed store sweep calls this once per scanned
-// entry, so building publicID per candidate would allocate O(fleet) per lookup.
+// for, accepting both the raw claim id and its published DNS-safe rendering.
+// The rendering is compared in place: the store sweep calls this per scanned
+// entry, and building publicID per candidate would allocate O(fleet) per lookup.
 func matchesID(claimID, requested string) bool {
 	if claimID == "" || requested == "" {
 		return false
