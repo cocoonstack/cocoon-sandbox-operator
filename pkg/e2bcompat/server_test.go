@@ -287,8 +287,6 @@ func TestErrorBodyCarriesMessage(t *testing.T) {
 	}
 }
 
-// fakeStore records what the compat layer asked of the store and replays canned
-// answers, so the tests assert the translation rather than the node behavior.
 // TestLookupUsesClaimIDResolver pins the id-keyed fast path over the real
 // scatter-gather store: both id spellings resolve without a fleet List, other
 // namespaces stay invisible, and a miss is a plain not-found.
@@ -326,6 +324,25 @@ func TestLookupUsesClaimIDResolver(t *testing.T) {
 	}
 }
 
+// TestDetailStateFollowsThePhaseLabel pins the e2b state mapping: a Hibernated
+// phase reports paused, anything else running.
+func TestDetailStateFollowsThePhaseLabel(t *testing.T) {
+	s, err := NewServer(&fakeStore{}, Options{AllowAnonymous: true})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	sb := liveSandbox("sb-1", "sb_0123abcd", "node-a", "img", "tok")
+	if got := s.detailFor(&sb).State; got != StateRunning {
+		t.Fatalf("running sandbox state = %q, want %q", got, StateRunning)
+	}
+	sb.Labels = map[string]string{scale.PhaseLabel: phaseHibernated}
+	if got := s.detailFor(&sb).State; got != StatePaused {
+		t.Fatalf("hibernated sandbox state = %q, want %q", got, StatePaused)
+	}
+}
+
+// fakeStore records what the compat layer asked of the store and replays canned
+// answers, so the tests assert the translation rather than the node behavior.
 type fakeStore struct {
 	claimPool scale.PoolKey
 	claimNS   string

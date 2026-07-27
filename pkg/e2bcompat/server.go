@@ -362,13 +362,17 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	if started.IsZero() {
 		started = time.Now()
 	}
+	state := StateRunning
+	if sb.Labels[scale.PhaseLabel] == phaseHibernated {
+		state = StatePaused
+	}
 	return SandboxDetail{
 		TemplateID:      templateOf(sb),
 		SandboxID:       publicID(sb.Annotations[scale.ClaimIDAnnotation]),
 		ClientID:        sb.Status.NodeName,
 		StartedAt:       started.UTC().Format(time.RFC3339),
 		EndAt:           started.Add(DefaultTimeoutSeconds * time.Second).UTC().Format(time.RFC3339),
-		State:           StateRunning,
+		State:           state,
 		EnvdVersion:     s.opts.EnvdVersion,
 		EnvdAccessToken: sb.Annotations[tokenAnnotation],
 		Domain:          s.opts.Domain,
