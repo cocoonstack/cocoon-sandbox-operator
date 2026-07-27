@@ -24,8 +24,10 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
@@ -142,8 +144,13 @@ func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
 	enqueueAll := handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
 		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: "sync"}}}
 	})
+	// Generation-filtered: the loop's own writeStatus must not re-trigger it —
+	// under claim churn the warm counts change every pass and the 5s cadence
+	// would degrade into a continuous back-to-back loop. Spec edits bump the
+	// generation, create/delete pass the predicate, and NodeInventory events
+	// plus the RequeueAfter tick cover everything else status sampling needs.
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&extv1beta1.SandboxWarmPool{}).
+		For(&extv1beta1.SandboxWarmPool{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&extv1beta1.NodeInventory{}, enqueueAll).
 		Named("sandboxwarmpool").
 		Complete(d)
