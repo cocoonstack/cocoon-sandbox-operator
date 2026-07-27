@@ -66,12 +66,7 @@ type SandboxdClient interface {
 	Stats(ctx context.Context, id string) (sandboxd.SandboxStats, error)
 }
 
-// Authorizer runs the inline policy check (SubjectAccessReview)
-// before a claim is delivered. Policy is the part of Kubernetes that stays
-// centralized; only the ownership-transfer transaction moves to the node. A
-// non-nil error rejects the claim inline before any delivery and is NOT a
-// fallback signal (IsFallback stays false), matching the "quota exceeded →
-// reject inline" failure mode in the README.
+// Authorizer checks a claim inline before delivery.
 type Authorizer interface {
 	Authorize(ctx context.Context, req ClaimRequest) error
 }
@@ -90,7 +85,7 @@ type GatewayConfig struct {
 	Node string
 	// Client delivers and releases sandboxes on this node.
 	Client SandboxdClient
-	// Authorizer runs the inline SubjectAccessReview + quota check.
+	// Authorizer checks claims inline.
 	Authorizer Authorizer
 	// Recorder durably records Bound asynchronously after delivery.
 	Recorder ClaimRecorder
@@ -380,10 +375,7 @@ type SubjectAccessReviewer interface {
 	Create(ctx context.Context, sar *authzv1.SubjectAccessReview, opts metav1.CreateOptions) (*authzv1.SubjectAccessReview, error)
 }
 
-// ReviewAuthorizer is the default Authorizer. It authorizes a claim with a central
-// SubjectAccessReview against the SandboxClaim resource — the policy check the L2
-// design deliberately keeps on the apiserver. The reviewer is injected, so it
-// exercises the real decision path without a live cluster.
+// ReviewAuthorizer checks SandboxClaim access through SubjectAccessReview.
 type ReviewAuthorizer struct {
 	Reviewer SubjectAccessReviewer
 	// Group/Resource/Verb default to the SandboxClaim create check when empty.
@@ -392,8 +384,7 @@ type ReviewAuthorizer struct {
 	Verb     string
 }
 
-// Authorize denies fail-closed when the caller identity is absent, then runs the
-// SubjectAccessReview.
+// Authorize denies missing identities and runs SubjectAccessReview.
 func (a *ReviewAuthorizer) Authorize(ctx context.Context, req ClaimRequest) error {
 	user := req.Selector[RequestUserSelectorKey]
 	if user == "" {

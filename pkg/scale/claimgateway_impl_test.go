@@ -150,9 +150,7 @@ func TestClaimGatewayReleaseOwnerTeardownOnly(t *testing.T) {
 	require.Equal(t, int64(1), fs.releases.Load())
 }
 
-// TestClaimGatewayAuthorizationRejectsInline exercises the default ReviewAuthorizer:
-// a denied SubjectAccessReview (or exceeded quota) rejects the claim inline BEFORE
-// any delivery, and the rejection is a hard error, not a fallback.
+// TestClaimGatewayAuthorizationRejectsInline verifies SAR denials precede delivery.
 func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
 	t.Run("deny", func(t *testing.T) {
 		fs := newFakeSandboxd(t)

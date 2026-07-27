@@ -2,9 +2,7 @@ package scale
 
 import "context"
 
-// ClaimRequest is a node-local warm-pool claim. It names the SandboxClaim being
-// served and the warm pool to draw from; the gateway authorizes the caller
-// (SubjectAccessReview + ResourceQuota) inline before delivery.
+// ClaimRequest identifies a node-local warm-pool claim.
 type ClaimRequest struct {
 	Namespace string
 	ClaimName string
@@ -32,11 +30,7 @@ type Assignment struct {
 // hands over an already-running guest in sub-millisecond time and returns
 // connection info immediately; the SandboxClaim object is reconciled to Bound
 // asynchronously afterward.
-//
-// Authorization stays central and inline (SubjectAccessReview + ResourceQuota):
-// policy is the part of Kubernetes that should remain centralized; only the
-// ownership-transfer transaction moves to the node. If the node has no warm VM,
-// the caller falls back to the L1 Kubernetes path (create a new Sandbox).
+// Authorization stays central through SubjectAccessReview.
 type ClaimGateway interface {
 	// Claim transfers ownership of a node-local warm sandbox to the caller and
 	// returns connection info. It performs the authorization check inline; it
