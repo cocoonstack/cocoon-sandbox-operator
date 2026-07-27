@@ -41,7 +41,7 @@ tiers rather than headlines:
 | **cold boot** (kernel start) | 26–32 s (full OCI microVM boot) | 200–350 ms | — |
 | substrate | real CH/KVM microVM | real FC/CH microVM | Firecracker microVM |
 | control plane | **Kubernetes CRDs, any k8s SDK** | node-local daemon + Go/Python SDK | proprietary hosted SDK |
-| self-hosted | yes (Apache 2.0) | yes | no |
+| self-hosted | yes (AGPL-3.0) | yes | no |
 
 Two honest caveats:
 

@@ -45,5 +45,5 @@ the work under this repository's license.
 ## License
 
 By contributing you agree that your contributions are licensed under
-[Apache-2.0](LICENSE). Provenance for the imported `agents.x-k8s.io` APIs is
-tracked in [UPSTREAM.md](UPSTREAM.md).
+[AGPL-3.0](LICENSE). Provenance for the imported `agents.x-k8s.io` APIs
+(Apache-2.0, headers retained) is tracked in [UPSTREAM.md](UPSTREAM.md).
