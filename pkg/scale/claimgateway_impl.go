@@ -351,12 +351,7 @@ func (o *OrphanReconciler) Reconcile(ctx context.Context) (int, error) {
 		if getErr != nil {
 			if k8serrors.IsNotFound(getErr) {
 				// The owning SandboxClaim is genuinely gone. We NEVER destroy the
-				// VM here (audit-and-adopt only); owner-authorized teardown owns
-				// that. Guard against an ambiguous 404 (a mis-mapped GVR would omit
-				// Details.Name) so we never act on a false "deleted" signal.
-				if n := notFoundName(getErr); n != "" && n != d.ClaimName {
-					return reconciled, fmt.Errorf("scale: ambiguous 404 for claim %s/%s (details name %q); refusing to treat as deleted", d.ClaimNS, d.ClaimName, n)
-				}
+				// VM here (audit-and-adopt only); owner-authorized teardown owns that.
 				o.log.V(1).Info("delivery has no SandboxClaim object; leaving VM intact (no destroy)",
 					"namespace", d.ClaimNS, "claim", d.ClaimName, "sandbox", d.SandboxName)
 				continue
@@ -374,18 +369,6 @@ func (o *OrphanReconciler) Reconcile(ctx context.Context) (int, error) {
 		reconciled++
 	}
 	return reconciled, nil
-}
-
-// notFoundName extracts the object name a genuine NotFound status carries in
-// Details.Name; empty when the error is not a structured NotFound.
-func notFoundName(err error) string {
-	var se k8serrors.APIStatus
-	if errors.As(err, &se) {
-		if d := se.Status().Details; d != nil {
-			return d.Name
-		}
-	}
-	return ""
 }
 
 // SubjectAccessReviewer creates a SubjectAccessReview and returns the decided
