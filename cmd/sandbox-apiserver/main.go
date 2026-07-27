@@ -181,7 +181,7 @@ func (o *options) serverConfig() (*genericapiserver.Config, error) {
 
 func run() error {
 	o := newOptions()
-	fs := pflag.NewFlagSet("cocoon-sandbox-apiserver", pflag.ExitOnError)
+	fs := pflag.NewFlagSet("sandbox-apiserver", pflag.ExitOnError)
 	o.addFlags(fs)
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
@@ -233,7 +233,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server, err := cfg.Complete(nil).New("cocoon-sandbox-apiserver", genericapiserver.NewEmptyDelegate())
+	server, err := cfg.Complete(nil).New("sandbox-apiserver", genericapiserver.NewEmptyDelegate())
 	if err != nil {
 		return fmt.Errorf("build generic apiserver: %w", err)
 	}
@@ -395,7 +395,7 @@ func currentNamespace() string {
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "cocoon-sandbox-apiserver:", err)
+		fmt.Fprintln(os.Stderr, "sandbox-apiserver:", err)
 		os.Exit(1)
 	}
 }

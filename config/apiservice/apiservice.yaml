@@ -27,15 +27,15 @@ kind: APIService
 metadata:
   name: v1beta1.agents.x-k8s.io
   labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
   annotations:
-    cert-manager.io/inject-ca-from: cocoon-sandbox-system/cocoon-sandbox-apiserver-serving
+    cert-manager.io/inject-ca-from: cocoon-sandbox-system/sandbox-apiserver-serving
 spec:
   group: agents.x-k8s.io
   version: v1beta1
   service:
-    name: cocoon-sandbox-apiserver
+    name: sandbox-apiserver
     namespace: cocoon-sandbox-system
     port: 443
   groupPriorityMinimum: 1000

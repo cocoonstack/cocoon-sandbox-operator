@@ -13,13 +13,13 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: cocoon-sandbox-apiserver:system:auth-delegator
+  name: sandbox-apiserver:system:auth-delegator
   labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 subjects:
 - kind: ServiceAccount
-  name: cocoon-sandbox-apiserver
+  name: sandbox-apiserver
   namespace: cocoon-sandbox-system
 roleRef:
   kind: ClusterRole
@@ -30,14 +30,14 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: cocoon-sandbox-apiserver-auth-reader
+  name: sandbox-apiserver-auth-reader
   namespace: kube-system
   labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 subjects:
 - kind: ServiceAccount
-  name: cocoon-sandbox-apiserver
+  name: sandbox-apiserver
   namespace: cocoon-sandbox-system
 roleRef:
   kind: Role
@@ -48,9 +48,9 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: cocoon-sandbox-apiserver-inventory-reader
+  name: sandbox-apiserver-inventory-reader
   labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 rules:
 - apiGroups:
@@ -85,17 +85,17 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: cocoon-sandbox-apiserver-inventory-reader
+  name: sandbox-apiserver-inventory-reader
   labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 subjects:
 - kind: ServiceAccount
-  name: cocoon-sandbox-apiserver
+  name: sandbox-apiserver
   namespace: cocoon-sandbox-system
 roleRef:
   kind: ClusterRole
-  name: cocoon-sandbox-apiserver-inventory-reader
+  name: sandbox-apiserver-inventory-reader
   apiGroup: rbac.authorization.k8s.io
 
 ---
@@ -105,10 +105,10 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: cocoon-sandbox-apiserver-leader-election
+  name: sandbox-apiserver-leader-election
   namespace: cocoon-sandbox-system
   labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 rules:
 - apiGroups:
@@ -135,16 +135,16 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: cocoon-sandbox-apiserver-leader-election
+  name: sandbox-apiserver-leader-election
   namespace: cocoon-sandbox-system
   labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 subjects:
 - kind: ServiceAccount
-  name: cocoon-sandbox-apiserver
+  name: sandbox-apiserver
   namespace: cocoon-sandbox-system
 roleRef:
   kind: Role
-  name: cocoon-sandbox-apiserver-leader-election
+  name: sandbox-apiserver-leader-election
   apiGroup: rbac.authorization.k8s.io

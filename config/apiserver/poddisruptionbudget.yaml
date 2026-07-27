@@ -23,13 +23,13 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: cocoon-sandbox-apiserver
+  name: sandbox-apiserver
   namespace: cocoon-sandbox-system
   labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 spec:
   minAvailable: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: cocoon-sandbox-apiserver
+      app.kubernetes.io/name: sandbox-apiserver

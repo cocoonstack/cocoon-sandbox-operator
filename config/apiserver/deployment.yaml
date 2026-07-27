@@ -3,7 +3,7 @@
 #
 # The server is stateless (it stores nothing; List/Get/Watch scatter-gather
 # per-node NodeInventory objects through an informer cache), so two replicas
-# behind the cocoon-sandbox-apiserver Service (service.yaml) give the
+# behind the sandbox-apiserver Service (service.yaml) give the
 # kube-apiserver an always-available aggregation backend.
 #
 # Serving certs come from cert-manager (certificate.yaml): the secret is
@@ -15,33 +15,33 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: cocoon-sandbox-apiserver
+  name: sandbox-apiserver
   namespace: cocoon-sandbox-system
   labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cocoon-sandbox-apiserver
+  name: sandbox-apiserver
   namespace: cocoon-sandbox-system
   labels:
-    app.kubernetes.io/name: cocoon-sandbox-apiserver
+    app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: cocoon-sandbox-apiserver
+      app.kubernetes.io/name: sandbox-apiserver
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: cocoon-sandbox-apiserver
+        app.kubernetes.io/name: sandbox-apiserver
         app.kubernetes.io/component: aggregated-apiserver
     spec:
-      serviceAccountName: cocoon-sandbox-apiserver
+      serviceAccountName: sandbox-apiserver
       # An unavailable APIService does not just fail `kubectl get sandboxes`: it
       # fails discovery for the whole cluster, so the two replicas must never
       # share a failure domain. Spreading is required, not preferred — running
@@ -53,14 +53,14 @@ spec:
           whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
-              app.kubernetes.io/name: cocoon-sandbox-apiserver
+              app.kubernetes.io/name: sandbox-apiserver
       containers:
-      - name: cocoon-sandbox-apiserver
+      - name: sandbox-apiserver
         image: ko://github.com/cocoonstack/sandbox-operator/cmd/sandbox-apiserver # placeholder value, replaced by deployment scripts
         args:
         - --secure-port=6443
-        - --tls-cert-file=/etc/cocoon-sandbox-apiserver/serving-certs/tls.crt
-        - --tls-private-key-file=/etc/cocoon-sandbox-apiserver/serving-certs/tls.key
+        - --tls-cert-file=/etc/sandbox-apiserver/serving-certs/tls.crt
+        - --tls-private-key-file=/etc/sandbox-apiserver/serving-certs/tls.key
         ports:
         - name: https
           containerPort: 6443
@@ -89,9 +89,9 @@ spec:
             memory: 512Mi
         volumeMounts:
         - name: serving-certs
-          mountPath: /etc/cocoon-sandbox-apiserver/serving-certs
+          mountPath: /etc/sandbox-apiserver/serving-certs
           readOnly: true
       volumes:
       - name: serving-certs
         secret:
-          secretName: cocoon-sandbox-apiserver-serving-certs
+          secretName: sandbox-apiserver-serving-certs
