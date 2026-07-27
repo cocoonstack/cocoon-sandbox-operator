@@ -167,7 +167,7 @@ endpoint mapping, and limits in [docs/e2b-compat.md](docs/e2b-compat.md).
 
 Each release publishes multi-arch (amd64/arm64) images to GHCR:
 `ghcr.io/cocoonstack/sandbox-operator` (controller) and
-`ghcr.io/cocoonstack/cocoon-sandbox-apiserver` (aggregated apiserver).
+`ghcr.io/cocoonstack/sandbox-apiserver` (aggregated apiserver).
 
 Helm:
 

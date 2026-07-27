@@ -2,7 +2,7 @@
 
 # Image for cmd/sandbox-apiserver, the L3 aggregated apiserver serving
 # sandboxes.agents.x-k8s.io (see config/apiserver/ for the Deployment).
-#   docker build -f Dockerfile.apiserver -t <registry>/cocoon-sandbox-apiserver:<tag> .
+#   docker build -f Dockerfile.apiserver -t <registry>/sandbox-apiserver:<tag> .
 
 FROM --platform=$BUILDPLATFORM golang:1.26.5 AS builder
 

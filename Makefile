@@ -4,7 +4,7 @@ BINARY := bin/sandbox-operator
 MAIN := ./cmd/sandbox-operator
 APISERVER_BINARY := bin/sandbox-apiserver
 APISERVER_MAIN := ./cmd/sandbox-apiserver
-APISERVER_IMG ?= ghcr.io/cocoonstack/cocoon-sandbox-apiserver:dev
+APISERVER_IMG ?= ghcr.io/cocoonstack/sandbox-apiserver:dev
 VERSION_PKG := github.com/cocoonstack/sandbox-operator/internal/version
 
 GIT_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
