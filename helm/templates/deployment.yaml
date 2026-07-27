@@ -81,6 +81,6 @@ spec:
       volumes:
       - name: config-volume
         configMap:
-          name: cocoon-sandbox-config
+          name: sandbox-config
           optional: true
 

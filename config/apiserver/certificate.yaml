@@ -10,7 +10,7 @@ apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
   name: sandbox-apiserver-selfsigned
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
@@ -22,7 +22,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: sandbox-apiserver-ca
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
@@ -43,7 +43,7 @@ apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
   name: sandbox-apiserver-ca
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
@@ -56,14 +56,14 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: sandbox-apiserver-serving
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 spec:
   dnsNames:
-  - sandbox-apiserver.cocoon-sandbox-system.svc
-  - sandbox-apiserver.cocoon-sandbox-system.svc.cluster.local
+  - sandbox-apiserver.sandbox-system.svc
+  - sandbox-apiserver.sandbox-system.svc.cluster.local
   secretName: sandbox-apiserver-serving-certs
   duration: 8760h # 1 year
   renewBefore: 720h # 30 days

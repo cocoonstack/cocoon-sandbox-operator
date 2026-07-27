@@ -1,7 +1,7 @@
 namespace:
   # create controls whether the namespace is created by this chart.
   create: true
-  name: cocoon-sandbox-system
+  name: sandbox-system
 
 image:
   repository: ghcr.io/cocoonstack/sandbox-operator
@@ -88,4 +88,4 @@ podSecurityContext: null
 containerSecurityContext: null
 
 # Name of the webhook service.
-webhookServiceName: cocoon-sandbox-webhook-service
+webhookServiceName: sandbox-webhook-service

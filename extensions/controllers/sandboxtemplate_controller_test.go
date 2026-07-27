@@ -141,8 +141,8 @@ func TestSandboxTemplateReconcileNetworkPolicy(t *testing.T) {
 					t.Fatalf("Expected both PodSelector and NamespaceSelector to be non-nil")
 				}
 				if peer1.PodSelector.MatchLabels["app"] != "sandbox-router" ||
-					peer1.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "cocoon-sandbox-system" {
-					t.Errorf("Expected first Ingress peer to target sandbox-router in cocoon-sandbox-system namespace")
+					peer1.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "sandbox-system" {
+					t.Errorf("Expected first Ingress peer to target sandbox-router in sandbox-system namespace")
 				}
 				if len(np.Spec.Egress) != 1 {
 					t.Fatalf("Expected 1 Default Egress rule, got %d", len(np.Spec.Egress))

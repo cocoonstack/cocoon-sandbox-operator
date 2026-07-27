@@ -40,7 +40,7 @@ func TestGenerateWebhookCerts(t *testing.T) {
 	serviceName := "test-service"
 	namespace := "test-namespace"
 	clusterDomain := "cluster.local"
-	secretName := "cocoon-sandbox-webhook-certs"
+	secretName := "sandbox-webhook-certs"
 
 	t.Run("successfully generates new certs when Secret does not exist", func(t *testing.T) {
 		tempDir, err := os.MkdirTemp("", "webhook-certs-test-*")

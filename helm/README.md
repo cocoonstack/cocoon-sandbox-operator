@@ -7,7 +7,7 @@ compatibility CRDs, RBAC, conversion webhook, and certificate management.
 
 ```bash
 helm upgrade --install sandbox-operator ./helm \
-  --namespace cocoon-sandbox-system \
+  --namespace sandbox-system \
   --create-namespace \
   --set image.tag=<version>
 ```
@@ -17,7 +17,7 @@ vk-cocoon cluster is ready, it can be selected cluster-wide with:
 
 ```bash
 helm upgrade --install sandbox-operator ./helm \
-  --namespace cocoon-sandbox-system \
+  --namespace sandbox-system \
   --create-namespace \
   --set image.tag=<version> \
   --set controller.defaultRuntime=vk-cocoon
@@ -34,7 +34,7 @@ Apply changed CRDs before upgrading the controller:
 ```bash
 kubectl apply -f helm/crds/
 helm upgrade sandbox-operator ./helm \
-  --namespace cocoon-sandbox-system \
+  --namespace sandbox-system \
   --reuse-values \
   --set image.tag=<new-version>
 ```
@@ -50,7 +50,7 @@ Do not delete the CRDs while sandbox custom resources still exist.
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `replicaCount` | Operator replicas | `1` |
 | `namespace.create` | Create the operator namespace | `true` |
-| `namespace.name` | Operator namespace | `cocoon-sandbox-system` |
+| `namespace.name` | Operator namespace | `sandbox-system` |
 | `controller.leaderElect` | Enable leader election | `true` |
 | `controller.extensions` | Enable Template, WarmPool, and Claim | `true` |
 | `controller.defaultRuntime` | Default Pod backend | `standard` |
@@ -64,7 +64,7 @@ Do not delete the CRDs while sandbox custom resources still exist.
 | `controller.sandboxWarmPoolMaxBatchSize` | WarmPool batch size | unset (`300` flag default) |
 | `controller.enableWarmPoolEviction` | Mark warm Pods safe to evict | unset (`true` flag default) |
 | `controller.extraArgs` | Additional operator arguments | `[]` |
-| `webhookServiceName` | Conversion-webhook Service | `cocoon-sandbox-webhook-service` |
+| `webhookServiceName` | Conversion-webhook Service | `sandbox-webhook-service` |
 | `resources` | Operator requests and limits | `{}` |
 | `nodeSelector`, `tolerations`, `affinity` | Operator scheduling | empty |
 | `podSecurityContext` | Operator Pod security context | `null` |

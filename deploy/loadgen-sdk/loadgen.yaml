@@ -64,7 +64,7 @@ spec:
       containers:
       - name: loadgen
         # Build with Dockerfile.sdkloadgen and push to your registry.
-        image: ghcr.io/cocoonstack/cocoon-sandbox-sdk-loadgen:latest
+        image: ghcr.io/cocoonstack/sandbox-sdk-loadgen:latest
         args:
         - --namespace=sandbox-sdk-loadgen
         - --concurrency=2

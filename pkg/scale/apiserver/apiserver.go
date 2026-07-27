@@ -25,7 +25,7 @@ import (
 // the TypeConverter needs.
 func NewOpenAPIV3Config() *openapicommon.OpenAPIV3Config {
 	cfg := genericapiserver.DefaultOpenAPIV3Config(sandboxOpenAPIDefinitions, openapinamer.NewDefinitionNamer(Scheme))
-	cfg.Info.Title = "cocoon-sandbox-aggregated-apiserver"
+	cfg.Info.Title = "sandbox-aggregated-apiserver"
 	return cfg
 }
 

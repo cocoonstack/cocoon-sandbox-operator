@@ -2,7 +2,7 @@
 kind: Namespace
 apiVersion: v1
 metadata:
-  name: cocoon-sandbox-system
+  name: sandbox-system
 
 ---
 
@@ -10,7 +10,7 @@ kind: ServiceAccount
 apiVersion: v1
 metadata:
   name: sandbox-operator
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app: sandbox-operator
 
@@ -23,7 +23,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: sandbox-operator
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
 roleRef:
   kind: ClusterRole
   name: sandbox-operator
@@ -35,7 +35,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: sandbox-operator
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
 rules:
 - apiGroups:
   - ""
@@ -46,7 +46,7 @@ rules:
 - apiGroups:
   - ""
   resourceNames:
-  - cocoon-sandbox-webhook-certs
+  - sandbox-webhook-certs
   resources:
   - secrets
   verbs:
@@ -60,11 +60,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: sandbox-operator
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
 subjects:
 - kind: ServiceAccount
   name: sandbox-operator
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
 roleRef:
   kind: Role
   name: sandbox-operator
@@ -76,7 +76,7 @@ kind: Service
 apiVersion: v1
 metadata:
   name: sandbox-operator
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app: sandbox-operator
 spec:
@@ -94,7 +94,7 @@ kind: Deployment
 apiVersion: apps/v1
 metadata:
   name: sandbox-operator
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app: sandbox-operator
 spec:
@@ -131,8 +131,8 @@ spec:
 kind: Service
 apiVersion: v1
 metadata:
-  name: cocoon-sandbox-webhook-service
-  namespace: cocoon-sandbox-system
+  name: sandbox-webhook-service
+  namespace: sandbox-system
 spec:
   selector:
     app: sandbox-operator

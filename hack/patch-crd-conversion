@@ -28,8 +28,8 @@ CONVERSION = """spec:
       - v1beta1
       clientConfig:
         service:
-          name: cocoon-sandbox-webhook-service
-          namespace: cocoon-sandbox-system
+          name: sandbox-webhook-service
+          namespace: sandbox-system
           path: /convert
 """
 

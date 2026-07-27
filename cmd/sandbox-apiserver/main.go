@@ -390,7 +390,7 @@ func currentNamespace() string {
 			return ns
 		}
 	}
-	return "cocoon-sandbox-system"
+	return "sandbox-system"
 }
 
 func main() {

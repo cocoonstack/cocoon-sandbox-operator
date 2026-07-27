@@ -35,7 +35,7 @@ const (
 
 	// sandboxd virtual-node contract: vk-sandbox advertises this label
 	// and taints with vkProviderTaintKey (Exists toleration covers both planes).
-	sandboxdNodeLabelKey   = "cocoon-sandbox.io/runtime"
+	sandboxdNodeLabelKey   = "sandbox.cocoonstack.io/runtime"
 	sandboxdNodeLabelValue = "sandboxd"
 	// sandboxd claim axes — mirror pkg/scale selector keys and the
 	// vk-sandbox provider's AnnTemplate/AnnNet/AnnSize contract.

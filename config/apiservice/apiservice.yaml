@@ -30,13 +30,13 @@ metadata:
     app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
   annotations:
-    cert-manager.io/inject-ca-from: cocoon-sandbox-system/sandbox-apiserver-serving
+    cert-manager.io/inject-ca-from: sandbox-system/sandbox-apiserver-serving
 spec:
   group: agents.x-k8s.io
   version: v1beta1
   service:
     name: sandbox-apiserver
-    namespace: cocoon-sandbox-system
+    namespace: sandbox-system
     port: 443
   groupPriorityMinimum: 1000
   versionPriority: 15

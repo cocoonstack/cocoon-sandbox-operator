@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	webhookSecretName = "cocoon-sandbox-webhook-certs"
+	webhookSecretName = "sandbox-webhook-certs"
 	certValidity      = 365 * 24 * time.Hour
 
 	caCertKey     = "ca.crt"
@@ -91,7 +91,7 @@ func issueSelfSignedPair(serviceName, namespace, clusterDomain string) (caPEM, s
 	}
 	caTemplate := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "cocoon-sandbox-conversion-webhook-ca"},
+		Subject:               pkix.Name{CommonName: "sandbox-conversion-webhook-ca"},
 		NotBefore:             time.Now().Add(-1 * time.Hour),
 		NotAfter:              time.Now().Add(certValidity),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,

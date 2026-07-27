@@ -20,7 +20,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: sandbox-apiserver
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
 roleRef:
   kind: ClusterRole
   name: system:auth-delegator
@@ -38,7 +38,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: sandbox-apiserver
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
 roleRef:
   kind: Role
   name: extension-apiserver-authentication-reader
@@ -92,7 +92,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: sandbox-apiserver
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
 roleRef:
   kind: ClusterRole
   name: sandbox-apiserver-inventory-reader
@@ -106,7 +106,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: sandbox-apiserver-leader-election
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
@@ -136,14 +136,14 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: sandbox-apiserver-leader-election
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
 subjects:
 - kind: ServiceAccount
   name: sandbox-apiserver
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
 roleRef:
   kind: Role
   name: sandbox-apiserver-leader-election

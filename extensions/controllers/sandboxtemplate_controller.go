@@ -50,7 +50,7 @@ type SandboxTemplateReconciler struct {
 
 // defaultRouterNamespace is used when RouterNamespace is unset, matching the
 // operator's default install namespace.
-const defaultRouterNamespace = "cocoon-sandbox-system"
+const defaultRouterNamespace = "sandbox-system"
 
 //+kubebuilder:rbac:groups=extensions.agents.x-k8s.io,resources=sandboxtemplates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=extensions.agents.x-k8s.io,resources=sandboxtemplates/finalizers,verbs=get;update;patch

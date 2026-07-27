@@ -24,7 +24,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: sandbox-apiserver
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver

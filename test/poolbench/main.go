@@ -47,7 +47,7 @@ var (
 	out       = flag.String("out", "/tmp/poolbench.json", "results json")
 	sbRuntime = flag.String("runtime", "standard", "standard|vk-cocoon (vk-cocoon = real MicroVM)")
 	imageFlag = flag.String("image", image, "sandbox container/VM image")
-	nodeSelKV = flag.String("node-selector", "cocoon-sandbox.io/schedulable=true", "pod nodeSelector key=value")
+	nodeSelKV = flag.String("node-selector", "sandbox.cocoonstack.io/schedulable=true", "pod nodeSelector key=value")
 	cpuReq    = flag.String("cpu", "10m", "cpu request")
 	memReq    = flag.String("mem", "16Mi", "memory request")
 	snapPol   = flag.String("snapshot-policy", "", "cocoonset.cocoonstack.io/snapshot-policy (never for churn)")

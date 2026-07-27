@@ -16,7 +16,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: sandbox-apiserver
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver
@@ -26,7 +26,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sandbox-apiserver
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app.kubernetes.io/name: sandbox-apiserver
     app.kubernetes.io/component: aggregated-apiserver

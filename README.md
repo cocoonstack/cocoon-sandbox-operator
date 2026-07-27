@@ -173,7 +173,7 @@ Helm:
 
 ```bash
 helm upgrade --install sandbox-operator ./helm \
-  --namespace cocoon-sandbox-system --create-namespace \
+  --namespace sandbox-system --create-namespace \
   --set image.tag=<version>
 ```
 

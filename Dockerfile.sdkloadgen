@@ -2,7 +2,7 @@
 
 # Image for cmd/sandbox-sdk-loadgen, the persistent-client create-latency
 # benchmark that drives the writable aggregated apiserver (see deploy/loadgen-sdk/).
-#   docker build -f Dockerfile.sdkloadgen -t <registry>/cocoon-sandbox-sdk-loadgen:<tag> .
+#   docker build -f Dockerfile.sdkloadgen -t <registry>/sandbox-sdk-loadgen:<tag> .
 
 FROM --platform=$BUILDPLATFORM golang:1.26.5 AS builder
 

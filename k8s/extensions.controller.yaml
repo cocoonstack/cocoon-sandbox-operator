@@ -3,7 +3,7 @@ kind: Deployment
 apiVersion: apps/v1
 metadata:
   name: sandbox-operator
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
   labels:
     app: sandbox-operator
 spec:
@@ -41,5 +41,5 @@ spec:
       volumes:
       - name: config-volume
         configMap:
-          name: cocoon-sandbox-config
+          name: sandbox-config
           optional: true

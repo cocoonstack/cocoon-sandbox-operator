@@ -53,7 +53,7 @@ in `helm/README.md`). Because Helm does not own them, they never raise the
 `invalid ownership metadata` error.
 
 The **templated** shared resources do carry Helm ownership: the install Namespace
-`cocoon-sandbox-system`, the `sandbox-operator` ServiceAccount, ClusterRole,
+`sandbox-system`, the `sandbox-operator` ServiceAccount, ClusterRole,
 ClusterRoleBinding, and the operator/webhook Services. If a prior MindOS install
 already created any object with one of these names (most likely the Namespace),
 the first `helm upgrade --install` aborts with
@@ -64,14 +64,14 @@ it one of these ways:
   objects; or
 - Pre-stamp the colliding objects before installing:
   ```
-  for obj in namespace/cocoon-sandbox-system \
+  for obj in namespace/sandbox-system \
              serviceaccount/sandbox-operator \
              clusterrole/sandbox-operator \
              clusterrolebinding/sandbox-operator; do
-    kubectl -n cocoon-sandbox-system annotate "$obj" \
+    kubectl -n sandbox-system annotate "$obj" \
       meta.helm.sh/release-name=sandbox-operator \
-      meta.helm.sh/release-namespace=cocoon-sandbox-system --overwrite
-    kubectl -n cocoon-sandbox-system label "$obj" \
+      meta.helm.sh/release-namespace=sandbox-system --overwrite
+    kubectl -n sandbox-system label "$obj" \
       app.kubernetes.io/managed-by=Helm --overwrite
   done
   ```

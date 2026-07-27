@@ -187,7 +187,7 @@ func (r *CocoonSandboxController) claim(ctx context.Context, sb *cocoonsandboxv1
 		return fmt.Errorf("sandboxd claim returned incomplete handle")
 	}
 	ownerAddr := firstNonEmpty(claim.OwnerAddr, dialedAddr, addr)
-	secretName := sb.Name + "-cocoon-sandbox-token"
+	secretName := sb.Name + "-sandbox-token"
 	if err := r.upsertTokenSecret(ctx, sb, secretName, claim.Token); err != nil {
 		return r.releaseFailedClaim(ctx, ownerAddr, claim.ID, claim.Token, fmt.Errorf("upsert token Secret: %w", err))
 	}

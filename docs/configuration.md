@@ -38,8 +38,8 @@ was measured with, so an out-of-box install reproduces the published numbers.
 - `--leader-election-namespace` (auto-detected when empty)
 - `--webhook-port` (9443)
 - `--webhook-cert-dir` (`/tmp/k8s-webhook-server/serving-certs`)
-- `--webhook-service-name` (`cocoon-sandbox-webhook-service`)
-- `--webhook-namespace` (`cocoon-sandbox-system`)
+- `--webhook-service-name` (`sandbox-webhook-service`)
+- `--webhook-namespace` (`sandbox-system`)
 - `--manage-webhook-certs` (`true`)
 
 When `--manage-webhook-certs=true`, the operator creates serving certificates
@@ -64,7 +64,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sandbox-operator
-  namespace: cocoon-sandbox-system
+  namespace: sandbox-system
 spec:
   template:
     spec:
