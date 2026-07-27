@@ -111,30 +111,6 @@ func (c *Client) Wake(ctx context.Context, id string) error {
 	return c.sandboxVerb(ctx, id, "wake")
 }
 
-// sandboxVerb posts a body-less sandbox-scoped verb and expects 204.
-func (c *Client) sandboxVerb(ctx context.Context, id, verb string) error {
-	if id == "" {
-		return fmt.Errorf("sandboxd: %s requires a sandbox id", verb)
-	}
-	u := c.baseURL + "/v1/sandboxes/" + url.PathEscape(id) + "/" + verb
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
-	if err != nil {
-		return err
-	}
-	c.authenticate(req, c.token)
-
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return fmt.Errorf("sandboxd: %s: %w", verb, err)
-	}
-	defer drainAndClose(resp)
-
-	if resp.StatusCode != http.StatusNoContent {
-		return statusError(resp)
-	}
-	return nil
-}
-
 // Fork performs POST /v1/sandboxes/{id}/fork, branching the sandbox into count
 // children. The parent is checkpointed in place and keeps running; each child
 // is a fresh claim with its own id and lease.
@@ -247,13 +223,46 @@ func (c *Client) Sandboxes(ctx context.Context) ([]SandboxSummary, error) {
 	return out.Sandboxes, err
 }
 
-// postJSON sends body as JSON and decodes a 2xx reply into out.
+// sandboxVerb posts a body-less sandbox-scoped verb and expects 204.
+func (c *Client) sandboxVerb(ctx context.Context, id, verb string) error {
+	if id == "" {
+		return fmt.Errorf("sandboxd: %s requires a sandbox id", verb)
+	}
+	u := c.baseURL + "/v1/sandboxes/" + url.PathEscape(id) + "/" + verb
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	if err != nil {
+		return err
+	}
+	c.authenticate(req, c.token)
+
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("sandboxd: %s: %w", verb, err)
+	}
+	defer drainAndClose(resp)
+
+	if resp.StatusCode != http.StatusNoContent {
+		return statusError(resp)
+	}
+	return nil
+}
+
+// postJSON sends body as JSON via POST and decodes a 2xx reply into out.
 func (c *Client) postJSON(ctx context.Context, path string, body, out any) error {
+	return c.sendJSON(ctx, http.MethodPost, path, body, out)
+}
+
+// putJSON sends body as JSON via PUT and decodes a 2xx reply into out.
+func (c *Client) putJSON(ctx context.Context, path string, body, out any) error {
+	return c.sendJSON(ctx, http.MethodPut, path, body, out)
+}
+
+func (c *Client) sendJSON(ctx context.Context, method, path string, body, out any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("sandboxd: encode %s: %w", path, err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}

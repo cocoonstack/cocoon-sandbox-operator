@@ -94,16 +94,11 @@ func sandboxOpenAPIDefinitions(ref openapicommon.ReferenceCallback) map[string]o
 		sandboxDefPrefix + "Sandbox":     sandbox,
 		sandboxDefPrefix + "SandboxList": list,
 	}
-	// The action subresources (sandboxes/pause, /resume, /fork, /snapshot)
-	// exchange their own request and reply types. Every type reachable from a
-	// served resource needs a model here or InstallAPIGroup fails outright with
-	// "cannot find model definition for ...TypeMeta" — the subresource bodies
-	// embed metav1.TypeMeta, and openapinamer resolves them through this map,
-	// not through the Scheme.
-	// The action bodies embed metav1.TypeMeta, and the definition builder walks
-	// embedded field types looking for a model. Without this entry it aborts
-	// the whole group install with "cannot find model definition for
-	// ...meta.v1.TypeMeta" — a crash loop on rollout, not a degraded feature.
+	// The action-subresource bodies embed metav1.TypeMeta, and the definition
+	// builder walks embedded field types through this map, not the Scheme.
+	// Without this entry it aborts the whole group install with "cannot find
+	// model definition for ...meta.v1.TypeMeta" — a crash loop on rollout, not
+	// a degraded feature.
 	typeMeta := openapicommon.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{

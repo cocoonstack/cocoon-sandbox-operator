@@ -179,6 +179,22 @@ func (o *options) serverConfig() (*genericapiserver.Config, error) {
 	return cfg, nil
 }
 
+// startSidecars launches the optional in-process components that share the
+// apiserver's inventory cache: the warm-pool driver and the e2b REST surface.
+func (o *options) startSidecars(ctx context.Context, restCfg *restclient.Config, token string, store scale.SandboxStore, invSource scale.InventorySource) error {
+	if o.WarmPoolDriver {
+		if err := startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval); err != nil {
+			return err
+		}
+	}
+	if o.E2BAPI {
+		if err := startE2BServer(ctx, o, store, invSource); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func run() error {
 	o := newOptions()
 	fs := pflag.NewFlagSet("sandbox-apiserver", pflag.ExitOnError)
@@ -216,15 +232,6 @@ func run() error {
 		scale.WithClaimRouting(token, scale.NewSandboxdClientFactory()),
 	)
 
-	// The SandboxWarmPool driver is the control-plane surface for warm capacity:
-	// it reconciles official SandboxWarmPool CRs into node-local sandboxd pool
-	// targets and writes their status back from live inventory. It runs in THIS
-	// process alongside the NodeInventory cache — one component polls node state
-	// and writes back CR status. It is pool-level (O(pools+nodes)); there is no
-	// per-sandbox reconcile, so the apiserver never carries per-sandbox load.
-	// The e2b-compatible surface is a translation layer over the same store, on
-	// its own listener: an e2b SDK Create becomes the identical node-local claim,
-	// and what it creates stays visible to `kubectl get sandboxes`.
 	if err = o.startSidecars(ctx, restCfg, token, store, invSource); err != nil {
 		return err
 	}
@@ -288,22 +295,6 @@ func startInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache
 // in under a second). Leader election makes exactly one of the apiserver replicas
 // drive the pools. The manager's own metrics/health servers are disabled; the
 // aggregated apiserver owns the serving port.
-// startSidecars launches the optional in-process components that share the
-// apiserver's inventory cache: the warm-pool driver and the e2b REST surface.
-func (o *options) startSidecars(ctx context.Context, restCfg *restclient.Config, token string, store scale.SandboxStore, invSource scale.InventorySource) error {
-	if o.WarmPoolDriver {
-		if err := startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval); err != nil {
-			return err
-		}
-	}
-	if o.E2BAPI {
-		if err := startE2BServer(ctx, o, store, invSource); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token string, interval time.Duration) error {
 	scheme := runtime.NewScheme()
 	if err := extv1beta1.AddToScheme(scheme); err != nil {

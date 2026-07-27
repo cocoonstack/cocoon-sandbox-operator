@@ -3,7 +3,6 @@ package apiserver
 import (
 	"context"
 	"fmt"
-	"net"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -38,16 +37,6 @@ const (
 	NetAnnotation = "sandbox.cocoonstack.io/net"
 )
 
-// sandboxREST is the aggregated-apiserver storage for sandboxes.agents.x-k8s.io.
-// It is backed by a scale.SandboxStore (scatter-gather over node inventory), NOT
-// by the etcd-backed generic registry — so List/Get/Watch are synthesized from
-// live node state and Create/Delete are synchronous node-local claim/release; no
-// per-sandbox object ever exists in etcd.
-type sandboxREST struct {
-	store          scale.SandboxStore
-	tableConvertor rest.TableConvertor
-}
-
 // The verb set an aggregated, scatter-gather resource implements: the read triad
 // plus a node-local claim (Create) and release (GracefulDeleter).
 var (
@@ -62,6 +51,16 @@ var (
 	_ rest.SingularNameProvider = (*sandboxREST)(nil)
 )
 
+// sandboxREST is the aggregated-apiserver storage for sandboxes.agents.x-k8s.io.
+// It is backed by a scale.SandboxStore (scatter-gather over node inventory), NOT
+// by the etcd-backed generic registry — so List/Get/Watch are synthesized from
+// live node state and Create/Delete are synchronous node-local claim/release; no
+// per-sandbox object ever exists in etcd.
+type sandboxREST struct {
+	store          scale.SandboxStore
+	tableConvertor rest.TableConvertor
+}
+
 // NewSandboxREST builds the sandboxes REST storage over store.
 func NewSandboxREST(store scale.SandboxStore) rest.Storage {
 	return &sandboxREST{
@@ -70,34 +69,24 @@ func NewSandboxREST(store scale.SandboxStore) rest.Storage {
 	}
 }
 
-// New returns an empty Sandbox for the request pipeline.
 func (r *sandboxREST) New() runtime.Object { return &sandboxv1beta1.Sandbox{} }
 
-// NewList returns an empty SandboxList for the request pipeline.
 func (r *sandboxREST) NewList() runtime.Object { return &sandboxv1beta1.SandboxList{} }
 
-// Destroy releases resources; the store is stateless so this is a no-op.
 func (r *sandboxREST) Destroy() {}
 
-// NamespaceScoped reports that sandboxes are namespaced, so RBAC and
-// `kubectl get sandboxes -n <ns>` scope exactly as for any namespaced resource.
 func (r *sandboxREST) NamespaceScoped() bool { return true }
 
-// GetSingularName returns the singular resource name for discovery.
 func (r *sandboxREST) GetSingularName() string { return "sandbox" }
 
-// List scatter-gathers node inventory into a SandboxList, honoring the request
-// namespace and label/field selectors.
 func (r *sandboxREST) List(ctx context.Context, options *metainternalversion.ListOptions) (runtime.Object, error) {
 	return r.store.List(ctx, toScaleListOptions(ctx, options))
 }
 
-// Get routes to the owning node for name in the request namespace.
 func (r *sandboxREST) Get(ctx context.Context, name string, _ *metav1.GetOptions) (runtime.Object, error) {
 	return r.store.Get(ctx, genericapirequest.NamespaceValue(ctx), name)
 }
 
-// Watch merges per-node inventory streams into one Sandbox watch.
 func (r *sandboxREST) Watch(ctx context.Context, options *metainternalversion.ListOptions) (watch.Interface, error) {
 	return r.store.Watch(ctx, toScaleListOptions(ctx, options))
 }
@@ -186,7 +175,6 @@ func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation 
 	return sb, true, nil
 }
 
-// ConvertToTable renders the default Name/Age table for `kubectl get`.
 func (r *sandboxREST) ConvertToTable(ctx context.Context, object runtime.Object, tableOptions runtime.Object) (*metav1.Table, error) {
 	return r.tableConvertor.ConvertToTable(ctx, object, tableOptions)
 }
@@ -238,7 +226,7 @@ func synthesizeClaimedSandbox(namespace, name string, in *sandboxv1beta1.Sandbox
 	}
 	out.Status = sandboxv1beta1.SandboxStatus{
 		NodeName: a.Node,
-		PodIPs:   addressHosts(a.Address),
+		PodIPs:   scale.AddressIPs(a.Address),
 	}
 	apimeta.SetStatusCondition(&out.Status.Conditions, metav1.Condition{
 		Type:    string(sandboxv1beta1.SandboxConditionReady),
@@ -247,16 +235,4 @@ func synthesizeClaimedSandbox(namespace, name string, in *sandboxv1beta1.Sandbox
 		Message: fmt.Sprintf("warm sandbox %q delivered by node %q", a.SandboxName, a.Node),
 	})
 	return out
-}
-
-// addressHosts strips the port from a host:port connection address, yielding the
-// pod IP list on the synthesized status.
-func addressHosts(addr string) []string {
-	if addr == "" {
-		return nil
-	}
-	if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
-		return []string{host}
-	}
-	return []string{addr}
 }

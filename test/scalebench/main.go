@@ -98,7 +98,7 @@ func warmSandbox(idx int, poolHash, tmplHash string, poolUID types.UID) *sandbox
 				Kind:       "SandboxWarmPool",
 				Name:       poolName,
 				UID:        poolUID,
-				Controller: ptrTrue(),
+				Controller: new(true),
 			}},
 		},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
@@ -112,8 +112,6 @@ func warmSandbox(idx int, poolHash, tmplHash string, poolUID types.UID) *sandbox
 		}}},
 	}
 }
-
-func ptrTrue() *bool { b := true; return &b }
 
 func claim(idx int) *extv1beta1.SandboxClaim {
 	return &extv1beta1.SandboxClaim{
@@ -186,7 +184,7 @@ func measureFast(n int) ([]float64, int) {
 		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: cl.Name, Namespace: ns}}
 		start := time.Now()
 		ok := false
-		for pass := 0; pass < *maxPasses; pass++ {
+		for range *maxPasses {
 			if _, err := r.Reconcile(ctx, req); err != nil {
 				break
 			}
@@ -248,7 +246,7 @@ func adoptViaList(ctx context.Context, fc ctrlclient.Client, cl *extv1beta1.Sand
 			Kind:       "SandboxClaim",
 			Name:       cl.Name,
 			UID:        cl.UID,
-			Controller: ptrTrue(),
+			Controller: new(true),
 		}}
 		if err := fc.Patch(ctx, sb, ctrlclient.MergeFrom(orig)); err != nil {
 			continue // raced; try next candidate

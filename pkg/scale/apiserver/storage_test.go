@@ -90,10 +90,6 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	return f.releaseErr
 }
 
-func deleteCtx(ns string) context.Context {
-	return genericapirequest.WithNamespace(context.Background(), ns)
-}
-
 // The lifecycle verbs are not exercised by these tests; they satisfy the
 // SandboxStore contract so the fake stays a drop-in.
 func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
@@ -122,4 +118,8 @@ func (f *fakeStore) Promote(context.Context, string, string, string) (scale.Pool
 
 func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
 	return scale.SandboxStats{}, nil
+}
+
+func deleteCtx(ns string) context.Context {
+	return genericapirequest.WithNamespace(context.Background(), ns)
 }

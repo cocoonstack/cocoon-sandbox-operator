@@ -65,6 +65,27 @@ func NewSandboxdFactory() ClientFactory {
 	return func(addr, token string) PoolSetter { return sandboxd.New("http://"+addr, token) }
 }
 
+// Options configures a Driver.
+type Options struct {
+	Interval time.Duration
+	Log      logr.Logger
+}
+
+// nodeView is one schedulable node: its name, sandboxd address, and current
+// per-pool warm counts (for status write-back).
+type nodeView struct {
+	name   string
+	addr   string
+	warmBy map[scale.PoolKey]int
+}
+
+// desiredPool is a resolved SandboxWarmPool: its key and per-node target.
+type desiredPool struct {
+	nn      types.NamespacedName
+	key     scale.PoolKey
+	targets map[string]int
+}
+
 // Driver reconciles SandboxWarmPool CRs into node-local sandboxd warm targets.
 type Driver struct {
 	// kube lists SandboxWarmPools, gets SandboxTemplates, and writes pool status.
@@ -77,12 +98,6 @@ type Driver struct {
 
 	interval time.Duration
 	log      logr.Logger
-}
-
-// Options configures a Driver.
-type Options struct {
-	Interval time.Duration
-	Log      logr.Logger
 }
 
 // New builds a Driver. token empty leaves the driver fail-closed (it logs and
@@ -130,21 +145,6 @@ func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(d)
 }
 
-// nodeView is one schedulable node: its name, sandboxd address, and current
-// per-pool warm counts (for status write-back).
-type nodeView struct {
-	name   string
-	addr   string
-	warmBy map[scale.PoolKey]int
-}
-
-// desiredPool is a resolved SandboxWarmPool: its key and per-node target.
-type desiredPool struct {
-	nn      types.NamespacedName
-	key     scale.PoolKey
-	targets map[string]int
-}
-
 // reconcileOnce is the whole loop: resolve pools, distribute targets, PUT every
 // node's full pool set, write pool status from the warm those PUTs report back.
 func (d *Driver) reconcileOnce(ctx context.Context) error {
@@ -158,6 +158,7 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 	}
 
 	desired := make([]desiredPool, 0, len(pools.Items))
+	resolved := make(map[types.NamespacedName]scale.PoolKey, len(pools.Items))
 	for i := range pools.Items {
 		p := &pools.Items[i]
 		key, rerr := d.poolKey(ctx, p)
@@ -166,12 +167,14 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 			d.writeStatus(ctx, p, nodes, key) // status still reflects live warm (0 target)
 			continue
 		}
+		nn := types.NamespacedName{Namespace: p.Namespace, Name: p.Name}
+		resolved[nn] = key
 		replicas := int32(1)
 		if p.Spec.Replicas != nil {
 			replicas = *p.Spec.Replicas
 		}
 		desired = append(desired, desiredPool{
-			nn:      types.NamespacedName{Namespace: p.Namespace, Name: p.Name},
+			nn:      nn,
 			key:     key,
 			targets: distribute(replicas, nodes),
 		})
@@ -184,8 +187,8 @@ func (d *Driver) reconcileOnce(ctx context.Context) error {
 	// reflects what the nodes report now).
 	for i := range pools.Items {
 		p := &pools.Items[i]
-		key, kerr := d.poolKey(ctx, p)
-		if kerr != nil {
+		key, ok := resolved[types.NamespacedName{Namespace: p.Namespace, Name: p.Name}]
+		if !ok {
 			continue
 		}
 		d.writeStatus(ctx, p, nodes, key)
@@ -269,7 +272,6 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 				cmp.Compare(a.Size, b.Size),
 			)
 		})
-		idx := i
 		sem <- struct{}{}
 		wg.Go(func() {
 			defer func() { <-sem }()
@@ -282,27 +284,15 @@ func (d *Driver) applyToNodes(ctx context.Context, nodes []nodeView, desired []d
 				return
 			}
 			// The PUT response carries this node's live per-pool warm, so adopt it
-			// as the status source. NodeInventory lags by up to one publish
-			// interval (30s by default) and is read before this apply; the response
-			// is current as of this tick, which is what makes the status sampling
-			// period equal to the resync interval instead of interval+publish.
-			// A node whose PUT failed keeps its inventory-derived counts.
-			// Only this goroutine touches nodes[idx], so no lock is needed.
-			nodes[idx].warmBy = warmByFrom(info)
+			// as the status source: NodeInventory lags by up to one publish
+			// interval, which would make the status sampling period
+			// interval+publish instead of the resync interval. A node whose PUT
+			// failed keeps its inventory-derived counts. Only this goroutine
+			// touches nodes[i], so no lock is needed.
+			nodes[i].warmBy = warmByFrom(info)
 		})
 	}
 	wg.Wait()
-}
-
-// warmByFrom indexes a sandboxd PUT /v1/pools response by pool key. A key the
-// response omits is genuinely 0 warm — sandboxd echoes back every pool it holds,
-// and one it no longer holds is drained.
-func warmByFrom(info *sandboxd.NodeInfo) map[scale.PoolKey]int {
-	warmBy := make(map[scale.PoolKey]int, len(info.Pools))
-	for _, p := range info.Pools {
-		warmBy[scale.PoolKey{Template: p.Key.Template, Net: p.Key.Net, Size: p.Key.Size}] = p.Warm
-	}
-	return warmBy
 }
 
 // writeStatus updates a SandboxWarmPool's status.replicas/readyReplicas from the
@@ -326,6 +316,17 @@ func (d *Driver) writeStatus(ctx context.Context, p *extv1beta1.SandboxWarmPool,
 	if err := d.kube.Status().Update(ctx, fresh); err != nil {
 		d.log.V(1).Info("warm-pool status update deferred", "pool", p.Namespace+"/"+p.Name, "err", err.Error())
 	}
+}
+
+// warmByFrom indexes a sandboxd PUT /v1/pools response by pool key. A key the
+// response omits is genuinely 0 warm — sandboxd echoes back every pool it holds,
+// and one it no longer holds is drained.
+func warmByFrom(info *sandboxd.NodeInfo) map[scale.PoolKey]int {
+	warmBy := make(map[scale.PoolKey]int, len(info.Pools))
+	for _, p := range info.Pools {
+		warmBy[scale.PoolKey{Template: p.Key.Template, Net: p.Key.Net, Size: p.Key.Size}] = p.Warm
+	}
+	return warmBy
 }
 
 // distribute spreads total warm targets evenly across nodes (base + remainder to

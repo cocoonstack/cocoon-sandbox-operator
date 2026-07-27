@@ -135,7 +135,7 @@ func main() {
 		// Sampling window: catch peak seat use / queue depth while vk nodes LIST.
 		peakInqueue, peakInUse := 0.0, 0.0
 		var last map[string]float64
-		for k := 0; k < *windowN; k++ {
+		for range *windowN {
 			s := scrape(ctx)
 			peakInqueue = max(peakInqueue, s["vke_inqueue"])
 			peakInUse = max(peakInUse, s["vke_inuse"])
@@ -237,8 +237,6 @@ func main() {
 		os.Exit(1)
 	}
 }
-
-// ---- fixtures ----
 
 func ensureNS(ctx context.Context) {
 	_ = cl.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: *ns, Labels: map[string]string{runLabel: runVal}}})
@@ -375,8 +373,6 @@ func prodPods(ctx context.Context, namespace string, hosts []string) int {
 	return n
 }
 
-// ---- client LIST latency ----
-
 type latSamples struct {
 	ms    []float64
 	count int
@@ -384,7 +380,7 @@ type latSamples struct {
 
 func listLatency(ctx context.Context, samples int, do func() (int, error)) latSamples {
 	var s latSamples
-	for i := range samples {
+	for range samples {
 		start := time.Now()
 		c, err := do()
 		d := float64(time.Since(start).Microseconds()) / 1000
@@ -412,8 +408,6 @@ func listPods(ctx context.Context) (int, error) {
 	}
 	return len(pl.Items), nil
 }
-
-// ---- apiserver /metrics scrape ----
 
 // scrape pulls /metrics once and aggregates the LIST request-duration sums and
 // the vk LIST priority level's APF state.
@@ -487,8 +481,6 @@ func deltaAvgMs(prev, cur map[string]float64, series string) float64 {
 	}
 	return (cur[sumK] - prev[sumK]) / dc * 1000
 }
-
-// ---- stats + helpers ----
 
 func msP(s latSamples, p float64) float64 { return pct(s.ms, p) }
 

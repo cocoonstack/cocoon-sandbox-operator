@@ -204,8 +204,6 @@ func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
 	})
 }
 
-// --- test doubles ------------------------------------------------------------
-
 // fakeSandboxd is an httptest-backed sandboxd. It serves POST /v1/claim (200 with
 // a fresh id, unless forceStatus overrides) and POST /v1/sandboxes/{id}/release
 // (204), counting both so tests can assert the VM-destroy path.
@@ -314,8 +312,6 @@ func getClaim(t *testing.T, c client.Client, name string) *extv1beta1.SandboxCla
 	require.NoError(t, c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: name}, cur))
 	return cur
 }
-
-// --- tests -------------------------------------------------------------------
 
 func findCond(c *extv1beta1.SandboxClaim, t string) *metav1.Condition {
 	for i := range c.Status.Conditions {

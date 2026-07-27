@@ -121,11 +121,6 @@ func run(ctx context.Context, o options) error {
 	return nil
 }
 
-// ---------------------------------------------------------------- Kubernetes
-
-// newClient builds a controller-runtime client that knows this operator's
-// types. Any Kubernetes client works — client-go, the dynamic client, or
-// kubectl; nothing here is specific to controller-runtime.
 func loadConfig(kubeconfig string) (*rest.Config, error) {
 	if kubeconfig == "" {
 		return rest.InClusterConfig()
@@ -144,6 +139,9 @@ func newScheme() (*runtime.Scheme, error) {
 	return scheme, nil
 }
 
+// newClient builds a controller-runtime client that knows this operator's
+// types. Any Kubernetes client works — client-go, the dynamic client, or
+// kubectl; nothing here is specific to controller-runtime.
 func newClient(kubeconfig string, scheme *runtime.Scheme) (client.Client, error) {
 	cfg, err := loadConfig(kubeconfig)
 	if err != nil {
@@ -306,8 +304,6 @@ func newRESTClient(kubeconfig string, scheme *runtime.Scheme) (rest.Interface, e
 	cfg.NegotiatedSerializer = serializer.NewCodecFactory(scheme).WithoutConversion()
 	return rest.RESTClientFor(cfg)
 }
-
-// ----------------------------------------------------------------- e2b REST
 
 func runE2B(ctx context.Context, o options) error {
 	section("e2b-compatible REST API")
@@ -555,8 +551,6 @@ func (e *e2bClient) status(ctx context.Context, method, path string, body any) (
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode, nil
 }
-
-// -------------------------------------------------------------------- output
 
 func section(name string) { fmt.Printf("\n=== %s ===\n", name) }
 

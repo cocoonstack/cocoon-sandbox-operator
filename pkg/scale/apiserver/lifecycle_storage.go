@@ -22,6 +22,13 @@ import (
 // Sandbox schema untouched, which is what lets an unmodified upstream
 // agent-sandbox client keep working against this server.
 
+var (
+	_ rest.Storage                  = &lifecycleREST{}
+	_ rest.Scoper                   = &lifecycleREST{}
+	_ rest.NamedCreater             = &lifecycleREST{}
+	_ rest.GroupVersionKindProvider = &lifecycleREST{}
+)
+
 // lifecycleREST is the shared plumbing of the action subresources: resolve the
 // named sandbox through the store, then run one verb against its owning node.
 type lifecycleREST struct {
@@ -31,13 +38,6 @@ type lifecycleREST struct {
 	// verb performs the action and returns the response object.
 	verb func(ctx context.Context, store scale.SandboxStore, sb *sandboxv1beta1.Sandbox, opts runtime.Object) (runtime.Object, error)
 }
-
-var (
-	_ rest.Storage                  = &lifecycleREST{}
-	_ rest.Scoper                   = &lifecycleREST{}
-	_ rest.NamedCreater             = &lifecycleREST{}
-	_ rest.GroupVersionKindProvider = &lifecycleREST{}
-)
 
 func (r *lifecycleREST) New() runtime.Object { return r.newOptions() }
 
@@ -87,9 +87,6 @@ func (r *lifecycleREST) Create(
 	}
 	return r.verb(ctx, r.store, sb, obj)
 }
-
-// claimID reports the node-local claim id the store's verbs address.
-func claimID(sb *sandboxv1beta1.Sandbox) string { return sb.Annotations[ClaimIDAnnotation] }
 
 // NewSandboxPauseREST serves sandboxes/pause.
 func NewSandboxPauseREST(store scale.SandboxStore) rest.Storage {
@@ -176,3 +173,6 @@ func NewSandboxSnapshotREST(store scale.SandboxStore) rest.Storage {
 		},
 	}
 }
+
+// claimID reports the node-local claim id the store's verbs address.
+func claimID(sb *sandboxv1beta1.Sandbox) string { return sb.Annotations[ClaimIDAnnotation] }

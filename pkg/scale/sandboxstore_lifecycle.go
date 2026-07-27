@@ -7,11 +7,6 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 )
 
-// The lifecycle verbs route to the sandbox's owning node and write nothing:
-// like Claim and Release, they are synchronous node-local transactions, so the
-// control plane's storage stays O(pools+nodes) no matter how many sandboxes are
-// paused, forked, or checkpointed.
-
 // Pause hibernates a delivered sandbox on its owning node.
 func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	cl, err := s.nodeClient(ctx, node, "pause", id)

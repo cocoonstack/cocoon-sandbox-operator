@@ -149,7 +149,7 @@ func pct(xs []float64, p float64) float64 {
 func round4(f float64) float64 { return float64(int(f*10000)) / 10000 }
 
 // claimWaiter is the gateway surface the latency loop needs: Claim plus Wait to
-// drain async Bound records. *scale.NodeClaimGateway satisfies it structurally.
+// drain async Bound records. The value scale.NewGateway returns satisfies it.
 type claimWaiter interface {
 	Claim(ctx context.Context, req scale.ClaimRequest) (scale.Assignment, error)
 	Wait()

@@ -1,5 +1,5 @@
 // Package sandboxd is a small HTTP client for the node-local sandboxd warm-pool
-// daemon (see external/sandbox/docs/sandboxd-api.md). It uses only the standard
+// daemon (the sandbox repo's docs/sandboxd-api.md). It uses only the standard
 // library. The L2 ClaimGateway fronts one of these clients per node: Claim
 // transfers ownership of an already-running microVM in sub-millisecond time, and
 // Release destroys a sandbox's VM on owner-authorized teardown.
@@ -152,24 +152,23 @@ type PoolSpec struct {
 	Warm     int    `json:"warm"`
 }
 
+// NodePool is one pool's live state in a NodeInfo. Only the fields the
+// warm-pool driver reports on are decoded.
+type NodePool struct {
+	Key       PoolKey `json:"key"`
+	Warm      int     `json:"warm"`
+	Refilling int     `json:"refilling"`
+	Target    int     `json:"target"`
+	Golden    bool    `json:"golden"`
+}
+
 // NodeInfo is the PUT /v1/pools (and GET /v1/info) response: the node's live
-// per-pool warm state plus its lifecycle counters. Only the fields the warm-pool
-// driver reports on are decoded.
+// per-pool warm state plus its lifecycle counters.
 type NodeInfo struct {
-	Pools []struct {
-		Key struct {
-			Template string `json:"template"`
-			Net      string `json:"net"`
-			Size     string `json:"size"`
-		} `json:"key"`
-		Warm      int  `json:"warm"`
-		Refilling int  `json:"refilling"`
-		Target    int  `json:"target"`
-		Golden    bool `json:"golden"`
-	} `json:"pools"`
-	Claimed    int `json:"claimed"`
-	Hibernated int `json:"hibernated"`
-	Archived   int `json:"archived"`
+	Pools      []NodePool `json:"pools"`
+	Claimed    int        `json:"claimed"`
+	Hibernated int        `json:"hibernated"`
+	Archived   int        `json:"archived"`
 }
 
 // SetPools performs PUT /v1/pools, replacing this node's desired warm targets
@@ -180,31 +179,11 @@ func (c *Client) SetPools(ctx context.Context, pools []PoolSpec) (*NodeInfo, err
 	if pools == nil {
 		pools = []PoolSpec{}
 	}
-	body, err := json.Marshal(struct {
-		Pools []PoolSpec `json:"pools"`
-	}{Pools: pools})
-	if err != nil {
-		return nil, fmt.Errorf("sandboxd: encode pools: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/v1/pools", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	c.authenticate(req, c.token)
-
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("sandboxd: set pools: %w", err)
-	}
-	defer drainAndClose(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, statusError(resp)
-	}
 	var info NodeInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return nil, fmt.Errorf("sandboxd: decode pools response: %w", err)
+	if err := c.putJSON(ctx, "/v1/pools", struct {
+		Pools []PoolSpec `json:"pools"`
+	}{Pools: pools}, &info); err != nil {
+		return nil, err
 	}
 	return &info, nil
 }
@@ -222,7 +201,6 @@ func (c *Client) Release(ctx context.Context, id, token string) error {
 	if err != nil {
 		return err
 	}
-	// Release auth is the sandbox's own token, not the node api_token.
 	c.authenticate(req, token)
 
 	resp, err := c.hc.Do(req)
@@ -232,10 +210,7 @@ func (c *Client) Release(ctx context.Context, id, token string) error {
 	defer drainAndClose(resp)
 
 	switch resp.StatusCode {
-	case http.StatusNoContent:
-		return nil
-	case http.StatusNotFound:
-		// Already gone: the SDK treats a released/unknown sandbox as success.
+	case http.StatusNoContent, http.StatusNotFound:
 		return nil
 	default:
 		return statusError(resp)

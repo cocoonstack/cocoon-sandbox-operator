@@ -28,6 +28,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -161,6 +162,25 @@ type options struct {
 	loop              bool
 }
 
+// validateMode enforces the flags each run mode requires and settles the
+// derived ones. Cycle mode owns deletion itself, so per-create cleanup is off.
+func (o *options) validateMode() {
+	if o.waveSize > 0 {
+		if o.target <= 0 {
+			fatalf("--target is required and must be > 0 in cycle mode (got %d)", o.target)
+		}
+		if o.deleteConcurrency <= 0 {
+			fatalf("--delete-concurrency must be > 0 (got %d)", o.deleteConcurrency)
+		}
+		o.cleanup = false
+		return
+	}
+	if o.total <= 0 {
+		fatalf("--total is required and must be > 0 (got %d): this loadgen issues exactly --total creates and refuses to run unbounded", o.total)
+	}
+	o.concurrency = min(o.concurrency, o.total)
+}
+
 func main() {
 	var o options
 	flag.StringVar(&o.namespace, "namespace", "sandbox-sdk-loadgen", "namespace to create Sandboxes in")
@@ -259,6 +279,17 @@ func main() {
 	// Keep /metrics alive so the final histogram/counters remain scrapeable.
 	fmt.Println("run complete; serving /metrics until terminated")
 	<-context.Background().Done()
+}
+
+// runSummary is the end-of-run accounting printed to stdout.
+type runSummary struct {
+	issued, created, failed, released, leaked int64
+	elapsed                                   time.Duration
+}
+
+func (s runSummary) String() string {
+	return fmt.Sprintf("summary: issued=%d created=%d failed=%d released=%d leaked=%d elapsed=%s",
+		s.issued, s.created, s.failed, s.released, s.leaked, s.elapsed.Round(time.Millisecond))
 }
 
 // runCycles drives create-in-waves -> delete-all cycles until the context is
@@ -377,17 +408,6 @@ func sleepCtx(ctx context.Context, d time.Duration) {
 	}
 }
 
-// runSummary is the end-of-run accounting printed to stdout.
-type runSummary struct {
-	issued, created, failed, released, leaked int64
-	elapsed                                   time.Duration
-}
-
-func (s runSummary) String() string {
-	return fmt.Sprintf("summary: issued=%d created=%d failed=%d released=%d leaked=%d elapsed=%s",
-		s.issued, s.created, s.failed, s.released, s.leaked, s.elapsed.Round(time.Millisecond))
-}
-
 // run fans out o.concurrency workers. A worker RESERVES a slot from the shared
 // issue counter before each create, so across all workers exactly o.total
 // creates are issued — failures consume their slot and are not retried (a retry
@@ -426,29 +446,8 @@ func run(ctx context.Context, cl client.Client, o *options) runSummary {
 	return s
 }
 
-// createOne issues a single Create, records latency and outcome, and returns
-// the created object (for cleanup) or the error.
 // recordOutcome tallies one create attempt and, with --cleanup, its release. A
 // release that could not be confirmed counts as leaked, never as released.
-// validateMode enforces the flags each run mode requires and settles the
-// derived ones. Cycle mode owns deletion itself, so per-create cleanup is off.
-func (o *options) validateMode() {
-	if o.waveSize > 0 {
-		if o.target <= 0 {
-			fatalf("--target is required and must be > 0 in cycle mode (got %d)", o.target)
-		}
-		if o.deleteConcurrency <= 0 {
-			fatalf("--delete-concurrency must be > 0 (got %d)", o.deleteConcurrency)
-		}
-		o.cleanup = false
-		return
-	}
-	if o.total <= 0 {
-		fatalf("--total is required and must be > 0 (got %d): this loadgen issues exactly --total creates and refuses to run unbounded", o.total)
-	}
-	o.concurrency = min(o.concurrency, o.total)
-}
-
 func recordOutcome(ctx context.Context, cl client.Client, o *options, s *runSummary, sb *sandboxv1beta1.Sandbox, err error) {
 	if err != nil {
 		atomic.AddInt64(&s.failed, 1)
@@ -465,6 +464,8 @@ func recordOutcome(ctx context.Context, cl client.Client, o *options, s *runSumm
 	atomic.AddInt64(&s.leaked, 1)
 }
 
+// createOne issues a single Create, records latency and outcome, and returns
+// the created object (for cleanup) or the error.
 func createOne(ctx context.Context, cl client.Client, o *options, name string) (*sandboxv1beta1.Sandbox, error) {
 	sb := newSandbox(o.namespace, name, o.image)
 
@@ -582,7 +583,7 @@ func classify(err error) string {
 		return "throttled-429"
 	case apierrors.IsInternalError(err):
 		return "internal-500"
-	case apierrors.IsServerTimeout(err), apierrors.IsTimeout(err), err == context.DeadlineExceeded:
+	case apierrors.IsServerTimeout(err), apierrors.IsTimeout(err), errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
 	case apierrors.IsConflict(err), apierrors.IsAlreadyExists(err):
 		return "conflict"

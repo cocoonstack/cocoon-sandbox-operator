@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,6 +74,9 @@ var (
 	// ErrNoWarmCapacity lets the aggregated apiserver map an exhausted pool to a retryable 503 instead of writing an object.
 	ErrNoWarmCapacity = errors.New("scale: no node has warm capacity for the requested pool")
 )
+
+// IsNoWarmCapacity reports whether err means Claim found no warm node.
+func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }
 
 // InventorySource enumerates the per-node NodeInventory objects that back the
 // aggregated store. It is deliberately granular — a node enumeration plus a
@@ -160,6 +165,8 @@ func NewSandboxdClientFactory() SandboxdClientFactory {
 	}
 }
 
+var _ SandboxStore = (*scatterGatherStore)(nil)
+
 // scatterGatherStore is the concrete SandboxStore: List/Get/Watch synthesize
 // Sandbox objects from live NodeInventory rather than reading any per-sandbox
 // etcd object, and Create/Delete are node-local claim/release — exactly the
@@ -176,16 +183,6 @@ type scatterGatherStore struct {
 	sandboxdToken   string
 	sandboxdFactory SandboxdClientFactory
 }
-
-// Compile-time assertions for the L3 contracts.
-var (
-	_ SandboxStore     = (*scatterGatherStore)(nil)
-	_ InventorySource  = (*StaticInventorySource)(nil)
-	_ InventorySource  = (*ClientInventorySource)(nil)
-	_ InventoryApplier = (*StaticInventorySource)(nil)
-	_ InventoryApplier = (*ssaInventoryApplier)(nil)
-	_ runtime.Object   = (*NodeInventory)(nil)
-)
 
 // NewScatterGatherStore builds the aggregated store over src.
 func NewScatterGatherStore(src InventorySource, opts ...StoreOption) *scatterGatherStore {
@@ -283,9 +280,6 @@ func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*
 	return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), name)
 }
 
-// IsNoWarmCapacity reports whether err means Claim found no warm node.
-func IsNoWarmCapacity(err error) bool { return errors.Is(err, ErrNoWarmCapacity) }
-
 // Claim picks the node with the most warm capacity for pool and hands over one of
 // its already-running microVMs via that node's sandboxd, returning the assignment.
 // No per-sandbox object is written to etcd. It fails closed if claim routing is
@@ -332,21 +326,15 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 // claim routing is not configured. Callers must only reach this on owner-authorized
 // teardown (the delete-authorization contract); it never destroys a VM on pod state.
 func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error {
-	if s.sandboxdFactory == nil {
-		return fmt.Errorf("scale: claim routing not configured (call WithClaimRouting)")
-	}
 	if id == "" {
 		return fmt.Errorf("scale: release requires a claim id")
 	}
-	inv, err := s.src.NodeInventory(ctx, node)
+	cl, err := s.nodeClient(ctx, node, "release", id)
 	if err != nil {
-		return fmt.Errorf("scale: resolve node %q for release of %q: %w", node, id, err)
-	}
-	if inv.Address == "" {
-		return fmt.Errorf("scale: node %q advertises no sandboxd address to release %q", node, id)
+		return err
 	}
 	// The uniform fleet api_token authorizes release by id.
-	if err := s.sandboxdFactory(inv.Address, s.sandboxdToken).Release(ctx, id, s.sandboxdToken); err != nil {
+	if err := cl.Release(ctx, id, s.sandboxdToken); err != nil {
 		return fmt.Errorf("scale: sandboxd release of %q on node %q: %w", id, node, err)
 	}
 	return nil
@@ -380,47 +368,6 @@ func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) (
 	return out, nil
 }
 
-// pickPowerOfTwo samples two candidates and keeps the warmer one. Node inventory
-// is 5-30s stale, so always taking the global maximum funnels an entire burst onto
-// whichever node looked best in that snapshot; sampling spreads the burst while
-// still biasing toward warm capacity. A stale pick costs one gossip redirect.
-func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
-	if len(candidates) == 1 {
-		return candidates[0], 0
-	}
-	//nolint:gosec // load spreading, not a security decision
-	i := rand.IntN(len(candidates))
-	//nolint:gosec // load spreading, not a security decision
-	j := rand.IntN(len(candidates))
-	if candidates[j].warm > candidates[i].warm {
-		return candidates[j], j
-	}
-	return candidates[i], i
-}
-
-// poolCapacityMatches reports whether a node's advertised pool capacity serves the
-// requested pool key, normalizing the net/size defaults ("none"/"small") on both
-// sides so an unset axis matches its default-named pool.
-func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
-	return pc.Template == key.Template &&
-		normNet(pc.Net) == normNet(key.Net) &&
-		normSize(pc.Size) == normSize(key.Size)
-}
-
-func normNet(s string) string {
-	if s == "" {
-		return "none"
-	}
-	return s
-}
-
-func normSize(s string) string {
-	if s == "" {
-		return "small"
-	}
-	return s
-}
-
 // Watch merges per-node inventory into a single Sandbox event stream. This
 // minimal-correct implementation re-derives the fanned-out list on a slow cadence
 // and translates the diff into Added/Modified/Deleted events; a production
@@ -442,7 +389,6 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 		return w.send(ctx, watch.Event{Type: t, Object: sb})
 	}
 
-	// Initial synchronization: an Added for every currently-visible sandbox.
 	if list, err := s.List(ctx, opts); err != nil {
 		s.log.Error(err, "initial watch list failed")
 	} else {
@@ -521,6 +467,46 @@ func (s *scatterGatherStore) materialize(inv *NodeInventory, namespace string, l
 	return out
 }
 
+// AddressIPs strips the port from a "host:port" address, yielding the pod IP
+// list a synthesized Sandbox status carries. Shared with the aggregated
+// apiserver so both stamp identical PodIPs.
+func AddressIPs(addr string) []string {
+	if addr == "" {
+		return nil
+	}
+	if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
+		return []string{host}
+	}
+	return []string{addr}
+}
+
+// pickPowerOfTwo samples two candidates and keeps the warmer one. Node inventory
+// is 5-30s stale, so always taking the global maximum funnels an entire burst onto
+// whichever node looked best in that snapshot; sampling spreads the burst while
+// still biasing toward warm capacity. A stale pick costs one gossip redirect.
+func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
+	if len(candidates) == 1 {
+		return candidates[0], 0
+	}
+	//nolint:gosec // load spreading, not a security decision
+	i := rand.IntN(len(candidates))
+	//nolint:gosec // load spreading, not a security decision
+	j := rand.IntN(len(candidates))
+	if candidates[j].warm > candidates[i].warm {
+		return candidates[j], j
+	}
+	return candidates[i], i
+}
+
+// poolCapacityMatches reports whether a node's advertised pool capacity serves the
+// requested pool key, normalizing the net/size defaults on both sides so an unset
+// axis matches its default-named pool.
+func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
+	return pc.Template == key.Template &&
+		cmp.Or(pc.Net, NetDefault) == cmp.Or(key.Net, NetDefault) &&
+		cmp.Or(pc.Size, SizeClassSmall) == cmp.Or(key.Size, SizeClassSmall)
+}
+
 // parseSelectors turns the string selectors on ListOptions into matchers. Empty
 // strings become everything-matchers.
 func parseSelectors(opts ListOptions) (labels.Selector, fields.Selector, error) {
@@ -550,7 +536,7 @@ func entryToSandbox(node string, e InventoryEntry) *sandboxv1beta1.Sandbox {
 		},
 		Status: sandboxv1beta1.SandboxStatus{
 			NodeName: node,
-			PodIPs:   addressIPs(e.Address),
+			PodIPs:   AddressIPs(e.Address),
 			Conditions: []metav1.Condition{{
 				Type:    string(sandboxv1beta1.SandboxConditionReady),
 				Status:  readyStatus(e.Phase),
@@ -609,24 +595,13 @@ func readyReason(phase string) string {
 	return phase
 }
 
-// addressIPs strips the port from a host:port address, yielding the pod IP list.
-func addressIPs(addr string) []string {
-	if addr == "" {
-		return nil
-	}
-	if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
-		return []string{host}
-	}
-	return []string{addr}
-}
-
 // resourceVersionFor derives a deterministic, content-sensitive ResourceVersion
 // so watch can detect a Modified entry and clients see a stable version for an
 // unchanged one. It is opaque, as the API contract requires.
 func resourceVersionFor(ns, name string, e InventoryEntry) string {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address))
-	return fmt.Sprintf("%d", h.Sum64())
+	return strconv.FormatUint(h.Sum64(), 10)
 }
 
 func splitNamespacedName(s string) (namespace, name string) {
@@ -637,8 +612,6 @@ func splitNamespacedName(s string) (namespace, name string) {
 }
 
 func objKey(sb *sandboxv1beta1.Sandbox) string { return sb.Namespace + "/" + sb.Name }
-
-// --- Watch plumbing ----------------------------------------------------------
 
 // inventoryWatcher is a watch.Interface fed by the store's poll-diff goroutine.
 type inventoryWatcher struct {
@@ -676,8 +649,6 @@ func (w *inventoryWatcher) send(ctx context.Context, ev watch.Event) bool {
 		return false
 	}
 }
-
-// --- NodeInventory publisher (the O(nodes) write path) -----------------------
 
 // NodeLiveSource is a node's own live sandbox state — the sandboxd inventory /
 // L0 node-scoped cache — NOT a cluster-wide LIST. A lost NodeInventory object is
@@ -750,6 +721,8 @@ func (p *NodeInventoryPublisher) PublishPeriodically(ctx context.Context, interv
 	}
 }
 
+var _ InventoryApplier = (*ssaInventoryApplier)(nil)
+
 // ssaInventoryApplier is the production applier: it server-side-applies the
 // NodeInventory through a controller-runtime client, which resolves the resource
 // via its RESTMapper from the object's GVK — never a naive kind+"s"
@@ -775,8 +748,6 @@ func (a *ssaInventoryApplier) Apply(ctx context.Context, inv *NodeInventory) err
 	u := &unstructured.Unstructured{Object: raw}
 	u.SetGroupVersionKind(NodeInventoryGVK)
 	u.SetName(inv.Node)
-	// Server-side apply: the client resolves the GVR from the GVK via its
-	// RESTMapper (never a naive kind+"s").
 	ac := client.ApplyConfigurationFromUnstructured(u)
 	if err := a.c.Apply(ctx, ac, client.FieldOwner(a.fieldOwner), client.ForceOwnership); err != nil {
 		return fmt.Errorf("scale: server-side-apply node inventory: %w", err)
@@ -784,7 +755,10 @@ func (a *ssaInventoryApplier) Apply(ctx context.Context, inv *NodeInventory) err
 	return nil
 }
 
-// --- Static in-memory InventorySource (tests, bench, and the publish target) --
+var (
+	_ InventorySource  = (*StaticInventorySource)(nil)
+	_ InventoryApplier = (*StaticInventorySource)(nil)
+)
 
 // StaticInventorySource is an in-memory InventorySource that doubles as an
 // InventoryApplier: publishers Apply into it (the O(nodes) "etcd" writes) and the
@@ -842,12 +816,7 @@ func (s *StaticInventorySource) Remove(node string) {
 func (s *StaticInventorySource) ListNodes(_ context.Context) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	nodes := make([]string, 0, len(s.inv))
-	for n := range s.inv {
-		nodes = append(nodes, n)
-	}
-	slices.Sort(nodes)
-	return nodes, nil
+	return slices.Sorted(maps.Keys(s.inv)), nil
 }
 
 // NodeInventory returns a copy of one node's inventory, or an error if the node
@@ -880,7 +849,7 @@ func (s *StaticInventorySource) ApplyCount() int {
 	return s.applies
 }
 
-// --- Client-backed InventorySource (production read path) --------------------
+var _ InventorySource = (*ClientInventorySource)(nil)
 
 // ClientInventorySource is the production InventorySource: it reads NodeInventory
 // objects through a controller-runtime reader. Back it with a cache-fed reader

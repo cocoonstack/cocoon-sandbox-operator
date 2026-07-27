@@ -321,6 +321,36 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	return f.releaseErr
 }
 
+// The lifecycle verbs are not exercised by these tests; they satisfy the
+// SandboxStore contract so the fake stays a drop-in.
+func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
+
+func (f *fakeStore) Resume(context.Context, string, string) error { return nil }
+
+func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Snapshot, error) {
+	return scale.Snapshot{}, nil
+}
+
+func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }
+
+func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
+
+func (f *fakeStore) ClaimSnapshot(context.Context, string, string, int) (scale.Assignment, error) {
+	return scale.Assignment{}, nil
+}
+
+func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, error) {
+	return scale.PoolKey{}, nil
+}
+
+func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
+	return scale.SandboxStats{}, nil
+}
+
 func newTestServer(t *testing.T, store scale.SandboxStore, opts ...func(*Options)) http.Handler {
 	t.Helper()
 	o := Options{Namespace: "sandboxes", APIKeys: []string{testKey}, Log: logr.Discard()}
@@ -366,34 +396,4 @@ func liveSandbox(name, claimID, node, image, token string) sandboxv1beta1.Sandbo
 	sb.Spec.PodTemplate.Spec.Containers = []corev1.Container{{Name: "c", Image: image}}
 	sb.Status.NodeName = node
 	return sb
-}
-
-// The lifecycle verbs are not exercised by these tests; they satisfy the
-// SandboxStore contract so the fake stays a drop-in.
-func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
-
-func (f *fakeStore) Resume(context.Context, string, string) error { return nil }
-
-func (f *fakeStore) Fork(context.Context, string, string, int, int) ([]scale.Assignment, error) {
-	return nil, nil
-}
-
-func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Snapshot, error) {
-	return scale.Snapshot{}, nil
-}
-
-func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }
-
-func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
-
-func (f *fakeStore) ClaimSnapshot(context.Context, string, string, int) (scale.Assignment, error) {
-	return scale.Assignment{}, nil
-}
-
-func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, error) {
-	return scale.PoolKey{}, nil
-}
-
-func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
-	return scale.SandboxStats{}, nil
 }

@@ -49,9 +49,9 @@ const (
 	phaseHibernated = "Hibernated"
 )
 
-// Options configures the compat server.
 var errSandboxNotFound = errors.New("sandbox not found")
 
+// Options configures the compat server.
 type Options struct {
 	// Namespace is the Kubernetes namespace claims are made in. e2b has no
 	// namespace concept, so every compat claim lands in this one.

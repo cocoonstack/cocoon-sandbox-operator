@@ -131,8 +131,6 @@ func main() {
 	}
 }
 
-// ---- helpers ----
-
 func must(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "fatal:", err)
@@ -242,8 +240,6 @@ func podForSandbox(ctx context.Context, name string) (*corev1.Pod, error) {
 	err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, p)
 	return p, err
 }
-
-// ---- Core scenarios ----
 
 func scCoreCreateReady(ctx context.Context) (string, error) {
 	name := "e2e-core"
@@ -379,12 +375,8 @@ func waitPodGone(ctx context.Context, name string, d time.Duration) error {
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
 		p := &corev1.Pod{}
-		err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, p)
-		if apierrors.IsNotFound(err) {
+		if apierrors.IsNotFound(cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, p)) {
 			return nil
-		}
-		if err == nil && p.DeletionTimestamp != nil {
-			// terminating counts as gone-ish; keep waiting for full removal
 		}
 		time.Sleep(2 * time.Second)
 	}
@@ -475,8 +467,6 @@ func scDeleteCleanup(ctx context.Context) (string, error) {
 	}
 	return "", fmt.Errorf("resources not fully cleaned up")
 }
-
-// ---- Extension scenarios ----
 
 func newTemplate(name string) *extv1beta1.SandboxTemplate {
 	return &extv1beta1.SandboxTemplate{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
@@ -137,3 +138,5 @@ type InventoryEntry = extv1beta1.InventoryEntry
 // The canonical type (and its CRD) lives in the extensions.agents.x-k8s.io
 // group; these aliases keep the scale contracts self-contained for callers.
 type NodeInventory = extv1beta1.NodeInventory
+
+var _ runtime.Object = (*NodeInventory)(nil)

@@ -62,8 +62,6 @@ func NewInProcessServer(name string, store scale.SandboxStore) (*genericapiserve
 	config.ExternalAddress = "localhost:443"
 	config.LoopbackClientConfig = &restclient.Config{}
 	config.EffectiveVersion = basecompatibility.NewEffectiveVersionFromString("", "", "")
-	// A non-nil OpenAPIV3 config is required to install an API group (managed
-	// fields). Ignore the sandboxes path so no generated definitions are needed.
 	config.OpenAPIV3Config = NewOpenAPIV3Config()
 
 	server, err := config.Complete(nil).New(name, genericapiserver.NewEmptyDelegate())

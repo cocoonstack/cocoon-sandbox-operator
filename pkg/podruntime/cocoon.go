@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -179,15 +180,10 @@ func requestedMode(pod *corev1.Pod, defaultMode string) (string, bool) {
 }
 
 func toleratesVKCocoon(tolerations []corev1.Toleration) bool {
-	for _, toleration := range tolerations {
-		if toleration.Key != vkProviderTaintKey || toleration.Operator != corev1.TolerationOpExists {
-			continue
-		}
-		if toleration.Effect == "" || toleration.Effect == corev1.TaintEffectNoSchedule {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(tolerations, func(t corev1.Toleration) bool {
+		return t.Key == vkProviderTaintKey && t.Operator == corev1.TolerationOpExists &&
+			(t.Effect == "" || t.Effect == corev1.TaintEffectNoSchedule)
+	})
 }
 
 func setDefault(values map[string]string, key, value string) {

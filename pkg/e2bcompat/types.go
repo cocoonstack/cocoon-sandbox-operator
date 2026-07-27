@@ -6,6 +6,12 @@ package e2bcompat
 // contract — the SDK unmarshals them directly — so they are reproduced exactly
 // rather than restyled to this repo's own conventions.
 
+// Sandbox states reported to the SDK (spec: SandboxState).
+const (
+	StateRunning = "running"
+	StatePaused  = "paused"
+)
+
 // NewSandbox is the POST /sandboxes request body (spec: NewSandbox). Only
 // templateID is required; the rest carry SDK defaults.
 type NewSandbox struct {
@@ -143,9 +149,3 @@ type APIError struct {
 	Code    int32  `json:"code"`
 	Message string `json:"message"`
 }
-
-// Sandbox states reported to the SDK (spec: SandboxState).
-const (
-	StateRunning = "running"
-	StatePaused  = "paused"
-)

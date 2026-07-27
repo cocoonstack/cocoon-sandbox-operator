@@ -98,7 +98,7 @@ func main() {
 	// One WarmPool per pool expresses desired replicas as pure intent; these are
 	// the O(pools) durable objects (a single spec can mean a million sandboxes).
 	warmPools := make([]*extv1beta1.SandboxWarmPool, 0, pools)
-	for p := 0; p < pools; p++ {
+	for p := range pools {
 		warmPools = append(warmPools, &extv1beta1.SandboxWarmPool{
 			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pool-%d", p), Namespace: namespaceName(p % numNS)},
 			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: ptr.To(int32(perNode))},
@@ -107,7 +107,7 @@ func main() {
 
 	// Publish one NodeInventory per node from that node's own live state.
 	var sampleNS, sampleName string
-	for k := 0; k < nodes; k++ {
+	for k := range nodes {
 		node := fmt.Sprintf("node-%d", k)
 		entries := make(sliceLiveSource, 0, perNode)
 		for i := range perNode {

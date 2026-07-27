@@ -271,9 +271,6 @@ func fillPool(target int) map[string]any {
 	}
 }
 
-// claimLatency measures claim -> Bound latency using a single watch stream
-// (event-driven, no polling load on the apiserver, so the measurement does not
-// contend with the controller it is measuring).
 // waitPoolStable blocks until the pool has `target` Ready sandboxes for 3
 // consecutive checks (no in-flight replenishment), so the claim measurement is
 // not racing pod pulls.
@@ -297,6 +294,9 @@ func waitPoolStable(target, timeoutSec int) {
 	fmt.Printf("[pool] WARN: not fully stable, proceeding at %d/%d ready\n", ready, target)
 }
 
+// claimLatency measures claim -> Bound latency using a single watch stream
+// (event-driven, no polling load on the apiserver, so the measurement does not
+// contend with the controller it is measuring).
 func claimLatency(n, conc int) map[string]any {
 	base := fmt.Sprintf("plc-%d", time.Now().Unix()%100000)
 	names := make([]string, n)
@@ -346,25 +346,23 @@ func claimLatency(n, conc int) map[string]any {
 	var wg sync.WaitGroup
 	fails := 0
 	for i := range n {
-		wg.Add(1)
 		sem <- struct{}{}
-		go func(idx int) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			claim := &extv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: names[idx], Namespace: *ns, Labels: map[string]string{"cocoon-e2e-run": "g0129-pool"}},
+				ObjectMeta: metav1.ObjectMeta{Name: names[i], Namespace: *ns, Labels: map[string]string{"cocoon-e2e-run": "g0129-pool"}},
 				Spec:       extv1beta1.SandboxClaimSpec{WarmPoolRef: extv1beta1.SandboxWarmPoolRef{Name: poolName}},
 			}
 			mu.Lock()
-			createTimes[names[idx]] = time.Now()
+			createTimes[names[i]] = time.Now()
 			mu.Unlock()
 			if err := cl.Create(context.Background(), claim); err != nil {
 				mu.Lock()
-				createTimes[names[idx]] = time.Time{}
+				createTimes[names[i]] = time.Time{}
 				fails++
 				mu.Unlock()
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 

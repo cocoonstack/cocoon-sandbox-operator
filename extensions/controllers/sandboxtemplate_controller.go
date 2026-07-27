@@ -178,9 +178,6 @@ func (r *SandboxTemplateReconciler) ensureTemplateRefHashLabel(ctx context.Conte
 	return nil
 }
 
-// buildDefaultNetworkPolicySpec generates the "Secure by Default" network policy.
-// routerNamespace is the namespace the sandbox-router runs in (the operator
-// install namespace); ingress is admitted only from that namespace.
 // dropManagedNetworkPolicy removes the NetworkPolicy this controller previously
 // created for a template that has since opted out. A policy someone else owns is
 // left in place.
@@ -205,6 +202,9 @@ func (r *SandboxTemplateReconciler) dropManagedNetworkPolicy(ctx context.Context
 	return nil
 }
 
+// buildDefaultNetworkPolicySpec generates the "Secure by Default" network policy.
+// routerNamespace is the namespace the sandbox-router runs in (the operator
+// install namespace); ingress is admitted only from that namespace.
 func buildDefaultNetworkPolicySpec(templateName, routerNamespace string) networkingv1.NetworkPolicySpec {
 	if routerNamespace == "" {
 		routerNamespace = defaultRouterNamespace

@@ -167,8 +167,6 @@ type loadgen struct {
 	log logr.Logger
 }
 
-func gvk(kind string) schema.GroupVersionKind { return extv1beta1.GroupVersion.WithKind(kind) }
-
 // setup creates the SandboxTemplate + SandboxWarmPool (idempotent).
 func (l *loadgen) setup(ctx context.Context) error {
 	tpl := &unstructured.Unstructured{}
@@ -354,6 +352,8 @@ func (l *loadgen) poolReadyReplicas(ctx context.Context) int64 {
 	rr, _, _ := unstructured.NestedInt64(pool.Object, "status", "readyReplicas")
 	return rr
 }
+
+func gvk(kind string) schema.GroupVersionKind { return extv1beta1.GroupVersion.WithKind(kind) }
 
 func isReady(u *unstructured.Unstructured) bool {
 	conds, found, err := unstructured.NestedSlice(u.Object, "status", "conditions")

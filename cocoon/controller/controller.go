@@ -122,7 +122,7 @@ func (r *CocoonSandboxController) reconcileDelete(ctx context.Context, sb *cocoo
 	}
 	token := ""
 	if ref := sb.Status.TokenSecretRef; ref != nil {
-		v, err := r.secretValue(ctx, sb.Namespace, ref)
+		v, err := secretValue(ctx, r.Client, sb.Namespace, ref)
 		if err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{RequeueAfter: cocoonSandboxRequeue}, fmt.Errorf("read sandbox token secret: %w", err)
 		}
@@ -355,26 +355,11 @@ func (r *CocoonSandboxController) nodeAPIToken(ctx context.Context, node *cocoon
 	if node.Spec.APITokenSecretRef == nil {
 		return "", nil
 	}
-	token, err := r.secretValue(ctx, node.Namespace, node.Spec.APITokenSecretRef)
+	token, err := secretValue(ctx, r.Client, node.Namespace, node.Spec.APITokenSecretRef)
 	if err != nil {
 		return "", fmt.Errorf("read CocoonSandboxNode API token secret: %w", err)
 	}
 	return token, nil
-}
-
-func (r *CocoonSandboxController) secretValue(ctx context.Context, namespace string, ref *corev1.SecretKeySelector) (string, error) {
-	if ref == nil || ref.Name == "" {
-		return "", nil
-	}
-	key := ref.Key
-	if key == "" {
-		key = cocoonSandboxTokenKey
-	}
-	var secret corev1.Secret
-	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &secret); err != nil {
-		return "", err
-	}
-	return string(secret.Data[key]), nil
 }
 
 // CocoonSandboxNodeController refreshes sandboxd node inventory.
@@ -471,6 +456,15 @@ func (r *CocoonSandboxNodeController) updateNodeStatus(ctx context.Context, node
 	return nil
 }
 
+// desiredPool is a resolved CocoonSandboxPool: its axes and per-node targets.
+type desiredPool struct {
+	obj      *cocoonsandboxv1.CocoonSandboxPool
+	template string
+	net      cocoonsandboxv1.CocoonSandboxNet
+	size     cocoonsandboxv1.CocoonSandboxSize
+	targets  map[string]int
+}
+
 // CocoonSandboxPoolController reconciles declarative warm pool capacity into sandboxd nodes.
 type CocoonSandboxPoolController struct {
 	Client  client.Client
@@ -531,14 +525,6 @@ func (r *CocoonSandboxPoolController) enqueuePoolsForNode(ctx context.Context, o
 		}})
 	}
 	return requests
-}
-
-type desiredPool struct {
-	obj      *cocoonsandboxv1.CocoonSandboxPool
-	template string
-	net      cocoonsandboxv1.CocoonSandboxNet
-	size     cocoonsandboxv1.CocoonSandboxSize
-	targets  map[string]int
 }
 
 func (r *CocoonSandboxPoolController) syncPoolNamespace(ctx context.Context, namespace string) error {
@@ -648,12 +634,7 @@ func (r *CocoonSandboxPoolController) updatePoolStatus(ctx context.Context, pool
 	next.Status.ReadyReplicas = 0
 	next.Status.WarmByNode = nil
 	if targets != nil {
-		nodeNames := make([]string, 0, len(targets))
-		for nodeName := range targets {
-			nodeNames = append(nodeNames, nodeName)
-		}
-		slices.Sort(nodeNames)
-		for _, nodeName := range nodeNames {
+		for _, nodeName := range slices.Sorted(maps.Keys(targets)) {
 			warm, target := observedPoolOnNode(template, net, size, nodeName, targets[nodeName], infos)
 			next.Status.ReadyReplicas += int32(warm)
 			next.Status.WarmByNode = append(next.Status.WarmByNode, cocoonsandboxv1.CocoonSandboxPoolNodeStatus{
@@ -746,11 +727,7 @@ func observedPoolOnNode(template string, net cocoonsandboxv1.CocoonSandboxNet, s
 }
 
 func firstNodeError(nodeErrors map[string]string) (string, string) {
-	names := make([]string, 0, len(nodeErrors))
-	for name := range nodeErrors {
-		names = append(names, name)
-	}
-	slices.Sort(names)
+	names := slices.Sorted(maps.Keys(nodeErrors))
 	return names[0], nodeErrors[names[0]]
 }
 

@@ -42,12 +42,7 @@ func matchesID(claimID, requested string) bool {
 }
 
 func needsRewrite(s string) bool {
-	for _, r := range s {
-		if !isDNSSafe(r) {
-			return true
-		}
-	}
-	return false
+	return strings.ContainsFunc(s, func(r rune) bool { return !isDNSSafe(r) })
 }
 
 // isDNSSafe reports whether r is legal inside a DNS label (RFC 1123): lowercase

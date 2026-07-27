@@ -292,13 +292,11 @@ func fireClaims(ctx context.Context, n, conc, timeoutSec int) (bound, createFail
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	for i := range n {
-		wg.Add(1)
 		sem <- struct{}{}
-		go func(idx int) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			c := &extv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: names[idx], Namespace: *ns, Labels: map[string]string{runLabel: runVal}},
+				ObjectMeta: metav1.ObjectMeta{Name: names[i], Namespace: *ns, Labels: map[string]string{runLabel: runVal}},
 				Spec:       extv1beta1.SandboxClaimSpec{WarmPoolRef: extv1beta1.SandboxWarmPoolRef{Name: poolName}},
 			}
 			if err := cl.Create(ctx, c); err != nil {
@@ -306,7 +304,7 @@ func fireClaims(ctx context.Context, n, conc, timeoutSec int) (bound, createFail
 				createFails++
 				mu.Unlock()
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 

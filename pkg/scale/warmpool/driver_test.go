@@ -167,7 +167,7 @@ func TestStatusFallsBackToInventoryWhenPutFails(t *testing.T) {
 // PUT that repeats a key ("duplicate pool"), which silently stalled every node.
 func TestTwoPoolsSameKeyAggregate(t *testing.T) {
 	// Both pools reference the same template "tpl" → identical key.
-	d, setter, inv, _ := newTestDriver(t, warmPool("p1", 3), warmPool2("p2", 5), template())
+	d, setter, inv, _ := newTestDriver(t, warmPool("p1", 3), warmPool("p2", 5), template())
 	putNodes(inv, 2)
 	if err := d.reconcileOnce(context.Background()); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -247,21 +247,12 @@ func (n *fakeNode) SetPools(_ context.Context, pools []sandboxd.PoolSpec) (*sand
 	// each with its live warm count.
 	info := &sandboxd.NodeInfo{}
 	for _, p := range pools {
-		var entry struct {
-			Key struct {
-				Template string `json:"template"`
-				Net      string `json:"net"`
-				Size     string `json:"size"`
-			} `json:"key"`
-			Warm      int  `json:"warm"`
-			Refilling int  `json:"refilling"`
-			Target    int  `json:"target"`
-			Golden    bool `json:"golden"`
-		}
-		entry.Key.Template, entry.Key.Net, entry.Key.Size = p.Template, p.Net, p.Size
-		entry.Warm = n.parent.warm[n.addr]
-		entry.Target = p.Warm
-		info.Pools = append(info.Pools, entry)
+		info.Pools = append(info.Pools, sandboxd.NodePool{
+			Key:  sandboxd.PoolKey{Template: p.Template, Net: p.Net, Size: p.Size},
+			Warm: n.parent.warm[n.addr],
+			// Target echoes the requested warm watermark.
+			Target: p.Warm,
+		})
 	}
 	return info, nil
 }
@@ -313,10 +304,4 @@ func putNodes(inv *scale.StaticInventorySource, n int) {
 			Address:    "10.0.0." + name + ":7777",
 		})
 	}
-}
-
-// warmPool2 builds a second pool referencing the same template.
-func warmPool2(name string, replicas int32) *extv1beta1.SandboxWarmPool {
-	p := warmPool(name, replicas)
-	return p
 }

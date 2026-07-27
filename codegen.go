@@ -14,7 +14,7 @@
 
 // This file just exists as a place to put //go:generate directives that should apply to the entire project
 
-package cocoonsandboxoperator
+package sandboxoperator
 
 // Generate CRDs and RBAC rules
 //go:generate go tool -modfile=tools.mod sigs.k8s.io/controller-tools/cmd/controller-gen object crd:maxDescLen=0 paths=./api/... output:crd:dir=k8s/crds

@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -83,7 +84,7 @@ type ClaimRecorder interface {
 	RecordBound(ctx context.Context, claimNS, claimName string, a Assignment) error
 }
 
-// GatewayConfig constructs a nodeClaimGateway.
+// GatewayConfig configures NewGateway.
 type GatewayConfig struct {
 	// Node is the name of the node this gateway fronts (stamped into Assignments).
 	Node string
@@ -122,6 +123,8 @@ type delivered struct {
 	token string
 }
 
+var _ ClaimGateway = (*nodeClaimGateway)(nil)
+
 // nodeClaimGateway is the concrete L2 ClaimGateway: it authorizes inline, delivers
 // a warm sandbox from the node's sandboxd, returns the Assignment immediately, and
 // records Bound asynchronously.
@@ -142,9 +145,6 @@ type nodeClaimGateway struct {
 	holdings map[string]delivered // Assignment.SandboxName -> ownership credential
 	wg       sync.WaitGroup       // tracks in-flight async Bound-record jobs
 }
-
-// compile-time assertion that the concrete gateway satisfies the L2 contract.
-var _ ClaimGateway = (*nodeClaimGateway)(nil)
 
 // NewGateway builds a node-local ClaimGateway from cfg. It returns the concrete
 // type so callers can Wait on async record drain during graceful shutdown; the
@@ -178,15 +178,12 @@ func NewGateway(cfg GatewayConfig) *nodeClaimGateway {
 // Bound is enqueued as an async job — the return does NOT block on the k8s write.
 // When the node has no warm capacity the result is ErrNoNodeCapacity (IsFallback).
 func (g *nodeClaimGateway) Claim(ctx context.Context, req ClaimRequest) (Assignment, error) {
-	// (1) Central policy check, inline, before any delivery. A denial (including
-	// quota exceeded) is a hard reject, never a fallback.
 	if g.authz != nil {
 		if err := g.authz.Authorize(ctx, req); err != nil {
 			return Assignment{}, fmt.Errorf("scale: claim %s/%s not authorized: %w", req.Namespace, req.ClaimName, err)
 		}
 	}
 
-	// (2) Node-local ownership transfer: sandboxd hands over an already-running VM.
 	res, err := g.client.Claim(ctx, g.specFor(req))
 	if err != nil {
 		if errors.Is(err, sandboxd.ErrNodeAtCapacity) {
@@ -195,16 +192,11 @@ func (g *nodeClaimGateway) Claim(ctx context.Context, req ClaimRequest) (Assignm
 		return Assignment{}, fmt.Errorf("scale: sandboxd claim for %s/%s: %w", req.Namespace, req.ClaimName, err)
 	}
 
-	// (3) Build the Assignment and remember the ownership credential so a later
-	// owner-authorized Release can destroy exactly this VM.
 	a := Assignment{SandboxName: res.ID, Node: g.node, Address: res.OwnerAddr, Token: res.Token}
 	g.mu.Lock()
 	g.holdings[a.SandboxName] = delivered{id: res.ID, token: res.Token}
 	g.mu.Unlock()
 
-	// (4) Record Bound asynchronously. The record follows the action; a lost
-	// record leaves an orphan binding that the OrphanReconciler heals (it never
-	// destroys the VM). Return to the caller now.
 	g.enqueueRecord(req.Namespace, req.ClaimName, a)
 	return a, nil
 }
@@ -261,25 +253,13 @@ func (g *nodeClaimGateway) enqueueRecord(ns, name string, a Assignment) {
 // override each axis and falling back to gateway defaults (and, for the template,
 // finally to the WarmPool name).
 func (g *nodeClaimGateway) specFor(req ClaimRequest) sandboxd.ClaimSpec {
-	tmpl := firstNonEmpty(req.Selector[SelectorTemplateKey], g.tmpl, req.WarmPool)
 	return sandboxd.ClaimSpec{
-		Template:   tmpl,
-		Net:        firstNonEmpty(req.Selector[SelectorNetKey], g.net),
-		Size:       firstNonEmpty(req.Selector[SelectorSizeKey], g.size),
+		Template:   cmp.Or(req.Selector[SelectorTemplateKey], g.tmpl, req.WarmPool),
+		Net:        cmp.Or(req.Selector[SelectorNetKey], g.net),
+		Size:       cmp.Or(req.Selector[SelectorSizeKey], g.size),
 		TTLSeconds: g.ttl,
 	}
 }
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-// --- Default ClaimRecorder ---------------------------------------------------
 
 // clientClaimRecorder records Bound by patching the SandboxClaim status:
 // status.sandbox.name is set to the delivered sandbox (the same "Bound" marker the
@@ -314,8 +294,6 @@ func (r *clientClaimRecorder) RecordBound(ctx context.Context, claimNS, claimNam
 	})
 	return r.c.Status().Patch(ctx, cur, client.MergeFrom(orig))
 }
-
-// --- Orphan GC ---------------------------------------------------------------
 
 // Delivery is one live sandbox a node currently holds, with the claim it was
 // delivered to. This is the node's own live state (the L0 node-scoped cache /
@@ -410,8 +388,6 @@ func notFoundName(err error) string {
 	return ""
 }
 
-// --- Default Authorizer ------------------------------------------------------
-
 // SubjectAccessReviewer creates a SubjectAccessReview and returns the decided
 // object — the shape of client-go's
 // authorizationv1client.SubjectAccessReviewInterface.Create, narrowed to an
@@ -453,9 +429,9 @@ func (a *ReviewAuthorizer) Authorize(ctx context.Context, req ClaimRequest) erro
 			User: user,
 			ResourceAttributes: &authzv1.ResourceAttributes{
 				Namespace: req.Namespace,
-				Verb:      firstNonEmpty(a.Verb, "create"),
-				Group:     firstNonEmpty(a.Group, extv1beta1.GroupVersion.Group),
-				Resource:  firstNonEmpty(a.Resource, "sandboxclaims"),
+				Verb:      cmp.Or(a.Verb, "create"),
+				Group:     cmp.Or(a.Group, extv1beta1.GroupVersion.Group),
+				Resource:  cmp.Or(a.Resource, "sandboxclaims"),
 				Name:      req.ClaimName,
 			},
 		},
