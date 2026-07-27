@@ -148,10 +148,7 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 	}
 
 	// Fetch template and compute hash once to avoid repeated expensive operations,
-	// only currentSandboxBlueprintHash is used for staleness checks,
-	// currentPodTemplateHash is kept as a value for DeprecatedSandboxPodTemplateHashLabel
-	// for external consumer compatibility
-	template, currentPodTemplateHash, currentSandboxBlueprintHash, tmplErr := r.fetchTemplateAndHash(ctx, warmPool)
+	template, currentSandboxBlueprintHash, tmplErr := r.fetchTemplateAndHash(ctx, warmPool)
 
 	// Delete stale pods, filter pods by ownership and adopt orphans
 	activeSandboxes, allErrors := r.filterActiveSandboxes(ctx, warmPool, sandboxList.Items, template, currentSandboxBlueprintHash, tmplErr)
@@ -206,7 +203,7 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 		sandboxesToCreate := min(desiredReplicas-currentReplicas, maxBatchSize)
 		logger.Info("Creating new pool sandboxes", "count", sandboxesToCreate)
 
-		sandboxCR, err := r.buildSandboxCR(ctx, warmPool, poolNameHash, template, currentPodTemplateHash, currentSandboxBlueprintHash)
+		sandboxCR, err := r.buildSandboxCR(ctx, warmPool, poolNameHash, template, currentSandboxBlueprintHash)
 		if err != nil {
 			logger.Error(err, "Failed to build sandbox CR blueprint")
 			allErrors = errors.Join(allErrors, err)
@@ -381,15 +378,6 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 	return activeSandboxes, allErrors
 }
 
-// computePodTemplateHash computes a hash of the sandbox template's Spec.PodTemplate.
-func computePodTemplateHash(template *extensionsv1beta1.SandboxTemplate) (string, error) {
-	specJSON, err := json.Marshal(template.Spec.PodTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal pod template for hashing: %w", err)
-	}
-	return sandboxcontrollers.NameHash(string(specJSON)), nil
-}
-
 // computeSandboxBlueprintHash computes a hash of the sandbox template's Spec.SandboxBlueprint.
 func computeSandboxBlueprintHash(template *extensionsv1beta1.SandboxTemplate) (string, error) {
 	specJSON, err := json.Marshal(template.Spec.SandboxBlueprint)
@@ -400,13 +388,10 @@ func computeSandboxBlueprintHash(template *extensionsv1beta1.SandboxTemplate) (s
 }
 
 // fetchTemplateAndHash fetches the sandbox template and computes its hash.
-func (r *SandboxWarmPoolReconciler) fetchTemplateAndHash(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) (*extensionsv1beta1.SandboxTemplate, string, string, error) {
+func (r *SandboxWarmPoolReconciler) fetchTemplateAndHash(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) (*extensionsv1beta1.SandboxTemplate, string, error) {
 	logger := log.FromContext(ctx)
 	template, tmplErr := r.getTemplate(ctx, warmPool)
-	var currentPodTemplateHash, currentSandboxBlueprintHash string
-	if tmplErr == nil {
-		currentPodTemplateHash, tmplErr = computePodTemplateHash(template)
-	}
+	var currentSandboxBlueprintHash string
 	if tmplErr == nil {
 		currentSandboxBlueprintHash, tmplErr = computeSandboxBlueprintHash(template)
 	}
@@ -414,7 +399,7 @@ func (r *SandboxWarmPoolReconciler) fetchTemplateAndHash(ctx context.Context, wa
 	if tmplErr != nil {
 		logger.Error(tmplErr, "Failed to get sandbox template and hash", "templateRef", warmPool.Spec.TemplateRef.Name)
 	}
-	return template, currentPodTemplateHash, currentSandboxBlueprintHash, tmplErr
+	return template, currentSandboxBlueprintHash, tmplErr
 }
 
 // buildSandboxCR constructs the base Sandbox CR (with pod template and volume claim templates) for the warm pool.
@@ -423,16 +408,14 @@ func (r *SandboxWarmPoolReconciler) buildSandboxCR(
 	warmPool *extensionsv1beta1.SandboxWarmPool,
 	poolNameHash string,
 	template *extensionsv1beta1.SandboxTemplate,
-	currentPodTemplateHash string,
 	currentSandboxBlueprintHash string,
 ) (*sandboxv1beta1.Sandbox, error) {
 	sandboxLabels := map[string]string{
-		warmPoolSandboxLabel:                                 poolNameHash,
-		sandboxTemplateRefHash:                               SandboxTemplateRefHash(warmPool.Spec.TemplateRef.Name),
-		sandboxv1beta1.SandboxLaunchTypeLabel:                sandboxv1beta1.SandboxLaunchTypeWarm,
-		sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel: currentPodTemplateHash,
-		sandboxv1beta1.SandboxTemplateHashLabel:              currentSandboxBlueprintHash,
-		sandboxv1beta1.CreatedByLabel:                        "controller",
+		warmPoolSandboxLabel:                    poolNameHash,
+		sandboxTemplateRefHash:                  SandboxTemplateRefHash(warmPool.Spec.TemplateRef.Name),
+		sandboxv1beta1.SandboxLaunchTypeLabel:   sandboxv1beta1.SandboxLaunchTypeWarm,
+		sandboxv1beta1.SandboxTemplateHashLabel: currentSandboxBlueprintHash,
+		sandboxv1beta1.CreatedByLabel:           "controller",
 	}
 
 	sandboxAnnotations := map[string]string{
@@ -463,7 +446,6 @@ func (r *SandboxWarmPoolReconciler) buildSandboxCR(
 	}
 	sandbox.Spec.PodTemplate.ObjectMeta.Labels[warmPoolSandboxLabel] = poolNameHash
 	sandbox.Spec.PodTemplate.ObjectMeta.Labels[sandboxTemplateRefHash] = SandboxTemplateRefHash(warmPool.Spec.TemplateRef.Name)
-	sandbox.Spec.PodTemplate.ObjectMeta.Labels[sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel] = currentPodTemplateHash
 	sandbox.Spec.PodTemplate.ObjectMeta.Labels[sandboxv1beta1.SandboxTemplateHashLabel] = currentSandboxBlueprintHash
 
 	// Respect the template's custom eviction annotation if explicitly specified.

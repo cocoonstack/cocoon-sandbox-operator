@@ -900,7 +900,7 @@ func TestReconcilePool_TemplateUpdateRollout(t *testing.T) {
 			require.NoError(t, err)
 
 			// Get initial hash label
-			template, _, initialHash, err := r.fetchTemplateAndHash(ctx, warmPool)
+			template, initialHash, err := r.fetchTemplateAndHash(ctx, warmPool)
 			require.NoError(t, err)
 
 			// Verify sandboxes exist with initial image and hash
@@ -920,7 +920,7 @@ func TestReconcilePool_TemplateUpdateRollout(t *testing.T) {
 			require.NoError(t, err)
 
 			// Get new expected hash label
-			_, _, updatedHash, err := r.fetchTemplateAndHash(ctx, warmPool)
+			_, updatedHash, err := r.fetchTemplateAndHash(ctx, warmPool)
 			require.NoError(t, err)
 			require.NotEqual(t, initialHash, updatedHash, "Hashes should differ after template update")
 
@@ -1776,7 +1776,7 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 			require.Len(t, sandboxes.Items, int(replicas), "expected warm sandbox after initial reconcile")
 
 			// Capture initial sandboxblueprint hash
-			_, _, initialHash, err := r.fetchTemplateAndHash(ctx, warmPool)
+			_, initialHash, err := r.fetchTemplateAndHash(ctx, warmPool)
 			require.NoError(t, err)
 
 			// Capture initial sandbox names to verify recreation later
@@ -1791,7 +1791,7 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 			}
 
 			// Capture updated sandbox blueprint hash after template update
-			_, _, updatedHash, err := r.fetchTemplateAndHash(ctx, warmPool)
+			_, updatedHash, err := r.fetchTemplateAndHash(ctx, warmPool)
 			require.NoError(t, err)
 			if tt.expectRecreation {
 				require.NotEqual(t, initialHash, updatedHash, "sandbox blueprint hash should change after template update")
@@ -2110,6 +2110,31 @@ func TestSandboxBlueprintFieldsAreCompared(t *testing.T) {
 		"SandboxBlueprint fields have changed. Update compareSandboxBlueprint() in "+
 			"sandboxwarmpool_controller.go to compare the new field for staleness detection, then update the "+
 			"expected field list in this test to include it.")
+}
+
+func TestNewPoolSandboxesCarryOnlyTheRenamedHashLabel(t *testing.T) {
+	// The write path for the pre-rename label is retired; only objects created
+	// before the rename may still carry it, and they drain as the pool recycles.
+	r := &SandboxWarmPoolReconciler{Scheme: newScheme(t)}
+	warmPool := &extensionsv1beta1.SandboxWarmPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+	}
+	sb, err := r.buildSandboxCR(t.Context(), warmPool, "hash", createTemplate("default"), "bph")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, labels := range map[string]map[string]string{
+		"sandbox":     sb.Labels,
+		"podTemplate": sb.Spec.PodTemplate.ObjectMeta.Labels,
+	} {
+		if _, ok := labels[sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel]; ok {
+			t.Errorf("%s labels still carry the retired pod-template-hash label", name)
+		}
+	}
+	if sb.Labels[sandboxv1beta1.SandboxTemplateHashLabel] != "bph" {
+		t.Errorf("renamed hash label = %q, want %q", sb.Labels[sandboxv1beta1.SandboxTemplateHashLabel], "bph")
+	}
 }
 
 // Create a test scheme with extensions types registered.
