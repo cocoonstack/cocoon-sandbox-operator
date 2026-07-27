@@ -1755,7 +1755,7 @@ func (r *SandboxClaimReconciler) mapWarmPoolToClaims(ctx context.Context, obj cl
 		log.FromContext(ctx).Error(err, "failed to list SandboxClaims for SandboxWarmPool", "namespace", warmPool.Namespace, "name", warmPool.Name)
 		return nil
 	}
-	requests := make([]ctrl.Request, 0, len(claims.Items))
+	var requests []ctrl.Request
 	for i := range claims.Items {
 		claim := &claims.Items[i]
 		// Bound claims are driven by their own Sandbox events; pool churn only

@@ -714,9 +714,13 @@ func poolMemberChangePredicate() predicate.Funcs {
 			if !okOld || !okNew {
 				return true
 			}
+			// The reconcile reads only the controller ref, so compare that —
+			// DeepEqual over the owner slice costs ~200x per member event.
+			oldRef, newRef := metav1.GetControllerOf(oldSb), metav1.GetControllerOf(newSb)
 			return oldSb.Generation != newSb.Generation ||
 				oldSb.DeletionTimestamp.IsZero() != newSb.DeletionTimestamp.IsZero() ||
-				!equality.Semantic.DeepEqual(oldSb.OwnerReferences, newSb.OwnerReferences) ||
+				(oldRef == nil) != (newRef == nil) ||
+				(oldRef != nil && oldRef.UID != newRef.UID) ||
 				isSandboxReady(oldSb) != isSandboxReady(newSb)
 		},
 	}
