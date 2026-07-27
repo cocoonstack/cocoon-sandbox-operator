@@ -1758,6 +1758,13 @@ func (r *SandboxClaimReconciler) mapWarmPoolToClaims(ctx context.Context, obj cl
 	requests := make([]ctrl.Request, 0, len(claims.Items))
 	for i := range claims.Items {
 		claim := &claims.Items[i]
+		// This watch exists to wake claims still waiting on the pool (e.g.
+		// WarmPoolNotFound). Bound claims are driven by their own Sandbox events;
+		// re-enqueueing them on every pool status write O(claims)-amplifies
+		// replenishment churn.
+		if claim.Status.SandboxStatus.Name != "" {
+			continue
+		}
 		requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: claim.Namespace, Name: claim.Name}})
 	}
 	return requests

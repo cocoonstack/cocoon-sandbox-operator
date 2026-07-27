@@ -4286,6 +4286,13 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "claim-other", Namespace: "default"},
 		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "other-warmpool"}},
 	}
+	claimBound := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "claim-bound", Namespace: "default"},
+		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPoolName}},
+		Status: extensionsv1beta1.SandboxClaimStatus{
+			SandboxStatus: extensionsv1beta1.SandboxStatus{Name: "claim-bound-sandbox"},
+		},
+	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
 		ObjectMeta: metav1.ObjectMeta{Name: warmPoolName, Namespace: "default"},
@@ -4298,7 +4305,7 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 	// Let's use the WithIndex option on the fake client builder to support the matchingFields query!
 	fakeClientWithIndex := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(claim1, claim2, claimOther, warmPool).
+		WithObjects(claim1, claim2, claimOther, claimBound, warmPool).
 		WithIndex(&extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, func(obj client.Object) []string {
 			c := obj.(*extensionsv1beta1.SandboxClaim)
 			if c.Spec.WarmPoolRef.Name == "" {
@@ -4316,7 +4323,7 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 	requests := reconciler.mapWarmPoolToClaims(t.Context(), warmPool)
 
 	if len(requests) != 2 {
-		t.Fatalf("expected 2 requests, got %d", len(requests))
+		t.Fatalf("expected 2 requests (bound and other-pool claims excluded), got %d", len(requests))
 	}
 
 	expectedNames := map[string]bool{"claim-1": true, "claim-2": true}
