@@ -167,7 +167,7 @@ func fixture(n int) (ctrlclient.Client, queue.SandboxQueue, []*extv1beta1.Sandbo
 
 // measureFast reconciles each claim through the real controller and records the
 // wall time to reach Bound (status.sandbox.name set).
-func measureFast(n int) ([]float64, int) {
+func measureFast(ctx context.Context, n int) ([]float64, int) {
 	fc, q, claims, scheme := fixture(n)
 	r := &ctrls.SandboxClaimReconciler{
 		Client:                  fc,
@@ -177,7 +177,6 @@ func measureFast(n int) ([]float64, int) {
 		Tracer:                  asmetrics.NewNoOp(),
 		MaxConcurrentReconciles: 1,
 	}
-	ctx := context.Background()
 	lat := make([]float64, 0, n)
 	bound := 0
 	for _, cl := range claims {
@@ -208,9 +207,8 @@ func measureFast(n int) ([]float64, int) {
 // measureNaive adopts each claim via a full-namespace Sandbox LIST (the pre-L1
 // O(N) candidate selection), then the same single ownership PATCH. It touches the
 // same fixture the fast path would, so the only difference measured is selection.
-func measureNaive(n int) ([]float64, int) {
+func measureNaive(ctx context.Context, n int) ([]float64, int) {
 	fc, _, claims, _ := fixture(n)
-	ctx := context.Background()
 	lat := make([]float64, 0, n)
 	bound := 0
 	for _, cl := range claims {
@@ -287,6 +285,7 @@ type sizeResult struct {
 
 func main() {
 	flag.Parse()
+	ctx := context.Background()
 	var sizes []int
 	for _, s := range strings.Split(*sizesFlag, ",") {
 		v, err := strconv.Atoi(strings.TrimSpace(s))
@@ -300,8 +299,8 @@ func main() {
 
 	results := make([]sizeResult, 0, len(sizes))
 	for _, n := range sizes {
-		fastLat, fastBound := measureFast(n)
-		naiveLat, naiveBound := measureNaive(n)
+		fastLat, fastBound := measureFast(ctx, n)
+		naiveLat, naiveBound := measureNaive(ctx, n)
 		r := sizeResult{
 			N:         n,
 			FastP50Ms: pct(fastLat, 50),

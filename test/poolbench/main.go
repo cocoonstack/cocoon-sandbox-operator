@@ -72,6 +72,7 @@ func must(err error) {
 
 func main() {
 	flag.Parse()
+	ctx := context.Background()
 	must(clientgoscheme.AddToScheme(scheme))
 	must(sandboxv1beta1.AddToScheme(scheme))
 	must(extv1beta1.AddToScheme(scheme))
@@ -88,7 +89,7 @@ func main() {
 
 	if *mode == "claim" {
 		// Claim-only: measure latency against a pool that an external orchestrator filled.
-		claimRes := claimLatency(*claims, *claimConc)
+		claimRes := claimLatency(ctx, *claims, *claimConc)
 		result["claim"] = claimRes
 		fmt.Printf("[claim] n=%d conc=%d warmHits=%d succ=%.1f%% latency p50=%.0fms p95=%.0fms p99=%.0fms max=%.0fms\n",
 			*claims, *claimConc, claimRes["warmHits"], claimRes["successRate"].(float64)*100, claimRes["p50Ms"], claimRes["p95Ms"], claimRes["p99Ms"], claimRes["maxMs"])
@@ -98,11 +99,11 @@ func main() {
 		return
 	}
 
-	ensureNS()
-	ensureTemplate()
+	ensureNS(ctx)
+	ensureTemplate(ctx)
 
 	// ---- Phase A: pool fill throughput ----
-	fill := fillPool(*poolSize)
+	fill := fillPool(ctx, *poolSize)
 	result["fill"] = fill
 	fmt.Printf("[fill] target=%d reachedReady=%d in %.1fs -> %.2f ready/s; createToReady p50=%.0fms p95=%.0fms\n",
 		*poolSize, fill["reachedReady"], fill["elapsedSec"], fill["throughputPerSec"], fill["p50Ms"], fill["p95Ms"])
@@ -115,10 +116,10 @@ func main() {
 	}
 
 	// Gate: the pool must be fully warm and steady, else claims race replenishment.
-	waitPoolStable(*poolSize, 120)
+	waitPoolStable(ctx, *poolSize, 120)
 
 	// ---- Phase B: warm-claim latency ----
-	claimRes := claimLatency(*claims, *claimConc)
+	claimRes := claimLatency(ctx, *claims, *claimConc)
 	result["claim"] = claimRes
 	fmt.Printf("[claim] n=%d conc=%d warmHits=%d succ=%.1f%% latency p50=%.0fms p95=%.0fms p99=%.0fms max=%.0fms\n",
 		*claims, *claimConc, claimRes["warmHits"], claimRes["successRate"].(float64)*100, claimRes["p50Ms"], claimRes["p95Ms"], claimRes["p99Ms"], claimRes["maxMs"])
@@ -128,11 +129,11 @@ func main() {
 	fmt.Printf("wrote %s\n", *out)
 }
 
-func ensureNS() {
-	_ = cl.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: *ns, Labels: map[string]string{"cocoon-e2e-run": "g0129-pool"}}})
+func ensureNS(ctx context.Context) {
+	_ = cl.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: *ns, Labels: map[string]string{"cocoon-e2e-run": "g0129-pool"}}})
 }
 
-func ensureTemplate() {
+func ensureTemplate(ctx context.Context) {
 	svc := false
 	nodeSel := map[string]string{}
 	if kv := strings.SplitN(*nodeSelKV, "=", 2); len(kv) == 2 && kv[0] != "" {
@@ -173,15 +174,15 @@ func ensureTemplate() {
 			NetworkPolicyManagement: "Unmanaged",
 		},
 	}
-	err := cl.Create(context.Background(), t)
+	err := cl.Create(ctx, t)
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		must(err)
 	}
 }
 
-func ensurePool(replicas int32) {
+func ensurePool(ctx context.Context, replicas int32) {
 	p := &extv1beta1.SandboxWarmPool{ObjectMeta: metav1.ObjectMeta{Name: poolName, Namespace: *ns}}
-	err := cl.Get(context.Background(), types.NamespacedName{Namespace: *ns, Name: poolName}, p)
+	err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: poolName}, p)
 	if apierrors.IsNotFound(err) {
 		p = &extv1beta1.SandboxWarmPool{
 			ObjectMeta: metav1.ObjectMeta{Name: poolName, Namespace: *ns},
@@ -190,17 +191,17 @@ func ensurePool(replicas int32) {
 				TemplateRef: extv1beta1.SandboxTemplateRef{Name: tmplName},
 			},
 		}
-		must(cl.Create(context.Background(), p))
+		must(cl.Create(ctx, p))
 		return
 	}
 	must(err)
 	p.Spec.Replicas = &replicas
-	must(cl.Update(context.Background(), p))
+	must(cl.Update(ctx, p))
 }
 
-func readySandboxes() (total, ready int) {
+func readySandboxes(ctx context.Context) (total, ready int) {
 	sl := &sandboxv1beta1.SandboxList{}
-	if err := cl.List(context.Background(), sl, ctrlclient.InNamespace(*ns)); err != nil {
+	if err := cl.List(ctx, sl, ctrlclient.InNamespace(*ns)); err != nil {
 		return 0, 0
 	}
 	for i := range sl.Items {
@@ -223,14 +224,14 @@ func readySandboxes() (total, ready int) {
 	return
 }
 
-func fillPool(target int) map[string]any {
-	ensurePool(int32(target))
+func fillPool(ctx context.Context, target int) map[string]any {
+	ensurePool(ctx, int32(target))
 	start := time.Now()
 	deadline := start.Add(time.Duration(*fillWait) * time.Second)
 	series := []map[string]any{}
 	lastReady := 0
 	for time.Now().Before(deadline) {
-		total, ready := readySandboxes()
+		total, ready := readySandboxes(ctx)
 		series = append(series, map[string]any{"t": int(time.Since(start).Seconds()), "total": total, "ready": ready})
 		if ready > lastReady {
 			lastReady = ready
@@ -244,7 +245,7 @@ func fillPool(target int) map[string]any {
 	// createToReady per sandbox: creationTimestamp -> Ready condition lastTransitionTime
 	var c2r []float64
 	sl := &sandboxv1beta1.SandboxList{}
-	_ = cl.List(context.Background(), sl, ctrlclient.InNamespace(*ns))
+	_ = cl.List(ctx, sl, ctrlclient.InNamespace(*ns))
 	for i := range sl.Items {
 		s := &sl.Items[i]
 		for _, c := range s.Status.Conditions {
@@ -274,11 +275,11 @@ func fillPool(target int) map[string]any {
 // waitPoolStable blocks until the pool has `target` Ready sandboxes for 3
 // consecutive checks (no in-flight replenishment), so the claim measurement is
 // not racing pod pulls.
-func waitPoolStable(target, timeoutSec int) {
+func waitPoolStable(ctx context.Context, target, timeoutSec int) {
 	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
 	stable := 0
 	for time.Now().Before(deadline) {
-		_, ready := readySandboxes()
+		_, ready := readySandboxes(ctx)
 		if ready >= target {
 			stable++
 			if stable >= 3 {
@@ -290,14 +291,14 @@ func waitPoolStable(target, timeoutSec int) {
 		}
 		time.Sleep(2 * time.Second)
 	}
-	_, ready := readySandboxes()
+	_, ready := readySandboxes(ctx)
 	fmt.Printf("[pool] WARN: not fully stable, proceeding at %d/%d ready\n", ready, target)
 }
 
 // claimLatency measures claim -> Bound latency using a single watch stream
 // (event-driven, no polling load on the apiserver, so the measurement does not
 // contend with the controller it is measuring).
-func claimLatency(n, conc int) map[string]any {
+func claimLatency(ctx context.Context, n, conc int) map[string]any {
 	base := fmt.Sprintf("plc-%d", time.Now().Unix()%100000)
 	names := make([]string, n)
 	track := make(map[string]bool, n)
@@ -308,8 +309,8 @@ func claimLatency(n, conc int) map[string]any {
 
 	// Establish the watch before creating claims so no Bound event is missed.
 	seed := &extv1beta1.SandboxClaimList{}
-	_ = wcl.List(context.Background(), seed, ctrlclient.InNamespace(*ns))
-	w, err := wcl.Watch(context.Background(), &extv1beta1.SandboxClaimList{}, ctrlclient.InNamespace(*ns))
+	_ = wcl.List(ctx, seed, ctrlclient.InNamespace(*ns))
+	w, err := wcl.Watch(ctx, &extv1beta1.SandboxClaimList{}, ctrlclient.InNamespace(*ns))
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}
@@ -356,7 +357,7 @@ func claimLatency(n, conc int) map[string]any {
 			mu.Lock()
 			createTimes[names[i]] = time.Now()
 			mu.Unlock()
-			if err := cl.Create(context.Background(), claim); err != nil {
+			if err := cl.Create(ctx, claim); err != nil {
 				mu.Lock()
 				createTimes[names[i]] = time.Time{}
 				fails++
@@ -373,7 +374,7 @@ func claimLatency(n, conc int) map[string]any {
 	w.Stop()
 
 	for _, nm := range names {
-		_ = cl.Delete(context.Background(), &extv1beta1.SandboxClaim{ObjectMeta: metav1.ObjectMeta{Name: nm, Namespace: *ns}})
+		_ = cl.Delete(ctx, &extv1beta1.SandboxClaim{ObjectMeta: metav1.ObjectMeta{Name: nm, Namespace: *ns}})
 	}
 
 	mu.Lock()

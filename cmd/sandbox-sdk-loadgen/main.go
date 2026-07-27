@@ -263,7 +263,7 @@ func main() {
 		}
 		// --loop=false single cycle finished: keep the histograms scrapeable.
 		fmt.Println("cycle complete; serving /metrics until terminated")
-		<-context.Background().Done()
+		<-ctx.Done()
 		return
 	}
 
@@ -278,7 +278,7 @@ func main() {
 
 	// Keep /metrics alive so the final histogram/counters remain scrapeable.
 	fmt.Println("run complete; serving /metrics until terminated")
-	<-context.Background().Done()
+	<-ctx.Done()
 }
 
 // runSummary is the end-of-run accounting printed to stdout.

@@ -193,7 +193,7 @@ func main() {
 
 	// (5) watch merge (best-effort): read at least one event off the merged
 	// stream, narrowed to the sample object so the initial sync is a single event.
-	watchEvents, watchOK := exerciseWatch(rc, sampleNS, sampleName)
+	watchEvents, watchOK := exerciseWatch(ctx, rc, sampleNS, sampleName)
 
 	kubectlGetWorks := len(allList.Items) == wantSandboxes &&
 		len(nsList.Items) == len(wantNS.Items) &&
@@ -251,8 +251,8 @@ func newRESTClient(host string) *restclient.RESTClient {
 // exerciseWatch opens a client-go watch and reads events until the initial sync
 // delivers at least one, or a short deadline elapses. Best-effort: List is the
 // required acceptance, watch is a bonus that proves the merge stream.
-func exerciseWatch(rc *restclient.RESTClient, ns, name string) (int, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func exerciseWatch(ctx context.Context, rc *restclient.RESTClient, ns, name string) (int, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	w, err := rc.Get().Namespace(ns).Resource("sandboxes").
 		Param("fieldSelector", "metadata.name="+name).

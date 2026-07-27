@@ -60,6 +60,7 @@ type result struct {
 
 func main() {
 	flag.Parse()
+	rootCtx := context.Background()
 	must(clientgoscheme.AddToScheme(scheme))
 	must(sandboxv1beta1.AddToScheme(scheme))
 	must(sandboxv1alpha1.AddToScheme(scheme))
@@ -74,7 +75,7 @@ func main() {
 	cs, err = kubernetes.NewForConfig(cfg)
 	must(err)
 
-	ensureNS(*ns)
+	ensureNS(rootCtx, *ns)
 
 	scenarios := []struct {
 		name string
@@ -100,7 +101,7 @@ func main() {
 		if *only != "" && !strings.Contains(","+*only+",", ","+s.name+",") {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+		ctx, cancel := context.WithTimeout(rootCtx, 6*time.Minute)
 		start := time.Now()
 		detail, err := s.fn(ctx)
 		cancel()
@@ -138,9 +139,9 @@ func must(err error) {
 	}
 }
 
-func ensureNS(n string) {
+func ensureNS(ctx context.Context, n string) {
 	nsObj := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: n, Labels: map[string]string{"cocoon-e2e-run": *run}}}
-	_ = cl.Create(context.Background(), nsObj)
+	_ = cl.Create(ctx, nsObj)
 }
 
 func labels() map[string]string { return map[string]string{"cocoon-e2e-run": *run} }
@@ -229,6 +230,8 @@ func execInPod(ctx context.Context, pod, container string, cmd []string) (string
 	return stdout.String() + stderr.String(), err
 }
 
+// deleteSandbox detaches from the scenario context: cleanup defers must still
+// run after that context's timeout has expired.
 func deleteSandbox(name string) {
 	s := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: *ns}}
 	_ = cl.Delete(context.Background(), s)

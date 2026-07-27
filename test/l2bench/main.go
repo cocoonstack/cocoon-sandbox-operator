@@ -157,8 +157,7 @@ type claimWaiter interface {
 
 // measureClaimLatency times gw.Claim over many iterations against the fake
 // sandboxd, returning per-call latencies in milliseconds.
-func measureClaimLatency(gw claimWaiter, iters int) []float64 {
-	ctx := context.Background()
+func measureClaimLatency(ctx context.Context, gw claimWaiter, iters int) []float64 {
 	lat := make([]float64, 0, iters)
 	for i := range iters {
 		req := scale.ClaimRequest{Namespace: ns, ClaimName: fmt.Sprintf("lat-%d", i), WarmPool: "base:24.04"}
@@ -178,9 +177,7 @@ func measureClaimLatency(gw claimWaiter, iters int) []float64 {
 // injectAndReconcileOrphans delivers `orphans` claims through a gateway whose async
 // record always fails (leaving orphan bindings), then runs the OrphanReconciler and
 // returns (reconciled, remainingOrphans).
-func injectAndReconcileOrphans(fs *fakeSandboxd, orphans int) (int, int) {
-	ctx := context.Background()
-
+func injectAndReconcileOrphans(ctx context.Context, fs *fakeSandboxd, orphans int) (int, int) {
 	objs := make([]ctrlclient.Object, 0, orphans)
 	for i := range orphans {
 		objs = append(objs, newClaim(fmt.Sprintf("orphan-%d", i)))
@@ -224,6 +221,7 @@ func injectAndReconcileOrphans(fs *fakeSandboxd, orphans int) (int, int) {
 
 func main() {
 	flag.Parse()
+	ctx := context.Background()
 
 	fs := newFakeSandboxd()
 	defer fs.srv.Close()
@@ -232,14 +230,14 @@ func main() {
 	gw := scale.NewGateway(scale.GatewayConfig{
 		Node: node, Client: sandboxd.New(fs.srv.URL, "root-token"),
 		Authorizer: allowAuthorizer{}, Recorder: &countingRecorder{},
-		TTLSeconds: 300, BaseContext: context.Background(), Logger: logr.Discard(),
+		TTLSeconds: 300, BaseContext: ctx, Logger: logr.Discard(),
 	})
-	lat := measureClaimLatency(gw, *itersFlag)
+	lat := measureClaimLatency(ctx, gw, *itersFlag)
 	p50 := pct(lat, 50)
 	p95 := pct(lat, 95)
 
 	// --- orphan-binding convergence (adopt-only; zero VM destroys) ---
-	reconciled, remaining := injectAndReconcileOrphans(fs, *orphansFlag)
+	reconciled, remaining := injectAndReconcileOrphans(ctx, fs, *orphansFlag)
 	destroys := fs.releases.Load()
 
 	// pass ONLY if every orphan converged, none remain, no VM was destroyed, and
