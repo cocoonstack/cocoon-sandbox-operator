@@ -1,7 +1,6 @@
 package podruntime
 
 import (
-	"context"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -47,7 +46,7 @@ func TestMutatePod(t *testing.T) {
 					Containers:       []corev1.Container{{Name: "agent", Image: "registry.example/agent:v1"}},
 				},
 			}
-			err = mutator.MutatePod(context.Background(), sandbox, pod)
+			err = mutator.MutatePod(t.Context(), sandbox, pod)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("MutatePod error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -95,10 +94,10 @@ func TestMutatePodIsIdempotent(t *testing.T) {
 	}
 	sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "worker", Namespace: "agents"}}
 	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "agent", Image: "agent:v1"}}}}
-	if err := mutator.MutatePod(context.Background(), sandbox, pod); err != nil {
+	if err := mutator.MutatePod(t.Context(), sandbox, pod); err != nil {
 		t.Fatalf("first MutatePod: %v", err)
 	}
-	if err := mutator.MutatePod(context.Background(), sandbox, pod); err != nil {
+	if err := mutator.MutatePod(t.Context(), sandbox, pod); err != nil {
 		t.Fatalf("second MutatePod: %v", err)
 	}
 	count := 0

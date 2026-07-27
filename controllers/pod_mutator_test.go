@@ -29,7 +29,7 @@ func TestReconcilePodAppliesPodMutator(t *testing.T) {
 		}),
 	}
 
-	pod, err := reconciler.reconcilePod(context.Background(), sandbox, NameHash(sandbox.Name))
+	pod, err := reconciler.reconcilePod(t.Context(), sandbox, NameHash(sandbox.Name))
 	if err != nil {
 		t.Fatalf("reconcilePod: %v", err)
 	}
@@ -50,11 +50,11 @@ func TestReconcilePodDoesNotCreatePodWhenMutatorFails(t *testing.T) {
 		}),
 	}
 
-	if _, err := reconciler.reconcilePod(context.Background(), sandbox, NameHash(sandbox.Name)); err == nil {
+	if _, err := reconciler.reconcilePod(t.Context(), sandbox, NameHash(sandbox.Name)); err == nil {
 		t.Fatal("reconcilePod succeeded when mutator failed")
 	}
 	var pod corev1.Pod
-	if err := kube.Get(context.Background(), clientObjectKey(sandbox.Namespace, sandbox.Name), &pod); err == nil {
+	if err := kube.Get(t.Context(), clientObjectKey(sandbox.Namespace, sandbox.Name), &pod); err == nil {
 		t.Fatal("Pod was created after mutator failure")
 	}
 }

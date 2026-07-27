@@ -138,7 +138,7 @@ func TestReconcilePool(t *testing.T) {
 				MaxBatchSize: sandboxCreateDeleteMaxBatchSize,
 			}
 
-			ctx := context.Background()
+			ctx := t.Context()
 
 			err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
@@ -274,7 +274,7 @@ func TestReconcilePoolControllerRef(t *testing.T) {
 				MaxBatchSize: sandboxCreateDeleteMaxBatchSize,
 			}
 
-			ctx := context.Background()
+			ctx := t.Context()
 
 			err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
@@ -310,7 +310,7 @@ func TestPoolLabelValueInIntegration(t *testing.T) {
 	templateName := "test-template"
 	replicas := int32(3)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := newTestScheme()
 
 	t.Run("all created sandboxes have correct labels from template", func(t *testing.T) {
@@ -398,7 +398,7 @@ func TestCreatePoolSandboxPropagatesVolumeClaimTemplates(t *testing.T) {
 	templateName := "test-template"
 	replicas := int32(1)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := newTestScheme()
 
 	template := &extensionsv1beta1.SandboxTemplate{
@@ -485,7 +485,7 @@ func TestCreatePoolSandboxAppliesSecureDefaults(t *testing.T) {
 	templateName := "test-template"
 	replicas := int32(1)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := newTestScheme()
 	trueValue := true
 
@@ -670,7 +670,7 @@ func TestReconcilePoolReadyReplicas(t *testing.T) {
 				Scheme: scheme,
 			}
 
-			ctx := context.Background()
+			ctx := t.Context()
 
 			err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
@@ -683,7 +683,7 @@ func TestReconcilePoolReadyReplicas(t *testing.T) {
 }
 
 func TestUpdateStatusClearsZeroValues(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := newTestScheme()
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
 		ObjectMeta: metav1.ObjectMeta{
@@ -765,7 +765,7 @@ func TestReconcilePoolGCStuckSandboxes(t *testing.T) {
 			MaxBatchSize: sandboxCreateDeleteMaxBatchSize,
 		}
 
-		ctx := context.Background()
+		ctx := t.Context()
 		err := r.reconcilePool(ctx, warmPool)
 		require.NoError(t, err)
 
@@ -795,7 +795,7 @@ func TestReconcilePoolGCStuckSandboxes(t *testing.T) {
 			MaxBatchSize: sandboxCreateDeleteMaxBatchSize,
 		}
 
-		ctx := context.Background()
+		ctx := t.Context()
 		err := r.reconcilePool(ctx, warmPool)
 		require.NoError(t, err)
 
@@ -893,7 +893,7 @@ func TestReconcilePool_TemplateUpdateRollout(t *testing.T) {
 				MaxBatchSize: sandboxCreateDeleteMaxBatchSize,
 			}
 
-			ctx := context.Background()
+			ctx := t.Context()
 
 			// Initial reconciliation to create the sandboxes
 			err := r.reconcilePool(ctx, warmPool)
@@ -1036,7 +1036,7 @@ func TestReconcilePool_TemplateRefUpdate_SameSpec(t *testing.T) {
 		MaxBatchSize: sandboxCreateDeleteMaxBatchSize,
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Initial reconcile
 	err := r.reconcilePool(ctx, warmPool)
@@ -1131,7 +1131,7 @@ func TestFindWarmPoolsForTemplate(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	requests := r.findWarmPoolsForTemplate(context.Background(), template)
+	requests := r.findWarmPoolsForTemplate(t.Context(), template)
 
 	require.Len(t, requests, 1)
 	require.Equal(t, "pool-1", requests[0].Name)
@@ -1248,7 +1248,7 @@ func TestReconcilePool_TemplateUpdate_DNSPolicy(t *testing.T) {
 	templateName := "test-template"
 	replicas := int32(2)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := newTestScheme()
 
 	// Create initial SandboxTemplate with default DNS
@@ -1328,7 +1328,7 @@ func TestIsSandboxStale_OrphanedSandboxVetting(t *testing.T) {
 	poolName := "test-pool"
 	poolNamespace := "default"
 	templateName := "test-template"
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := newTestScheme()
 
 	template := &extensionsv1beta1.SandboxTemplate{
@@ -1448,7 +1448,7 @@ func TestSlowStartBatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var callCount atomic.Int32
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			successes, err := slowStartBatch(ctx, tt.count, tt.initialBatchSize, func(idx int) error {
 				callCount.Add(1)
 				if tt.cancelContextAtIdx != nil && *tt.cancelContextAtIdx == idx {
@@ -1481,7 +1481,7 @@ func TestReconcilePool_EvictionOverride(t *testing.T) {
 	templateName := "test-template"
 	replicas := int32(1)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := newTestScheme()
 
 	testCases := []struct {
@@ -1764,7 +1764,7 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 				MaxBatchSize: sandboxCreateDeleteMaxBatchSize,
 			}
 
-			ctx := context.Background()
+			ctx := t.Context()
 
 			// Initial reconcile
 			err := r.reconcilePool(ctx, warmPool)

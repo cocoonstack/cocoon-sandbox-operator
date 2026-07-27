@@ -17,7 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"slices"
 	"testing"
 
@@ -226,14 +225,14 @@ func TestSandboxTemplateReconcileNetworkPolicy(t *testing.T) {
 				NamespacedName: types.NamespacedName{Name: tc.templateToReconcile.Name, Namespace: "default"},
 			}
 
-			_, err := reconciler.Reconcile(context.Background(), req)
+			_, err := reconciler.Reconcile(t.Context(), req)
 			if err != nil {
 				t.Fatalf("reconcile: (%v)", err)
 			}
 
 			var np networkingv1.NetworkPolicy
 			npName := types.NamespacedName{Name: tc.templateToReconcile.Name + "-network-policy", Namespace: req.Namespace}
-			err = client.Get(context.Background(), npName, &np)
+			err = client.Get(t.Context(), npName, &np)
 
 			if tc.expectNetworkPolicy && err != nil {
 				t.Fatalf("expected network policy to exist, got err: %v", err)
@@ -247,7 +246,7 @@ func TestSandboxTemplateReconcileNetworkPolicy(t *testing.T) {
 			}
 
 			var updatedTemplate extensionsv1beta1.SandboxTemplate
-			if err := client.Get(context.Background(), req.NamespacedName, &updatedTemplate); err != nil {
+			if err := client.Get(t.Context(), req.NamespacedName, &updatedTemplate); err != nil {
 				t.Fatalf("get sandbox template: %v", err)
 			}
 			expectedTemplateHash := SandboxTemplateRefHash(tc.templateToReconcile.Name)
@@ -256,12 +255,12 @@ func TestSandboxTemplateReconcileNetworkPolicy(t *testing.T) {
 			}
 
 			resourceVersion := updatedTemplate.ResourceVersion
-			_, err = reconciler.Reconcile(context.Background(), req)
+			_, err = reconciler.Reconcile(t.Context(), req)
 			if err != nil {
 				t.Fatalf("second reconcile: (%v)", err)
 			}
 			var relabeledTemplate extensionsv1beta1.SandboxTemplate
-			if err := client.Get(context.Background(), req.NamespacedName, &relabeledTemplate); err != nil {
+			if err := client.Get(t.Context(), req.NamespacedName, &relabeledTemplate); err != nil {
 				t.Fatalf("get sandbox template after second reconcile: %v", err)
 			}
 			if relabeledTemplate.ResourceVersion != resourceVersion {
@@ -305,14 +304,14 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 			NamespacedName: types.NamespacedName{Name: "victim", Namespace: "default"},
 		}
 
-		_, err := reconciler.Reconcile(context.Background(), req)
+		_, err := reconciler.Reconcile(t.Context(), req)
 		if err != nil {
 			t.Fatalf("reconcile: (%v)", err)
 		}
 
 		// Check if unownedNP still exists
 		var np networkingv1.NetworkPolicy
-		err = client.Get(context.Background(), types.NamespacedName{Name: "victim-network-policy", Namespace: "default"}, &np)
+		err = client.Get(t.Context(), types.NamespacedName{Name: "victim-network-policy", Namespace: "default"}, &np)
 		if err != nil {
 			if k8errors.IsNotFound(err) {
 				t.Errorf("VULNERABILITY: Unowned NetworkPolicy was deleted!")
@@ -353,7 +352,7 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 			NamespacedName: types.NamespacedName{Name: "victim", Namespace: "default"},
 		}
 
-		_, err := reconciler.Reconcile(context.Background(), req)
+		_, err := reconciler.Reconcile(t.Context(), req)
 		// We expect an error here once fixed, but currently it might succeed and overwrite
 		if err != nil {
 			t.Logf("Reconcile returned error (expected after fix): %v", err)
@@ -361,7 +360,7 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 
 		// Check if unownedNP was updated
 		var np networkingv1.NetworkPolicy
-		err = client.Get(context.Background(), types.NamespacedName{Name: "victim-network-policy", Namespace: "default"}, &np)
+		err = client.Get(t.Context(), types.NamespacedName{Name: "victim-network-policy", Namespace: "default"}, &np)
 		if err != nil {
 			t.Fatalf("failed to get network policy: %v", err)
 		}

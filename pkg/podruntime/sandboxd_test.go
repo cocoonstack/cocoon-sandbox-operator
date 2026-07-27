@@ -1,7 +1,6 @@
 package podruntime
 
 import (
-	"context"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -22,7 +21,7 @@ func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
 	sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"}}
 	pod := sandboxdPod("base:24.04")
 
-	if err := m.MutatePod(context.Background(), sandbox, pod); err != nil {
+	if err := m.MutatePod(t.Context(), sandbox, pod); err != nil {
 		t.Fatalf("MutatePod: %v", err)
 	}
 
@@ -56,7 +55,7 @@ func TestMutateSandboxdRespectsExplicitTemplate(t *testing.T) {
 		RuntimeAnnotation:          ModeSandboxd,
 		sandboxdTemplateAnnotation: "myproj:v1",
 	}
-	if err := m.MutatePod(context.Background(), sandbox, pod); err != nil {
+	if err := m.MutatePod(t.Context(), sandbox, pod); err != nil {
 		t.Fatalf("MutatePod: %v", err)
 	}
 	if pod.Annotations[sandboxdTemplateAnnotation] != "myproj:v1" {
@@ -70,7 +69,7 @@ func TestMutateSandboxdRejectsPinnedNode(t *testing.T) {
 	sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"}}
 	pod := sandboxdPod("base:24.04")
 	pod.Spec.NodeName = "cocoon-bd1"
-	if err := m.MutatePod(context.Background(), sandbox, pod); err == nil {
+	if err := m.MutatePod(t.Context(), sandbox, pod); err == nil {
 		t.Fatal("expected error for pinned nodeName in sandboxd mode")
 	}
 }

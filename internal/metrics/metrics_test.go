@@ -16,7 +16,6 @@
 package metrics
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -123,7 +122,7 @@ func TestStartSpanEndFuncEndsSpan(t *testing.T) {
 	// the span is never exported, a span resource leak. This mini test just proves the func closes the span.
 	exp := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
-	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = tp.Shutdown(t.Context()) })
 
 	inst := &otelInstrumenter{
 		tracer:     tp.Tracer("test"),
@@ -131,7 +130,7 @@ func TestStartSpanEndFuncEndsSpan(t *testing.T) {
 		logger:     logr.Discard(),
 	}
 
-	_, end := inst.StartSpan(context.Background(), nil, "op", nil)
+	_, end := inst.StartSpan(t.Context(), nil, "op", nil)
 	end()
 
 	spans := exp.GetSpans()

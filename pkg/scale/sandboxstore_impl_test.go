@@ -22,7 +22,7 @@ func TestScatterGatherList_FlattensAllNodes(t *testing.T) {
 	src.Put(inv("n2", entry("ns-a/s3", "Running")))
 	store := NewScatterGatherStore(src)
 
-	list, err := store.List(context.Background(), ListOptions{})
+	list, err := store.List(t.Context(), ListOptions{})
 	require.NoError(t, err)
 	require.Len(t, list.Items, 3)
 
@@ -47,7 +47,7 @@ func TestScatterGatherList_HonorsNamespaceFilter(t *testing.T) {
 	src.Put(inv("n2", entry("team-a/s3", "Running")))
 	store := NewScatterGatherStore(src)
 
-	list, err := store.List(context.Background(), ListOptions{Namespace: "team-a"})
+	list, err := store.List(t.Context(), ListOptions{Namespace: "team-a"})
 	require.NoError(t, err)
 	require.Len(t, list.Items, 2)
 	for _, it := range list.Items {
@@ -61,12 +61,12 @@ func TestScatterGatherList_HonorsLabelSelector(t *testing.T) {
 	src.Put(inv("n2", entry("ns/pending", "Pending")))
 	store := NewScatterGatherStore(src)
 
-	list, err := store.List(context.Background(), ListOptions{LabelSelector: PhaseLabel + "=Running"})
+	list, err := store.List(t.Context(), ListOptions{LabelSelector: PhaseLabel + "=Running"})
 	require.NoError(t, err)
 	require.Len(t, list.Items, 1)
 	assert.Equal(t, "running", list.Items[0].Name)
 
-	byNode, err := store.List(context.Background(), ListOptions{LabelSelector: NodeLabel + "=n2"})
+	byNode, err := store.List(t.Context(), ListOptions{LabelSelector: NodeLabel + "=n2"})
 	require.NoError(t, err)
 	require.Len(t, byNode.Items, 1)
 	assert.Equal(t, "pending", byNode.Items[0].Name)
@@ -78,12 +78,12 @@ func TestScatterGatherList_HonorsFieldSelector(t *testing.T) {
 	src.Put(inv("n2", entry("ns/c", "Running")))
 	store := NewScatterGatherStore(src)
 
-	byName, err := store.List(context.Background(), ListOptions{FieldSelector: "metadata.name=b"})
+	byName, err := store.List(t.Context(), ListOptions{FieldSelector: "metadata.name=b"})
 	require.NoError(t, err)
 	require.Len(t, byName.Items, 1)
 	assert.Equal(t, "b", byName.Items[0].Name)
 
-	byNode, err := store.List(context.Background(), ListOptions{FieldSelector: "status.nodeName=n2"})
+	byNode, err := store.List(t.Context(), ListOptions{FieldSelector: "status.nodeName=n2"})
 	require.NoError(t, err)
 	require.Len(t, byNode.Items, 1)
 	assert.Equal(t, "c", byNode.Items[0].Name)
@@ -98,7 +98,7 @@ func TestScatterGatherList_ToleratesPartitionedNode(t *testing.T) {
 
 	// A partitioned node degrades to eventual consistency: its sandboxes are
 	// omitted, but the list still succeeds with the reachable node's sandboxes.
-	list, err := store.List(context.Background(), ListOptions{})
+	list, err := store.List(t.Context(), ListOptions{})
 	require.NoError(t, err)
 	require.Len(t, list.Items, 1)
 	assert.Equal(t, "s1", list.Items[0].Name)
@@ -110,13 +110,13 @@ func TestScatterGatherGet_RoutesToOwningNode(t *testing.T) {
 	src.Put(inv("n2", entry("ns/s2", "Pending")))
 	store := NewScatterGatherStore(src)
 
-	got, err := store.Get(context.Background(), "ns", "s2")
+	got, err := store.Get(t.Context(), "ns", "s2")
 	require.NoError(t, err)
 	assert.Equal(t, "s2", got.Name)
 	assert.Equal(t, "ns", got.Namespace)
 	assert.Equal(t, "n2", got.Status.NodeName)
 
-	_, err = store.Get(context.Background(), "ns", "missing")
+	_, err = store.Get(t.Context(), "ns", "missing")
 	require.Error(t, err)
 	assert.True(t, k8serrors.IsNotFound(err), "expected NotFound, got %v", err)
 }
@@ -126,7 +126,7 @@ func TestScatterGatherGet_SynthesizesStatus(t *testing.T) {
 	src.Put(inv("n1", InventoryEntry{Name: "ns/s1", ID: "sb_abc123", Phase: "Running", ClaimRef: "ns/claim-1", Address: "10.1.2.3:7777"}))
 	store := NewScatterGatherStore(src)
 
-	got, err := store.Get(context.Background(), "ns", "s1")
+	got, err := store.Get(t.Context(), "ns", "s1")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"10.1.2.3"}, got.Status.PodIPs)
 	assert.Equal(t, "claim-1", got.Labels[ClaimLabel])
@@ -173,7 +173,7 @@ func TestScatterGatherWatch_EmitsAddModifyDelete(t *testing.T) {
 
 func TestScatterGather_ObjectCountIsPoolsPlusNodes(t *testing.T) {
 	const nodes, perNode = 4, 250
-	ctx := context.Background()
+	ctx := t.Context()
 	src := NewStaticInventorySource()
 
 	for k := range nodes {
@@ -204,7 +204,7 @@ func TestScatterGather_ObjectCountIsPoolsPlusNodes(t *testing.T) {
 }
 
 func TestPublisher_RebuildsFromLiveAfterLoss(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	live := &mutableLive{entries: []InventoryEntry{entry("ns/a", "Running")}}
 	src := NewStaticInventorySource()
 	pub := NewNodeInventoryPublisher("n1", live, src, logr.Discard())

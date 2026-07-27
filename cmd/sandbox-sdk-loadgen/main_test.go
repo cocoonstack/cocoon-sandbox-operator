@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -34,7 +33,7 @@ func TestRunIssuesExactlyTotal(t *testing.T) {
 		cleanup:        true,
 		releaseTimeout: 5 * time.Second,
 	}
-	s := run(context.Background(), cl, o)
+	s := run(t.Context(), cl, o)
 
 	if s.issued != 25 {
 		t.Fatalf("issued = %d, want exactly total (25)", s.issued)
@@ -50,7 +49,7 @@ func TestRunIssuesExactlyTotal(t *testing.T) {
 	}
 
 	list := &sandboxv1beta1.SandboxList{}
-	if err := cl.List(context.Background(), list); err != nil {
+	if err := cl.List(t.Context(), list); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(list.Items) != 0 {
@@ -76,7 +75,7 @@ func TestConcurrencyClampedToTotal(t *testing.T) {
 		cleanup:        true,
 		releaseTimeout: 5 * time.Second,
 	}
-	s := run(context.Background(), cl, o)
+	s := run(t.Context(), cl, o)
 	if s.issued != 2 || s.created != 2 {
 		t.Fatalf("issued=%d created=%d, want exactly 2/2", s.issued, s.created)
 	}

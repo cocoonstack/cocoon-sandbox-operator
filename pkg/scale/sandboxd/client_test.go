@@ -1,7 +1,6 @@
 package sandboxd
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -29,7 +28,7 @@ func TestClaimSuccess(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, "root-token")
-	res, err := c.Claim(context.Background(), ClaimSpec{Template: "base:24.04", Net: "none", Size: "small", TTLSeconds: 300})
+	res, err := c.Claim(t.Context(), ClaimSpec{Template: "base:24.04", Net: "none", Size: "small", TTLSeconds: 300})
 	require.NoError(t, err)
 	require.Equal(t, "sb_abc", res.ID)
 	require.Equal(t, "sbtok", res.Token)
@@ -46,7 +45,7 @@ func TestSandboxdClaimFallbackOn429(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, "root-token")
-	_, err := c.Claim(context.Background(), ClaimSpec{Template: "base:24.04"})
+	_, err := c.Claim(t.Context(), ClaimSpec{Template: "base:24.04"})
 	require.ErrorIs(t, err, ErrNodeAtCapacity)
 }
 
@@ -60,7 +59,7 @@ func TestSandboxdClaimRedirectIsCapacityMiss(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, "root-token")
-	_, err := c.Claim(context.Background(), ClaimSpec{Template: "base:24.04"})
+	_, err := c.Claim(t.Context(), ClaimSpec{Template: "base:24.04"})
 	require.ErrorIs(t, err, ErrNodeAtCapacity)
 }
 
@@ -72,7 +71,7 @@ func TestClaimServerError(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, "root-token")
-	_, err := c.Claim(context.Background(), ClaimSpec{Template: "base:24.04"})
+	_, err := c.Claim(t.Context(), ClaimSpec{Template: "base:24.04"})
 	require.Error(t, err)
 	var he *HTTPError
 	require.ErrorAs(t, err, &he)
@@ -95,8 +94,8 @@ func TestReleaseSuccessAndAlreadyGone(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, "root-token")
-	require.NoError(t, c.Release(context.Background(), "sb_abc", "sbtok"))
+	require.NoError(t, c.Release(t.Context(), "sb_abc", "sbtok"))
 	// 404 (already gone) is treated as success.
-	require.NoError(t, c.Release(context.Background(), "sb_abc", "sbtok"))
+	require.NoError(t, c.Release(t.Context(), "sb_abc", "sbtok"))
 	require.Equal(t, int64(2), releases.Load())
 }

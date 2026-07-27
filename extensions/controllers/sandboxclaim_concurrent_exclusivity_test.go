@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -35,7 +34,7 @@ import (
 // contention, the condition the decentralized claim fast-path is built for.
 func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 	scheme := newScheme(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const (
 		warmCount  = 12

@@ -30,7 +30,7 @@ func TestDelete_ReleasesByClaimIDAnnotation(t *testing.T) {
 	store := &fakeStore{getSandbox: sb}
 	r := NewSandboxREST(store).(*sandboxREST)
 
-	obj, ok, err := r.Delete(deleteCtx("ns"), "s1", nil, &metav1.DeleteOptions{})
+	obj, ok, err := r.Delete(deleteCtx(t, "ns"), "s1", nil, &metav1.DeleteOptions{})
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.NotNil(t, obj)
@@ -50,7 +50,7 @@ func TestDelete_FailsLoudWithoutClaimID(t *testing.T) {
 	store := &fakeStore{getSandbox: sb}
 	r := NewSandboxREST(store).(*sandboxREST)
 
-	_, ok, err := r.Delete(deleteCtx("ns"), "s1", nil, &metav1.DeleteOptions{})
+	_, ok, err := r.Delete(deleteCtx(t, "ns"), "s1", nil, &metav1.DeleteOptions{})
 	require.Error(t, err)
 	assert.False(t, ok)
 	assert.True(t, apierrors.IsInternalError(err), "expected an internal error, got %v", err)
@@ -120,6 +120,6 @@ func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, 
 	return scale.SandboxStats{}, nil
 }
 
-func deleteCtx(ns string) context.Context {
-	return genericapirequest.WithNamespace(context.Background(), ns)
+func deleteCtx(t *testing.T, ns string) context.Context {
+	return genericapirequest.WithNamespace(t.Context(), ns)
 }

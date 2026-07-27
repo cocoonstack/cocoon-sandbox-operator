@@ -1112,7 +1112,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: claimToUse.Name, Namespace: "default"},
 			}
-			_, err := reconciler.Reconcile(context.Background(), req)
+			_, err := reconciler.Reconcile(t.Context(), req)
 			if tc.expectError && err == nil {
 				t.Fatal("expected an error but got none")
 			}
@@ -1121,7 +1121,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			}
 
 			var sandbox sandboxv1beta1.Sandbox
-			err = client.Get(context.Background(), req.NamespacedName, &sandbox)
+			err = client.Get(t.Context(), req.NamespacedName, &sandbox)
 			if tc.expectSandbox && err != nil {
 				t.Fatalf("get sandbox: (%v)", err)
 			}
@@ -1146,7 +1146,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			}
 
 			var updatedClaim extensionsv1beta1.SandboxClaim
-			if err := client.Get(context.Background(), req.NamespacedName, &updatedClaim); err != nil {
+			if err := client.Get(t.Context(), req.NamespacedName, &updatedClaim); err != nil {
 				t.Fatalf("get sandbox claim: (%v)", err)
 			}
 			if len(updatedClaim.Status.Conditions) != 1 {
@@ -1174,7 +1174,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			// Assert NetworkPolicy Cleanup and Preservation
 			if tc.expectDeletedNP != "" {
 				var np networkingv1.NetworkPolicy
-				err := client.Get(context.Background(), types.NamespacedName{Name: tc.expectDeletedNP, Namespace: "default"}, &np)
+				err := client.Get(t.Context(), types.NamespacedName{Name: tc.expectDeletedNP, Namespace: "default"}, &np)
 				if !k8errors.IsNotFound(err) {
 					t.Errorf("expected NetworkPolicy %q to be DELETED, but it was found or got err: %v", tc.expectDeletedNP, err)
 				}
@@ -1182,7 +1182,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 
 			if tc.expectRetainedNP != "" {
 				var np networkingv1.NetworkPolicy
-				err := client.Get(context.Background(), types.NamespacedName{Name: tc.expectRetainedNP, Namespace: "default"}, &np)
+				err := client.Get(t.Context(), types.NamespacedName{Name: tc.expectRetainedNP, Namespace: "default"}, &np)
 				if err != nil {
 					t.Errorf("expected NetworkPolicy %q to be RETAINED, but it was missing or got err: %v", tc.expectRetainedNP, err)
 				}
@@ -1359,7 +1359,7 @@ func TestSandboxClaimCleanupPolicy(t *testing.T) {
 			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: tc.claim.Name, Namespace: "default"}}
 			var err error
 			for range 2 {
-				_, err = reconciler.Reconcile(context.Background(), req)
+				_, err = reconciler.Reconcile(t.Context(), req)
 				if err != nil {
 					t.Fatalf("reconcile failed: %v", err)
 				}
@@ -1367,7 +1367,7 @@ func TestSandboxClaimCleanupPolicy(t *testing.T) {
 
 			// 1. Verify Claim
 			var fetchedClaim extensionsv1beta1.SandboxClaim
-			err = client.Get(context.Background(), req.NamespacedName, &fetchedClaim)
+			err = client.Get(t.Context(), req.NamespacedName, &fetchedClaim)
 
 			if tc.expectClaimDeleted {
 				if !k8errors.IsNotFound(err) {
@@ -1402,7 +1402,7 @@ func TestSandboxClaimCleanupPolicy(t *testing.T) {
 			var fetchedSandbox sandboxv1beta1.Sandbox
 
 			// The Sandbox might now have different name than the claim!
-			err = client.Get(context.Background(), types.NamespacedName{Name: sandbox.Name, Namespace: sandbox.Namespace}, &fetchedSandbox)
+			err = client.Get(t.Context(), types.NamespacedName{Name: sandbox.Name, Namespace: sandbox.Namespace}, &fetchedSandbox)
 
 			if tc.expectSandboxDeleted {
 				if !k8errors.IsNotFound(err) {
@@ -1478,12 +1478,12 @@ func TestSandboxClaimMirrorsFinishedConditionAndSchedulesTTL(t *testing.T) {
 	}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace}}
-	result, err := reconciler.Reconcile(context.Background(), req)
+	result, err := reconciler.Reconcile(t.Context(), req)
 	require.NoError(t, err)
 	require.Greater(t, result.RequeueAfter, time.Duration(0))
 
 	updatedClaim := &extensionsv1beta1.SandboxClaim{}
-	require.NoError(t, client.Get(context.Background(), req.NamespacedName, updatedClaim))
+	require.NoError(t, client.Get(t.Context(), req.NamespacedName, updatedClaim))
 	finishedCondition := meta.FindStatusCondition(updatedClaim.Status.Conditions, string(sandboxv1beta1.SandboxConditionFinished))
 	require.NotNil(t, finishedCondition)
 	require.Equal(t, sandboxv1beta1.SandboxReasonPodSucceeded, finishedCondition.Reason)
@@ -1588,12 +1588,12 @@ func TestSandboxClaimTTLAfterFinishedCleanupPolicy(t *testing.T) {
 			}
 
 			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace}}
-			result, err := reconciler.Reconcile(context.Background(), req)
+			result, err := reconciler.Reconcile(t.Context(), req)
 			require.NoError(t, err)
 			require.Greater(t, result.RequeueAfter, time.Duration(0))
 
 			updatedClaim := &extensionsv1beta1.SandboxClaim{}
-			require.NoError(t, client.Get(context.Background(), req.NamespacedName, updatedClaim))
+			require.NoError(t, client.Get(t.Context(), req.NamespacedName, updatedClaim))
 			readyCondition := meta.FindStatusCondition(updatedClaim.Status.Conditions, string(sandboxv1beta1.SandboxConditionReady))
 			require.NotNil(t, readyCondition)
 			require.Equal(t, extensionsv1beta1.ClaimExpiredReason, readyCondition.Reason)
@@ -1602,13 +1602,13 @@ func TestSandboxClaimTTLAfterFinishedCleanupPolicy(t *testing.T) {
 			require.Equal(t, sandboxv1beta1.SandboxReasonPodSucceeded, finishedCondition.Reason)
 
 			updatedSandbox := &sandboxv1beta1.Sandbox{}
-			require.NoError(t, client.Get(context.Background(), req.NamespacedName, updatedSandbox))
+			require.NoError(t, client.Get(t.Context(), req.NamespacedName, updatedSandbox))
 
-			result, err = reconciler.Reconcile(context.Background(), req)
+			result, err = reconciler.Reconcile(t.Context(), req)
 			require.NoError(t, err)
 			require.Zero(t, result.RequeueAfter)
 
-			err = client.Get(context.Background(), req.NamespacedName, updatedClaim)
+			err = client.Get(t.Context(), req.NamespacedName, updatedClaim)
 			if tc.expectClaimDeleted {
 				require.True(t, k8errors.IsNotFound(err))
 			} else {
@@ -1621,7 +1621,7 @@ func TestSandboxClaimTTLAfterFinishedCleanupPolicy(t *testing.T) {
 				require.Equal(t, sandboxv1beta1.SandboxReasonPodSucceeded, finishedCondition.Reason)
 			}
 
-			err = client.Get(context.Background(), req.NamespacedName, updatedSandbox)
+			err = client.Get(t.Context(), req.NamespacedName, updatedSandbox)
 			if tc.expectSandboxDeleted {
 				require.True(t, k8errors.IsNotFound(err))
 			} else {
@@ -1702,12 +1702,12 @@ func TestSandboxClaimTTLCleanupRequiresPersistedExpiredStatus(t *testing.T) {
 	}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace}}
-	result, err := reconciler.Reconcile(context.Background(), req)
+	result, err := reconciler.Reconcile(t.Context(), req)
 	require.NoError(t, err)
 	require.Greater(t, result.RequeueAfter, time.Duration(0))
 
 	updatedClaim := &extensionsv1beta1.SandboxClaim{}
-	require.NoError(t, client.Get(context.Background(), req.NamespacedName, updatedClaim))
+	require.NoError(t, client.Get(t.Context(), req.NamespacedName, updatedClaim))
 	readyCondition := meta.FindStatusCondition(updatedClaim.Status.Conditions, string(sandboxv1beta1.SandboxConditionReady))
 	require.NotNil(t, readyCondition)
 	require.Equal(t, extensionsv1beta1.ClaimExpiredReason, readyCondition.Reason)
@@ -1715,13 +1715,13 @@ func TestSandboxClaimTTLCleanupRequiresPersistedExpiredStatus(t *testing.T) {
 	require.NotNil(t, finishedCondition)
 	require.Equal(t, sandboxv1beta1.SandboxReasonPodSucceeded, finishedCondition.Reason)
 
-	require.NoError(t, client.Get(context.Background(), req.NamespacedName, &sandboxv1beta1.Sandbox{}))
+	require.NoError(t, client.Get(t.Context(), req.NamespacedName, &sandboxv1beta1.Sandbox{}))
 
-	result, err = reconciler.Reconcile(context.Background(), req)
+	result, err = reconciler.Reconcile(t.Context(), req)
 	require.NoError(t, err)
 	require.Zero(t, result.RequeueAfter)
 
-	err = client.Get(context.Background(), req.NamespacedName, &extensionsv1beta1.SandboxClaim{})
+	err = client.Get(t.Context(), req.NamespacedName, &extensionsv1beta1.SandboxClaim{})
 	require.True(t, k8errors.IsNotFound(err))
 }
 
@@ -1762,7 +1762,7 @@ func TestSandboxProvisionEvent(t *testing.T) {
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
 
-	if _, err := reconciler.Reconcile(context.Background(), req); err != nil {
+	if _, err := reconciler.Reconcile(t.Context(), req); err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
 	}
 
@@ -1842,14 +1842,14 @@ func TestCreateSandboxPropagatesVolumeClaimTemplates(t *testing.T) {
 	}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
-	_, err := reconciler.Reconcile(context.Background(), req)
+	_, err := reconciler.Reconcile(t.Context(), req)
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
 	}
 
 	// Verify sandbox was created with volumeClaimTemplates
 	sandbox := &sandboxv1beta1.Sandbox{}
-	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: claimName, Namespace: "default"}, sandbox)
+	err = fakeClient.Get(t.Context(), types.NamespacedName{Name: claimName, Namespace: "default"}, sandbox)
 	if err != nil {
 		t.Fatalf("Failed to get sandbox: %v", err)
 	}
@@ -2314,7 +2314,7 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 				},
 			}
 
-			ctx := context.Background()
+			ctx := t.Context()
 			_, err := reconciler.Reconcile(ctx, req)
 			if err != nil {
 				t.Fatalf("reconcile failed: %v", err)
@@ -2432,7 +2432,7 @@ func TestSandboxEventHandler_Delete_RemovesGhostPods(t *testing.T) {
 	}
 
 	// 3. Fire the Delete event
-	handler.Delete(context.Background(), event.DeleteEvent{Object: sb}, nil)
+	handler.Delete(t.Context(), event.DeleteEvent{Object: sb}, nil)
 
 	// 4. Verify the Ghost Pod was removed from the queue
 	_, ok := q.Get(namespacedWarmPoolName)
@@ -2461,7 +2461,7 @@ func TestWarmPoolEventHandler_Delete_RemovesEntireQueue(t *testing.T) {
 	}
 
 	// 3. Fire the Delete event
-	handler.Delete(context.Background(), event.DeleteEvent{Object: warmPool}, nil)
+	handler.Delete(t.Context(), event.DeleteEvent{Object: warmPool}, nil)
 
 	// 4. Verify the entire queue was wiped out
 	_, ok := q.Get(namespacedWarmPoolName)
@@ -2546,7 +2546,7 @@ func TestSandboxClaimNoReAdoption(t *testing.T) {
 	}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := reconciler.Reconcile(ctx, req)
 	if err != nil {
@@ -2572,7 +2572,7 @@ func TestSandboxClaimNoReAdoption(t *testing.T) {
 }
 
 func TestRecordCreationLatencyMetric(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pastTime := metav1.Time{Time: time.Now().Add(-10 * time.Second)}
 
 	testCases := []struct {
@@ -2772,7 +2772,7 @@ func TestSandboxClaimCreationMetric(t *testing.T) {
 		}
 
 		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: "default"}}
-		_, err := reconciler.Reconcile(context.Background(), req)
+		_, err := reconciler.Reconcile(t.Context(), req)
 		if err != nil {
 			t.Fatalf("reconcile failed: %v", err)
 		}
@@ -2785,7 +2785,7 @@ func TestSandboxClaimCreationMetric(t *testing.T) {
 
 		// Verify created Sandbox labels are absent
 		sb := &sandboxv1beta1.Sandbox{}
-		if err := client.Get(context.Background(), types.NamespacedName{Name: claim.Name, Namespace: "default"}, sb); err != nil {
+		if err := client.Get(t.Context(), types.NamespacedName{Name: claim.Name, Namespace: "default"}, sb); err != nil {
 			t.Fatalf("failed to get created sandbox: %v", err)
 		}
 		if val, exists := sb.Labels[sandboxv1beta1.CreatedByLabel]; exists && val != "" {
@@ -2849,7 +2849,7 @@ func TestSandboxClaimCreationMetric(t *testing.T) {
 			Tracer:           asmetrics.NewNoOp(),
 		}
 		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: "default"}}
-		_, err := reconciler.Reconcile(context.Background(), req)
+		_, err := reconciler.Reconcile(t.Context(), req)
 		if err != nil {
 			t.Fatalf("reconcile failed: %v", err)
 		}
@@ -2862,7 +2862,7 @@ func TestSandboxClaimCreationMetric(t *testing.T) {
 
 		// Verify adopted Sandbox labels are removed (since claim lacks it)
 		sb := &sandboxv1beta1.Sandbox{}
-		if err := client.Get(context.Background(), types.NamespacedName{Name: "warm-sb", Namespace: "default"}, sb); err != nil {
+		if err := client.Get(t.Context(), types.NamespacedName{Name: "warm-sb", Namespace: "default"}, sb); err != nil {
 			t.Fatalf("failed to get adopted sandbox: %v", err)
 		}
 		if val, exists := sb.Labels[sandboxv1beta1.CreatedByLabel]; exists && val != "" {
@@ -2973,11 +2973,11 @@ func TestInitializeSandboxLaunchTypeLabel(t *testing.T) {
 				Scheme: scheme,
 			}
 
-			err := reconciler.initializeSandboxLaunchTypeLabel(context.Background(), sandbox, tc.launchType)
+			err := reconciler.initializeSandboxLaunchTypeLabel(t.Context(), sandbox, tc.launchType)
 			require.NoError(t, err)
 
 			var updated sandboxv1beta1.Sandbox
-			err = fakeClient.Get(context.Background(), types.NamespacedName{Name: sandbox.Name, Namespace: sandbox.Namespace}, &updated)
+			err = fakeClient.Get(t.Context(), types.NamespacedName{Name: sandbox.Name, Namespace: sandbox.Namespace}, &updated)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, updated.Labels[sandboxv1beta1.SandboxLaunchTypeLabel])
 		})
@@ -3261,7 +3261,7 @@ func TestSandboxClaimReconcileCleanup(t *testing.T) {
 		t.Helper()
 		for _, cl := range claims {
 			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: cl.Name, Namespace: cl.Namespace}}
-			if _, err := r.Reconcile(context.Background(), req); err != nil {
+			if _, err := r.Reconcile(t.Context(), req); err != nil {
 				t.Fatalf("Reconcile(%s): %v", cl.Name, err)
 			}
 		}
@@ -3591,7 +3591,7 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 	// the claim and must requeue to try again. Post-#1107 the requeue is a bounded
 	// fixed-delay requeue with a nil error (not an exponentially-rate-limited error), so
 	// the compounding backoff that inflated adoption tail latency no longer occurs.
-	res, err := reconciler.Reconcile(context.Background(), req)
+	res, err := reconciler.Reconcile(t.Context(), req)
 	if err != nil {
 		t.Fatalf("Expected reconcile to requeue without error during cache lag, got error: %v", err)
 	}
@@ -3601,7 +3601,7 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 
 	// Verify that the claim status was NOT updated with the sandbox name (adoption deferred)
 	updatedClaim := &extensionsv1beta1.SandboxClaim{}
-	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, updatedClaim); err != nil {
+	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, updatedClaim); err != nil {
 		t.Fatalf("failed to get claim: %v", err)
 	}
 
@@ -3621,7 +3621,7 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 
 	// Verify that the extra warm sandbox was NOT adopted (it should still have its warm pool labels)
 	var extra sandboxv1beta1.Sandbox
-	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "pool-sb-extra", Namespace: "default"}, &extra); err != nil {
+	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "pool-sb-extra", Namespace: "default"}, &extra); err != nil {
 		t.Fatalf("failed to get extra warm sandbox: %v", err)
 	}
 	if _, ok := extra.Labels[warmPoolSandboxLabel]; !ok {
@@ -3631,7 +3631,7 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 	// Simulate the cache catching up!
 	// Fetch the adopted sandbox object, add the SandboxClaim owner reference, and update it in fakeClient.
 	var adopted sandboxv1beta1.Sandbox
-	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "adopted-sb", Namespace: "default"}, &adopted); err != nil {
+	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "adopted-sb", Namespace: "default"}, &adopted); err != nil {
 		t.Fatalf("failed to get adopted sandbox: %v", err)
 	}
 	adopted.OwnerReferences = []metav1.OwnerReference{{
@@ -3641,25 +3641,25 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 		UID:        "claim-uid-123",
 		Controller: ptr.To(true), // nolint:modernize
 	}}
-	if err := fakeClient.Update(context.Background(), &adopted); err != nil {
+	if err := fakeClient.Update(t.Context(), &adopted); err != nil {
 		t.Fatalf("failed to update adopted sandbox with claim owner ref: %v", err)
 	}
 
 	// Run reconcile AGAIN
-	_, err = reconciler.Reconcile(context.Background(), req)
+	_, err = reconciler.Reconcile(t.Context(), req)
 	if err != nil {
 		t.Fatalf("Expected second Reconcile to succeed after cache caught up, but failed: %v", err)
 	}
 
 	// Verify that the claim status WAS updated this time!
-	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, updatedClaim); err != nil {
+	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, updatedClaim); err != nil {
 		t.Fatalf("failed to get claim: %v", err)
 	}
 	if updatedClaim.Status.SandboxStatus.Name != "adopted-sb" {
 		t.Errorf("expected claim status to be updated with 'adopted-sb' on 2nd pass, got %q", updatedClaim.Status.SandboxStatus.Name)
 	}
 
-	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "adopted-sb", Namespace: "default"}, &adopted); err != nil {
+	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "adopted-sb", Namespace: "default"}, &adopted); err != nil {
 		t.Fatalf("failed to get adopted sandbox: %v", err)
 	}
 	if val := adopted.Labels[sandboxv1beta1.SandboxLaunchTypeLabel]; val != sandboxv1beta1.SandboxLaunchTypeWarm {
@@ -3667,7 +3667,7 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 	}
 
 	// Verify that the extra warm sandbox was STILL NOT adopted (it should still have its warm pool labels)
-	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "pool-sb-extra", Namespace: "default"}, &extra); err != nil {
+	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "pool-sb-extra", Namespace: "default"}, &extra); err != nil {
 		t.Fatalf("failed to get extra warm sandbox: %v", err)
 	}
 	if _, ok := extra.Labels[warmPoolSandboxLabel]; !ok {
@@ -3777,7 +3777,7 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
 
 	// Pass 1: adoption is triggered (patches the sandbox) and defers via bounded requeue.
-	res, err := reconciler.Reconcile(context.Background(), req)
+	res, err := reconciler.Reconcile(t.Context(), req)
 	if err != nil {
 		t.Fatalf("pass 1: expected nil error, got: %v", err)
 	}
@@ -3791,7 +3791,7 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 
 	// Passes 2 and 3: cache still stale — must keep requeueing WITHOUT re-patching.
 	for pass := 2; pass <= 3; pass++ {
-		res, err = reconciler.Reconcile(context.Background(), req)
+		res, err = reconciler.Reconcile(t.Context(), req)
 		if err != nil {
 			t.Fatalf("pass %d: expected nil error, got: %v", pass, err)
 		}
@@ -3913,7 +3913,7 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 	}
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
 
-	res, err := reconciler.Reconcile(context.Background(), req)
+	res, err := reconciler.Reconcile(t.Context(), req)
 	if err != nil {
 		t.Fatalf("expected nil error during cache lag, got: %v", err)
 	}
@@ -3922,7 +3922,7 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 	}
 
 	updatedClaim := &extensionsv1beta1.SandboxClaim{}
-	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, updatedClaim); err != nil {
+	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, updatedClaim); err != nil {
 		t.Fatalf("failed to get claim: %v", err)
 	}
 	if updatedClaim.Status.SandboxStatus.Name != "adopted-sb" {
@@ -4043,7 +4043,7 @@ func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
 
 	// Pass 1: fresh adoption through adoptSandboxFromCandidates; status is finalized.
-	if _, err := reconciler.Reconcile(context.Background(), req); err != nil {
+	if _, err := reconciler.Reconcile(t.Context(), req); err != nil {
 		t.Fatalf("pass 1: expected nil error, got: %v", err)
 	}
 	patchesAfterFirstPass := sandboxPatches
@@ -4052,7 +4052,7 @@ func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 	}
 
 	updatedClaim := &extensionsv1beta1.SandboxClaim{}
-	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, updatedClaim); err != nil {
+	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, updatedClaim); err != nil {
 		t.Fatalf("failed to get claim: %v", err)
 	}
 	if updatedClaim.Status.SandboxStatus.Name != "warm-sb" {
@@ -4063,7 +4063,7 @@ func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 	// bounded requeue WITHOUT re-sending the adoption patch, and WITHOUT wiping
 	// the status finalized on pass 1.
 	for pass := 2; pass <= 3; pass++ {
-		res, err := reconciler.Reconcile(context.Background(), req)
+		res, err := reconciler.Reconcile(t.Context(), req)
 		if err != nil {
 			t.Fatalf("pass %d: expected nil error, got: %v", pass, err)
 		}
@@ -4073,7 +4073,7 @@ func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 		if sandboxPatches != patchesAfterFirstPass {
 			t.Fatalf("pass %d: expected no additional sandbox patches while cache lags, got %d (was %d)", pass, sandboxPatches, patchesAfterFirstPass)
 		}
-		if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, updatedClaim); err != nil {
+		if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, updatedClaim); err != nil {
 			t.Fatalf("pass %d: failed to get claim: %v", pass, err)
 		}
 		if updatedClaim.Status.SandboxStatus.Name != "warm-sb" {
@@ -4158,13 +4158,13 @@ func TestSandboxClaimPreventsAdoptionFromWrongWarmPool(t *testing.T) {
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
 
-	_, err := reconciler.Reconcile(context.Background(), req)
+	_, err := reconciler.Reconcile(t.Context(), req)
 	if err != nil {
 		t.Fatalf("Expected reconcile to succeed (fall through and create new sandbox), but failed: %v", err)
 	}
 
 	var sb sandboxv1beta1.Sandbox
-	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "wrong-pool-sb", Namespace: "default"}, &sb); err != nil {
+	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "wrong-pool-sb", Namespace: "default"}, &sb); err != nil {
 		t.Fatalf("failed to get sandbox: %v", err)
 	}
 	if _, ok := sb.Labels[warmPoolSandboxLabel]; !ok {
@@ -4172,7 +4172,7 @@ func TestSandboxClaimPreventsAdoptionFromWrongWarmPool(t *testing.T) {
 	}
 
 	var newSb sandboxv1beta1.Sandbox
-	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, &newSb); err != nil {
+	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "test-claim", Namespace: "default"}, &newSb); err != nil {
 		t.Fatalf("expected a new sandbox to be created with claim name, but got error: %v", err)
 	}
 
@@ -4235,7 +4235,7 @@ func TestSandboxClaimRecoveryWhenTemplateCreated(t *testing.T) {
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
 
 	// Should return no error but RequeueAfter because template is missing
-	result, err := reconciler.Reconcile(context.Background(), req)
+	result, err := reconciler.Reconcile(t.Context(), req)
 	if err != nil {
 		t.Fatalf("expected no error when template is missing, but got %v", err)
 	}
@@ -4245,7 +4245,7 @@ func TestSandboxClaimRecoveryWhenTemplateCreated(t *testing.T) {
 
 	// Verify status is set to TemplateNotFound
 	var updatedClaim extensionsv1beta1.SandboxClaim
-	if err := fakeClient.Get(context.Background(), req.NamespacedName, &updatedClaim); err != nil {
+	if err := fakeClient.Get(t.Context(), req.NamespacedName, &updatedClaim); err != nil {
 		t.Fatalf("failed to get claim: %v", err)
 	}
 	cond := meta.FindStatusCondition(updatedClaim.Status.Conditions, string(sandboxv1beta1.SandboxConditionReady))
@@ -4254,18 +4254,18 @@ func TestSandboxClaimRecoveryWhenTemplateCreated(t *testing.T) {
 	}
 
 	// Step 2: Create template and reconcile again
-	if err := fakeClient.Create(context.Background(), template); err != nil {
+	if err := fakeClient.Create(t.Context(), template); err != nil {
 		t.Fatalf("failed to create template: %v", err)
 	}
 
-	_, err = reconciler.Reconcile(context.Background(), req)
+	_, err = reconciler.Reconcile(t.Context(), req)
 	if err != nil {
 		t.Fatalf("expected no error when template exists, but got %v", err)
 	}
 
 	// Verify sandbox is created
 	var sandbox sandboxv1beta1.Sandbox
-	if err := fakeClient.Get(context.Background(), req.NamespacedName, &sandbox); err != nil {
+	if err := fakeClient.Get(t.Context(), req.NamespacedName, &sandbox); err != nil {
 		t.Fatalf("expected sandbox to be created, but got error: %v", err)
 	}
 }
@@ -4313,7 +4313,7 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	requests := reconciler.mapWarmPoolToClaims(context.Background(), warmPool)
+	requests := reconciler.mapWarmPoolToClaims(t.Context(), warmPool)
 
 	if len(requests) != 2 {
 		t.Fatalf("expected 2 requests, got %d", len(requests))
@@ -4538,11 +4538,11 @@ func TestSandboxClaimAdoptionStrategy(t *testing.T) {
 			}
 
 			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
-			_, err := reconciler.Reconcile(context.Background(), req)
+			_, err := reconciler.Reconcile(t.Context(), req)
 			require.NoError(t, err)
 
 			var adoptedSandbox sandboxv1beta1.Sandbox
-			err = fakeClient.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: tc.expectedAdoptedSandbox}, &adoptedSandbox)
+			err = fakeClient.Get(t.Context(), types.NamespacedName{Namespace: "default", Name: tc.expectedAdoptedSandbox}, &adoptedSandbox)
 			require.NoError(t, err)
 
 			controllerRef := metav1.GetControllerOf(&adoptedSandbox)
@@ -4731,26 +4731,26 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 			}
 
 			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
-			_, err := reconciler.Reconcile(context.Background(), req)
+			_, err := reconciler.Reconcile(t.Context(), req)
 			require.NoError(t, err)
 
 			if tc.expectSandboxAdoption {
 				var adopted sandboxv1beta1.Sandbox
-				require.NoError(t, fakeClient.Get(context.Background(), types.NamespacedName{Name: tc.expectedAdoptedSandbox, Namespace: "default"}, &adopted))
+				require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: tc.expectedAdoptedSandbox, Namespace: "default"}, &adopted))
 				controllerRef := metav1.GetControllerOf(&adopted)
 				require.NotNil(t, controllerRef)
 				require.Equal(t, claim.UID, controllerRef.UID)
 
 				// Verify claim's AssignedSandboxName annotation
 				var updatedClaim extensionsv1beta1.SandboxClaim
-				require.NoError(t, fakeClient.Get(context.Background(), req.NamespacedName, &updatedClaim))
+				require.NoError(t, fakeClient.Get(t.Context(), req.NamespacedName, &updatedClaim))
 				require.Equal(t, tc.expectedAdoptedSandbox, updatedClaim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation])
 				return
 			}
 
 			// Verify newly created cold-started sandbox with propagated/merged VolumeClaimTemplates
 			sandbox := &sandboxv1beta1.Sandbox{}
-			err = fakeClient.Get(context.Background(), types.NamespacedName{Name: claimName, Namespace: "default"}, sandbox)
+			err = fakeClient.Get(t.Context(), types.NamespacedName{Name: claimName, Namespace: "default"}, sandbox)
 			require.NoError(t, err)
 
 			if tc.expectColdStart {
@@ -4902,12 +4902,12 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 			}
 
 			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
-			_, err := reconciler.Reconcile(context.Background(), req)
+			_, err := reconciler.Reconcile(t.Context(), req)
 			require.NoError(t, err)
 
 			// Verify claim condition reflects the error status
 			updatedClaim := &extensionsv1beta1.SandboxClaim{}
-			err = fakeClient.Get(context.Background(), req.NamespacedName, updatedClaim)
+			err = fakeClient.Get(t.Context(), req.NamespacedName, updatedClaim)
 			require.NoError(t, err)
 
 			cond := meta.FindStatusCondition(updatedClaim.Status.Conditions, string(sandboxv1beta1.SandboxConditionReady))
@@ -4978,11 +4978,11 @@ func TestSandboxClaimReconcile_PatchErrorPreservesStatus(t *testing.T) {
 	}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: "default"}}
-	_, err := reconciler.Reconcile(context.Background(), req)
+	_, err := reconciler.Reconcile(t.Context(), req)
 	require.Error(t, err)
 
 	updatedClaim := &extensionsv1beta1.SandboxClaim{}
-	err = fakeClient.Get(context.Background(), req.NamespacedName, updatedClaim)
+	err = fakeClient.Get(t.Context(), req.NamespacedName, updatedClaim)
 	require.NoError(t, err)
 	require.Equal(t, "warm-sandbox", updatedClaim.Status.SandboxStatus.Name, "status.sandbox.name must not be wiped out when metadata patch fails")
 }
@@ -5031,11 +5031,11 @@ func TestSandboxClaimReconcile_TransientLookupErrorPreservesStatus(t *testing.T)
 	}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: "default"}}
-	_, err := reconciler.Reconcile(context.Background(), req)
+	_, err := reconciler.Reconcile(t.Context(), req)
 	require.Error(t, err)
 
 	updatedClaim := &extensionsv1beta1.SandboxClaim{}
-	err = fakeClient.Get(context.Background(), req.NamespacedName, updatedClaim)
+	err = fakeClient.Get(t.Context(), req.NamespacedName, updatedClaim)
 	require.NoError(t, err)
 	require.Equal(t, "warm-sandbox", updatedClaim.Status.SandboxStatus.Name, "status.sandbox.name must not be wiped out when sandbox lookup fails with transient error")
 }
@@ -5073,7 +5073,7 @@ func TestReconcile_TracingNormalization(t *testing.T) {
 	}
 
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
-	_, err := reconciler.Reconcile(context.Background(), req)
+	_, err := reconciler.Reconcile(t.Context(), req)
 	_ = err
 
 	require.NotNil(t, mt.capturedAttrs)

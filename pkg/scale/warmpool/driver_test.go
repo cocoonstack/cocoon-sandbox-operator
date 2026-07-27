@@ -29,7 +29,7 @@ func TestReconcileDistributesAndMatchesPoolKey(t *testing.T) {
 	d, setter, inv, kube := newTestDriver(t, warmPool("p", 100), template())
 	putNodes(inv, 26)
 
-	if err := d.reconcileOnce(context.Background()); err != nil {
+	if err := d.reconcileOnce(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestReconcileDistributesAndMatchesPoolKey(t *testing.T) {
 	// Status is written back from the warm each node reported (0 here — targets
 	// accepted, nothing refilled yet).
 	var got extv1beta1.SandboxWarmPool
-	if err := kube.Get(context.Background(), client.ObjectKey{Namespace: "ns", Name: "p"}, &got); err != nil {
+	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: "ns", Name: "p"}, &got); err != nil {
 		t.Fatalf("get pool: %v", err)
 	}
 	if got.Status.Replicas != 0 {
@@ -89,11 +89,11 @@ func TestReconcileWritesWarmStatus(t *testing.T) {
 		})
 		setter.reportWarm("10.0.0."+name+":7777", 4)
 	}
-	if err := d.reconcileOnce(context.Background()); err != nil {
+	if err := d.reconcileOnce(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	var got extv1beta1.SandboxWarmPool
-	if err := kube.Get(context.Background(), client.ObjectKey{Namespace: "ns", Name: "p"}, &got); err != nil {
+	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: "ns", Name: "p"}, &got); err != nil {
 		t.Fatalf("get pool: %v", err)
 	}
 	if got.Status.Replicas != 8 || got.Status.ReadyReplicas != 8 {
@@ -121,11 +121,11 @@ func TestStatusPrefersPutResponseOverStaleInventory(t *testing.T) {
 		// The node itself now reports 7 — the truth as of this tick.
 		setter.reportWarm(addr, 7)
 	}
-	if err := d.reconcileOnce(context.Background()); err != nil {
+	if err := d.reconcileOnce(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	var got extv1beta1.SandboxWarmPool
-	if err := kube.Get(context.Background(), client.ObjectKey{Namespace: "ns", Name: "p"}, &got); err != nil {
+	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: "ns", Name: "p"}, &got); err != nil {
 		t.Fatalf("get pool: %v", err)
 	}
 	if got.Status.Replicas != 14 {
@@ -150,11 +150,11 @@ func TestStatusFallsBackToInventoryWhenPutFails(t *testing.T) {
 		setter.reportWarm(addr, 9)
 	}
 	setter.failAddr = "10.0.0.b:7777"
-	if err := d.reconcileOnce(context.Background()); err != nil {
+	if err := d.reconcileOnce(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	var got extv1beta1.SandboxWarmPool
-	if err := kube.Get(context.Background(), client.ObjectKey{Namespace: "ns", Name: "p"}, &got); err != nil {
+	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: "ns", Name: "p"}, &got); err != nil {
 		t.Fatalf("get pool: %v", err)
 	}
 	if got.Status.Replicas != 14 {
@@ -169,7 +169,7 @@ func TestTwoPoolsSameKeyAggregate(t *testing.T) {
 	// Both pools reference the same template "tpl" → identical key.
 	d, setter, inv, _ := newTestDriver(t, warmPool("p1", 3), warmPool("p2", 5), template())
 	putNodes(inv, 2)
-	if err := d.reconcileOnce(context.Background()); err != nil {
+	if err := d.reconcileOnce(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	sum := 0
@@ -195,7 +195,7 @@ func TestTwoPoolsSameKeyAggregate(t *testing.T) {
 func TestDrainOnZeroReplicas(t *testing.T) {
 	d, setter, inv, _ := newTestDriver(t, warmPool("p", 0), template())
 	putNodes(inv, 3)
-	if err := d.reconcileOnce(context.Background()); err != nil {
+	if err := d.reconcileOnce(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	for addr, specs := range setter.byAddr {
@@ -211,7 +211,7 @@ func TestDrainOnZeroReplicas(t *testing.T) {
 func TestApplyBoundsEachNodeCall(t *testing.T) {
 	d, setter, inv, _ := newTestDriver(t, warmPool("p", 3), template())
 	putNodes(inv, 2)
-	if err := d.reconcileOnce(context.Background()); err != nil {
+	if err := d.reconcileOnce(t.Context()); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if !setter.sawDeadline {

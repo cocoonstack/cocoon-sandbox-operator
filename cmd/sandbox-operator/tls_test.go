@@ -15,7 +15,6 @@
 package main
 
 import (
-	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"os"
@@ -49,7 +48,7 @@ func TestGenerateWebhookCerts(t *testing.T) {
 
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-		caPEM, err := generateWebhookCerts(context.Background(), fakeClient, tempDir, serviceName, namespace, clusterDomain)
+		caPEM, err := generateWebhookCerts(t.Context(), fakeClient, tempDir, serviceName, namespace, clusterDomain)
 		require.NoError(t, err)
 		require.NotEmpty(t, caPEM)
 
@@ -77,7 +76,7 @@ func TestGenerateWebhookCerts(t *testing.T) {
 
 		// 3. Verify the Secret was created in the cluster
 		secret := &corev1.Secret{}
-		err = fakeClient.Get(context.Background(), types.NamespacedName{Name: secretName, Namespace: namespace}, secret)
+		err = fakeClient.Get(t.Context(), types.NamespacedName{Name: secretName, Namespace: namespace}, secret)
 		require.NoError(t, err)
 		assert.Equal(t, caPEM, secret.Data["ca.crt"])
 		assert.NotEmpty(t, secret.Data["tls.crt"])
@@ -108,7 +107,7 @@ func TestGenerateWebhookCerts(t *testing.T) {
 
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
 
-		caPEM, err := generateWebhookCerts(context.Background(), fakeClient, tempDir, serviceName, namespace, clusterDomain)
+		caPEM, err := generateWebhookCerts(t.Context(), fakeClient, tempDir, serviceName, namespace, clusterDomain)
 		require.NoError(t, err)
 		assert.Equal(t, existingCA, caPEM)
 
@@ -145,7 +144,7 @@ func TestGenerateWebhookCerts(t *testing.T) {
 
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
 
-		caPEM, err := generateWebhookCerts(context.Background(), fakeClient, tempDir, serviceName, namespace, clusterDomain)
+		caPEM, err := generateWebhookCerts(t.Context(), fakeClient, tempDir, serviceName, namespace, clusterDomain)
 		require.Error(t, err)
 		assert.Nil(t, caPEM)
 		assert.Contains(t, err.Error(), "has invalid certificate data")
@@ -220,12 +219,12 @@ func TestPatchCRDs(t *testing.T) {
 		serviceName := "new-service"
 		namespace := "new-namespace"
 
-		err := patchCRDs(context.Background(), fakeClient, caPEM, serviceName, namespace, true)
+		err := patchCRDs(t.Context(), fakeClient, caPEM, serviceName, namespace, true)
 		require.NoError(t, err)
 
 		// Verify crd1 was patched
 		patchedCRD1 := &apiextensionsv1.CustomResourceDefinition{}
-		err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "sandboxes.agents.x-k8s.io"}, patchedCRD1)
+		err = fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandboxes.agents.x-k8s.io"}, patchedCRD1)
 		require.NoError(t, err)
 		require.NotNil(t, patchedCRD1.Spec.Conversion)
 		require.NotNil(t, patchedCRD1.Spec.Conversion.Webhook)
@@ -236,14 +235,14 @@ func TestPatchCRDs(t *testing.T) {
 
 		// Verify crd2 was patched
 		patchedCRD2 := &apiextensionsv1.CustomResourceDefinition{}
-		err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "sandboxclaims.extensions.agents.x-k8s.io"}, patchedCRD2)
+		err = fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandboxclaims.extensions.agents.x-k8s.io"}, patchedCRD2)
 		require.NoError(t, err)
 		assert.Equal(t, serviceName, patchedCRD2.Spec.Conversion.Webhook.ClientConfig.Service.Name)
 		assert.Equal(t, caPEM, patchedCRD2.Spec.Conversion.Webhook.ClientConfig.CABundle)
 
 		// Verify crd4 was NOT patched (strategy remains None)
 		patchedCRD4 := &apiextensionsv1.CustomResourceDefinition{}
-		err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "sandboxwarmpools.extensions.agents.x-k8s.io"}, patchedCRD4)
+		err = fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandboxwarmpools.extensions.agents.x-k8s.io"}, patchedCRD4)
 		require.NoError(t, err)
 		assert.Equal(t, apiextensionsv1.NoneConverter, patchedCRD4.Spec.Conversion.Strategy)
 		assert.Nil(t, patchedCRD4.Spec.Conversion.Webhook)
@@ -261,19 +260,19 @@ func TestPatchCRDs(t *testing.T) {
 			WithObjects(crd1, crd2).
 			Build()
 
-		err := patchCRDs(context.Background(), fakeClient, []byte("ca"), "svc", "ns", false)
+		err := patchCRDs(t.Context(), fakeClient, []byte("ca"), "svc", "ns", false)
 		require.NoError(t, err)
 
 		// The core Sandbox CRD is still patched.
 		patchedCRD1 := &apiextensionsv1.CustomResourceDefinition{}
-		require.NoError(t, fakeClient.Get(context.Background(), types.NamespacedName{Name: "sandboxes.agents.x-k8s.io"}, patchedCRD1))
+		require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandboxes.agents.x-k8s.io"}, patchedCRD1))
 		require.NotNil(t, patchedCRD1.Spec.Conversion.Webhook)
 		assert.Equal(t, "svc", patchedCRD1.Spec.Conversion.Webhook.ClientConfig.Service.Name)
 
 		// The extension CRD is left untouched: its original caBundle and service
 		// are unchanged (not overwritten with the new values).
 		untouchedCRD2 := &apiextensionsv1.CustomResourceDefinition{}
-		require.NoError(t, fakeClient.Get(context.Background(), types.NamespacedName{Name: "sandboxclaims.extensions.agents.x-k8s.io"}, untouchedCRD2))
+		require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandboxclaims.extensions.agents.x-k8s.io"}, untouchedCRD2))
 		assert.Equal(t, []byte("old-ca"), untouchedCRD2.Spec.Conversion.Webhook.ClientConfig.CABundle)
 		assert.Equal(t, "old-service", untouchedCRD2.Spec.Conversion.Webhook.ClientConfig.Service.Name)
 	})

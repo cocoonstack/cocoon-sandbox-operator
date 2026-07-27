@@ -20,7 +20,7 @@ func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb-abc", Token: "sbtok", OwnerAddr: "10.0.0.2:9000"}}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("uniform-token", f.factory()))
 
-	a, err := store.Claim(context.Background(), "ns", "s1", PoolKey{Template: "img"}, 600)
+	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 600)
 	require.NoError(t, err)
 	assert.Equal(t, "n2", a.Node)
 	assert.Equal(t, "sb-abc", a.SandboxName)
@@ -43,7 +43,7 @@ func TestStoreClaim_NoWarmCapacityIsRetryable(t *testing.T) {
 	f := &recordingFactory{}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
 
-	_, err := store.Claim(context.Background(), "ns", "s1", PoolKey{Template: "img"}, 0)
+	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)
 	assert.True(t, IsNoWarmCapacity(err), "want ErrNoWarmCapacity, got %v", err)
 	assert.Equal(t, 0, f.claimCalls, "must not call sandboxd when no node is warm")
@@ -56,11 +56,11 @@ func TestStoreClaim_PoolKeyMatchingNormalizesDefaults(t *testing.T) {
 	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb-1"}}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
 
-	_, err := store.Claim(context.Background(), "ns", "s1", PoolKey{Template: "img", Net: "none", Size: "small"}, 0)
+	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img", Net: "none", Size: "small"}, 0)
 	require.NoError(t, err)
 
 	// A different net finds no matching pool.
-	_, err = store.Claim(context.Background(), "ns", "s2", PoolKey{Template: "img", Net: "egress"}, 0)
+	_, err = store.Claim(t.Context(), "ns", "s2", PoolKey{Template: "img", Net: "egress"}, 0)
 	require.Error(t, err)
 	assert.True(t, IsNoWarmCapacity(err), "net mismatch must be no-capacity, got %v", err)
 }
@@ -72,7 +72,7 @@ func TestStoreClaim_SandboxdCapacityRaceIsRetryable(t *testing.T) {
 	f := &recordingFactory{claimErr: sandboxd.ErrNodeAtCapacity}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
 
-	_, err := store.Claim(context.Background(), "ns", "s1", PoolKey{Template: "img"}, 0)
+	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)
 	assert.True(t, IsNoWarmCapacity(err), "sandboxd 429 must map to no-capacity, got %v", err)
 }
@@ -83,7 +83,7 @@ func TestStoreRelease_RoutesToNodeAddressWithUniformToken(t *testing.T) {
 	f := &recordingFactory{}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("uniform-token", f.factory()))
 
-	err := store.Release(context.Background(), "n2", "sb-abc")
+	err := store.Release(t.Context(), "n2", "sb-abc")
 	require.NoError(t, err)
 	assert.Equal(t, "10.0.0.2:7777", f.builtAddr, "release must route to the node's advertise address")
 	assert.Equal(t, "sb-abc", f.releaseID)
@@ -96,11 +96,11 @@ func TestStoreClaimRelease_FailClosedWithoutRouting(t *testing.T) {
 	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 1, Target: 1}))
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard())) // no WithClaimRouting
 
-	_, err := store.Claim(context.Background(), "ns", "s1", PoolKey{Template: "img"}, 0)
+	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)
 	assert.False(t, IsNoWarmCapacity(err), "unconfigured routing is a config error, not no-capacity")
 
-	require.Error(t, store.Release(context.Background(), "n1", "sb-1"))
+	require.Error(t, store.Release(t.Context(), "n1", "sb-1"))
 }
 
 func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
@@ -115,7 +115,7 @@ func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
 
 	picked := map[string]int{}
 	for range 200 {
-		candidates, err := store.warmCandidates(context.Background(), PoolKey{Template: "img"})
+		candidates, err := store.warmCandidates(t.Context(), PoolKey{Template: "img"})
 		require.NoError(t, err)
 		best, _ := pickPowerOfTwo(candidates)
 		picked[best.node]++
@@ -133,7 +133,7 @@ func TestPickWarmNodePrefersTheWarmerSample(t *testing.T) {
 
 	warmPicks := 0
 	for range 200 {
-		candidates, err := store.warmCandidates(context.Background(), PoolKey{Template: "img"})
+		candidates, err := store.warmCandidates(t.Context(), PoolKey{Template: "img"})
 		require.NoError(t, err)
 		best, _ := pickPowerOfTwo(candidates)
 		if best.node == "warm" {
@@ -157,7 +157,7 @@ func TestStoreClaimFallsBackWhenTheSampledNodeRacedToZero(t *testing.T) {
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
 
 	for range 40 {
-		a, err := store.Claim(context.Background(), "ns", "s", PoolKey{Template: "img"}, 0)
+		a, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
 		require.NoError(t, err, "a warm node was available but the claim reported no capacity")
 		assert.Equal(t, "warm", a.Node)
 	}
@@ -171,7 +171,7 @@ func TestStoreClaimReportsNoCapacityOnlyWhenEveryNodeRaced(t *testing.T) {
 	f := &raceFactory{emptyAll: true}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
 
-	_, err := store.Claim(context.Background(), "ns", "s", PoolKey{Template: "img"}, 0)
+	_, err := store.Claim(t.Context(), "ns", "s", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)
 	assert.True(t, IsNoWarmCapacity(err), "exhausting every node must stay the retryable no-capacity signal")
 	assert.Equal(t, 2, f.calls, "each node must be tried exactly once")

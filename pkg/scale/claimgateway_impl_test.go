@@ -38,11 +38,11 @@ func TestClaimGatewayHappyPath(t *testing.T) {
 		Authorizer:  allowAuthorizer{},
 		Recorder:    NewClaimRecorder(fc),
 		TTLSeconds:  300,
-		BaseContext: context.Background(),
+		BaseContext: t.Context(),
 		Logger:      testr.New(t),
 	})
 
-	a, err := gw.Claim(context.Background(), ClaimRequest{Namespace: "default", ClaimName: "c1", WarmPool: "base:24.04"})
+	a, err := gw.Claim(t.Context(), ClaimRequest{Namespace: "default", ClaimName: "c1", WarmPool: "base:24.04"})
 	require.NoError(t, err)
 	require.True(t, strings.HasPrefix(a.SandboxName, "sb_"), "got %q", a.SandboxName)
 	require.Equal(t, "node-a", a.Node)
@@ -70,9 +70,9 @@ func TestClaimGatewayOrphanBindingConverges(t *testing.T) {
 	// Gateway whose async record always fails → the delivery is never recorded.
 	gw := NewGateway(GatewayConfig{
 		Node: "node-a", Client: fs.client(), Authorizer: allowAuthorizer{},
-		Recorder: failingRecorder{}, BaseContext: context.Background(), Logger: testr.New(t),
+		Recorder: failingRecorder{}, BaseContext: t.Context(), Logger: testr.New(t),
 	})
-	a, err := gw.Claim(context.Background(), ClaimRequest{Namespace: "default", ClaimName: "c-orphan", WarmPool: "base:24.04"})
+	a, err := gw.Claim(t.Context(), ClaimRequest{Namespace: "default", ClaimName: "c-orphan", WarmPool: "base:24.04"})
 	require.NoError(t, err)
 	gw.Wait()
 
@@ -82,13 +82,13 @@ func TestClaimGatewayOrphanBindingConverges(t *testing.T) {
 	inv := sliceInventory{{SandboxName: a.SandboxName, Node: a.Node, Address: a.Address, ClaimNS: "default", ClaimName: "c-orphan"}}
 	orc := NewOrphanReconciler("node-a", inv, fc, NewClaimRecorder(fc), testr.New(t))
 
-	n, err := orc.Reconcile(context.Background())
+	n, err := orc.Reconcile(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "the single orphan binding should be reconciled")
 	require.Equal(t, a.SandboxName, getClaim(t, fc, "c-orphan").Status.SandboxStatus.Name, "orphan binding converged to Bound")
 
 	// Idempotent: a second pass finds no orphans.
-	n, err = orc.Reconcile(context.Background())
+	n, err = orc.Reconcile(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 0, n, "orphan count must converge to 0")
 
@@ -105,10 +105,10 @@ func TestClaimGatewayFallbackOnNoCapacity(t *testing.T) {
 
 	gw := NewGateway(GatewayConfig{
 		Node: "node-a", Client: fs.client(), Authorizer: allowAuthorizer{},
-		Recorder: NewClaimRecorder(fc), BaseContext: context.Background(), Logger: testr.New(t),
+		Recorder: NewClaimRecorder(fc), BaseContext: t.Context(), Logger: testr.New(t),
 	})
 
-	a, err := gw.Claim(context.Background(), ClaimRequest{Namespace: "default", ClaimName: "c2", WarmPool: "base:24.04"})
+	a, err := gw.Claim(t.Context(), ClaimRequest{Namespace: "default", ClaimName: "c2", WarmPool: "base:24.04"})
 	require.Error(t, err)
 	require.True(t, IsFallback(err), "429 must map to a fallback signal, got %v", err)
 	require.ErrorIs(t, err, ErrNoNodeCapacity)
@@ -127,25 +127,25 @@ func TestClaimGatewayReleaseOwnerTeardownOnly(t *testing.T) {
 
 	gw := NewGateway(GatewayConfig{
 		Node: "node-a", Client: fs.client(), Authorizer: allowAuthorizer{},
-		Recorder: noopRecorder{}, BaseContext: context.Background(), Logger: testr.New(t),
+		Recorder: noopRecorder{}, BaseContext: t.Context(), Logger: testr.New(t),
 	})
 
-	a, err := gw.Claim(context.Background(), ClaimRequest{Namespace: "default", ClaimName: "c-rel", WarmPool: "base:24.04"})
+	a, err := gw.Claim(t.Context(), ClaimRequest{Namespace: "default", ClaimName: "c-rel", WarmPool: "base:24.04"})
 	require.NoError(t, err)
 	gw.Wait()
 
 	// Owner-authorized teardown of a delivered sandbox destroys exactly that VM.
-	require.NoError(t, gw.Release(context.Background(), a))
+	require.NoError(t, gw.Release(t.Context(), a))
 	require.Equal(t, int64(1), fs.releases.Load(), "owner teardown must destroy the delivered VM")
 
 	// An Assignment the gateway never delivered (pod-derived / stale) must NOT
 	// reach sandboxd — no code path from pod state to a VM destroy.
-	err = gw.Release(context.Background(), Assignment{SandboxName: "sb_never_delivered", Node: "node-a"})
+	err = gw.Release(t.Context(), Assignment{SandboxName: "sb_never_delivered", Node: "node-a"})
 	require.Error(t, err)
 	require.Equal(t, int64(1), fs.releases.Load(), "an undelivered Assignment must not trigger any destroy")
 
 	// A second release of the same sandbox is likewise refused (already handed back).
-	err = gw.Release(context.Background(), a)
+	err = gw.Release(t.Context(), a)
 	require.Error(t, err)
 	require.Equal(t, int64(1), fs.releases.Load())
 }
@@ -159,13 +159,13 @@ func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
 		gw := NewGateway(GatewayConfig{
 			Node: "node-a", Client: fs.client(),
 			Authorizer: &ReviewAuthorizer{Reviewer: fakeSAR{allow: false}},
-			Recorder:   noopRecorder{}, BaseContext: context.Background(), Logger: testr.New(t),
+			Recorder:   noopRecorder{}, BaseContext: t.Context(), Logger: testr.New(t),
 		})
 		req := ClaimRequest{
 			Namespace: "default", ClaimName: "c3", WarmPool: "base:24.04",
 			Selector: map[string]string{RequestUserSelectorKey: "alice"},
 		}
-		a, err := gw.Claim(context.Background(), req)
+		a, err := gw.Claim(t.Context(), req)
 		require.Error(t, err)
 		require.False(t, IsFallback(err), "an authz denial is a hard reject, not a fallback")
 		require.Equal(t, Assignment{}, a)
@@ -177,9 +177,9 @@ func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
 		gw := NewGateway(GatewayConfig{
 			Node: "node-a", Client: fs.client(),
 			Authorizer: &ReviewAuthorizer{Reviewer: fakeSAR{allow: true}},
-			Recorder:   noopRecorder{}, BaseContext: context.Background(), Logger: testr.New(t),
+			Recorder:   noopRecorder{}, BaseContext: t.Context(), Logger: testr.New(t),
 		})
-		_, err := gw.Claim(context.Background(), ClaimRequest{Namespace: "default", ClaimName: "c4", WarmPool: "base:24.04"})
+		_, err := gw.Claim(t.Context(), ClaimRequest{Namespace: "default", ClaimName: "c4", WarmPool: "base:24.04"})
 		require.Error(t, err, "no caller identity must fail closed")
 		require.Equal(t, int64(0), fs.claims.Load())
 	})
@@ -190,13 +190,13 @@ func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
 		gw := NewGateway(GatewayConfig{
 			Node: "node-a", Client: fs.client(),
 			Authorizer: &ReviewAuthorizer{Reviewer: fakeSAR{allow: true}},
-			Recorder:   NewClaimRecorder(fc), BaseContext: context.Background(), Logger: testr.New(t),
+			Recorder:   NewClaimRecorder(fc), BaseContext: t.Context(), Logger: testr.New(t),
 		})
 		req := ClaimRequest{
 			Namespace: "default", ClaimName: "c5", WarmPool: "base:24.04",
 			Selector: map[string]string{RequestUserSelectorKey: "alice"},
 		}
-		a, err := gw.Claim(context.Background(), req)
+		a, err := gw.Claim(t.Context(), req)
 		require.NoError(t, err)
 		require.NotEmpty(t, a.SandboxName)
 		require.Equal(t, int64(1), fs.claims.Load())
@@ -309,7 +309,7 @@ func newClaimClient(t *testing.T, names ...string) client.Client {
 func getClaim(t *testing.T, c client.Client, name string) *extv1beta1.SandboxClaim {
 	t.Helper()
 	cur := &extv1beta1.SandboxClaim{}
-	require.NoError(t, c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: name}, cur))
+	require.NoError(t, c.Get(t.Context(), types.NamespacedName{Namespace: "default", Name: name}, cur))
 	return cur
 }
 

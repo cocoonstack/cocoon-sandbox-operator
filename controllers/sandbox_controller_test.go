@@ -3673,7 +3673,7 @@ func TestSandboxReconcile_ConditionsDoNotAccumulate(t *testing.T) {
 		Tracer: asmetrics.NewNoOp(),
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: sbName, Namespace: sbNs}}
 
 	const iters = 20
@@ -3720,7 +3720,7 @@ func TestReconcile_TracingNormalization(t *testing.T) {
 		ClusterDomain: "cluster.local",
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: sbName, Namespace: sbNs}}
 
 	var sb sandboxv1beta1.Sandbox

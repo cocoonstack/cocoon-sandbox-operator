@@ -17,7 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -43,7 +42,7 @@ import (
 // sandbox must be adopted by at most one claim.
 func TestWarmPoolPodExclusivity(t *testing.T) {
 	scheme := newScheme(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	poolNameHash := sandboxcontrollers.NameHash("pool")
 	templateHash := sandboxcontrollers.NameHash("tpl")
