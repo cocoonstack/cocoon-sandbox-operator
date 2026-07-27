@@ -12,6 +12,9 @@ GIT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 LD_FLAGS := -s -w -X $(VERSION_PKG).gitVersion=$(GIT_VERSION) -X $(VERSION_PKG).gitSHA=$(GIT_SHA) -X $(VERSION_PKG).buildDate=$(BUILD_DATE)
 
+## Build-tagged harnesses under test/, one tag per directory
+TAGGED_HARNESSES := e2e e2ebench l2bench l3bench poolbench scalebench scalestress
+
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
@@ -61,12 +64,21 @@ coverage: vet ## Write unit-test coverage to bin/coverage.out.
 	go test -coverprofile=bin/coverage.out ./...
 
 .PHONY: vet
-vet: ## Run go vet.
-	go vet ./...
+vet: ## Run go vet on linux and darwin.
+	GOOS=linux go vet ./...
+	GOOS=darwin go vet ./...
+
+.PHONY: vet-tagged
+vet-tagged: ## Type-check the build-tagged e2e/bench harnesses.
+	@for t in $(TAGGED_HARNESSES); do \
+		echo "go vet -tags $$t ./test/$$t"; \
+		go vet -tags $$t ./test/$$t || exit 1; \
+	done
 
 .PHONY: lint
-lint: golangci-lint ## Run golangci-lint.
-	$(GOLANGCILINT) run ./...
+lint: golangci-lint ## Run golangci-lint on linux and darwin.
+	GOOS=linux $(GOLANGCILINT) run ./...
+	GOOS=darwin $(GOLANGCILINT) run ./...
 
 .PHONY: fmt
 fmt: ## Format Go source files.
