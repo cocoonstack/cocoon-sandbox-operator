@@ -140,10 +140,10 @@ func TestReconcilePool(t *testing.T) {
 
 			ctx := t.Context()
 
-			err := r.reconcilePool(ctx, warmPool)
+			_, err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
-			err = r.reconcilePool(ctx, warmPool)
+			_, err = r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
 			// Verify final state - count sandboxes with correct warm pool label
@@ -276,10 +276,10 @@ func TestReconcilePoolControllerRef(t *testing.T) {
 
 			ctx := t.Context()
 
-			err := r.reconcilePool(ctx, warmPool)
+			_, err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
-			err = r.reconcilePool(ctx, warmPool)
+			_, err = r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
 			list := &sandboxv1beta1.SandboxList{}
@@ -365,7 +365,7 @@ func TestPoolLabelValueInIntegration(t *testing.T) {
 
 		expectedPoolNameHash := sandboxcontrollers.NameHash(poolName)
 
-		err := r.reconcilePool(ctx, warmPool)
+		_, err := r.reconcilePool(ctx, warmPool)
 		require.NoError(t, err)
 
 		list := &sandboxv1beta1.SandboxList{}
@@ -463,7 +463,7 @@ func TestCreatePoolSandboxPropagatesVolumeClaimTemplates(t *testing.T) {
 		MaxBatchSize: sandboxCreateDeleteMaxBatchSize,
 	}
 
-	err := r.reconcilePool(ctx, warmPool)
+	_, err := r.reconcilePool(ctx, warmPool)
 	require.NoError(t, err)
 
 	list := &sandboxv1beta1.SandboxList{}
@@ -559,7 +559,7 @@ func TestCreatePoolSandboxAppliesSecureDefaults(t *testing.T) {
 				MaxBatchSize: sandboxCreateDeleteMaxBatchSize,
 			}
 
-			err := r.reconcilePool(ctx, warmPool)
+			_, err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
 			list := &sandboxv1beta1.SandboxList{}
@@ -672,9 +672,9 @@ func TestReconcilePoolReadyReplicas(t *testing.T) {
 
 			ctx := t.Context()
 
-			err := r.reconcilePool(ctx, warmPool)
+			_, err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
-			err = r.reconcilePool(ctx, warmPool)
+			_, err = r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
 			require.Equal(t, tc.expectedReadyReplicas, warmPool.Status.ReadyReplicas)
@@ -766,7 +766,7 @@ func TestReconcilePoolGCStuckSandboxes(t *testing.T) {
 		}
 
 		ctx := t.Context()
-		err := r.reconcilePool(ctx, warmPool)
+		_, err := r.reconcilePool(ctx, warmPool)
 		require.NoError(t, err)
 
 		// The stuck sandbox should be deleted and replaced
@@ -796,7 +796,7 @@ func TestReconcilePoolGCStuckSandboxes(t *testing.T) {
 		}
 
 		ctx := t.Context()
-		err := r.reconcilePool(ctx, warmPool)
+		_, err := r.reconcilePool(ctx, warmPool)
 		require.NoError(t, err)
 
 		// Both should be kept (one healthy, one still within grace period)
@@ -896,7 +896,7 @@ func TestReconcilePool_TemplateUpdateRollout(t *testing.T) {
 			ctx := t.Context()
 
 			// Initial reconciliation to create the sandboxes
-			err := r.reconcilePool(ctx, warmPool)
+			_, err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
 			// Get initial hash label
@@ -925,7 +925,7 @@ func TestReconcilePool_TemplateUpdateRollout(t *testing.T) {
 			require.NotEqual(t, initialHash, updatedHash, "Hashes should differ after template update")
 
 			// Reconcile again to trigger rollout (or lack thereof)
-			err = r.reconcilePool(ctx, warmPool)
+			_, err = r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
 			// Verify state after update
@@ -954,7 +954,7 @@ func TestReconcilePool_TemplateUpdateRollout(t *testing.T) {
 				require.NoError(t, err)
 
 				// Reconcile to trigger replenishment
-				err = r.reconcilePool(ctx, warmPool)
+				_, err = r.reconcilePool(ctx, warmPool)
 				require.NoError(t, err)
 
 				// Verify that we have 2 sandboxes: one old (v1) and one new (v2)
@@ -1039,7 +1039,7 @@ func TestReconcilePool_TemplateRefUpdate_SameSpec(t *testing.T) {
 	ctx := t.Context()
 
 	// Initial reconcile
-	err := r.reconcilePool(ctx, warmPool)
+	_, err := r.reconcilePool(ctx, warmPool)
 	require.NoError(t, err)
 
 	sandboxes := &sandboxv1beta1.SandboxList{}
@@ -1073,7 +1073,7 @@ func TestReconcilePool_TemplateRefUpdate_SameSpec(t *testing.T) {
 	require.NoError(t, err)
 
 	// Reconcile again to trigger rollout
-	err = r.reconcilePool(ctx, warmPool)
+	_, err = r.reconcilePool(ctx, warmPool)
 	require.NoError(t, err)
 
 	// Verify state after update
@@ -1293,7 +1293,7 @@ func TestReconcilePool_TemplateUpdate_DNSPolicy(t *testing.T) {
 	}
 
 	// Initial reconcile to create sandboxes
-	err := r.reconcilePool(ctx, warmPool)
+	_, err := r.reconcilePool(ctx, warmPool)
 	require.NoError(t, err)
 
 	// Verify initial state
@@ -1312,7 +1312,7 @@ func TestReconcilePool_TemplateUpdate_DNSPolicy(t *testing.T) {
 	require.NoError(t, err)
 
 	// Reconcile again, should trigger rollout (deletion and recreation)
-	err = r.reconcilePool(ctx, warmPool)
+	_, err = r.reconcilePool(ctx, warmPool)
 	require.NoError(t, err)
 
 	// Verify that sandboxes now have the updated DNSPolicy
@@ -1372,7 +1372,7 @@ func TestIsSandboxStale_OrphanedSandboxVetting(t *testing.T) {
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: *spoofedSpec}}},
 	}
 
-	isStaleSpoofed := r.isSandboxStale(ctx, spoofedOrphan, template, currentSandboxBlueprintHash, vettedHashes)
+	isStaleSpoofed := r.isSandboxStale(ctx, spoofedOrphan, template, SandboxTemplateRefHash(template.Name), currentSandboxBlueprintHash, vettedHashes)
 	require.True(t, isStaleSpoofed, "Orphaned sandbox with spoofed hash but modified PodSpec should be stale")
 
 	// Case 2: Orphaned sandbox with matching hash label and genuine/fully vetted PodSpec.
@@ -1393,7 +1393,7 @@ func TestIsSandboxStale_OrphanedSandboxVetting(t *testing.T) {
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: *genuineSpec}}},
 	}
 
-	isStaleGenuine := r.isSandboxStale(ctx, genuineOrphan, template, currentSandboxBlueprintHash, vettedHashes)
+	isStaleGenuine := r.isSandboxStale(ctx, genuineOrphan, template, SandboxTemplateRefHash(template.Name), currentSandboxBlueprintHash, vettedHashes)
 	require.False(t, isStaleGenuine, "Orphaned sandbox with genuine fully vetted PodSpec should be fresh")
 }
 
@@ -1562,7 +1562,7 @@ func TestReconcilePool_EvictionOverride(t *testing.T) {
 				EnableWarmPoolEviction: tc.controllerEnable,
 			}
 
-			err := r.reconcilePool(ctx, warmPool)
+			_, err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
 			list := &sandboxv1beta1.SandboxList{}
@@ -1767,7 +1767,7 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 			ctx := t.Context()
 
 			// Initial reconcile
-			err := r.reconcilePool(ctx, warmPool)
+			_, err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
 			sandboxes := &sandboxv1beta1.SandboxList{}
@@ -1798,7 +1798,7 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 			}
 
 			// Recreate strategy should delete stale sandbox and create a fresh one
-			err = r.reconcilePool(ctx, warmPool)
+			_, err = r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
 			err = r.List(ctx, sandboxes, client.InNamespace(poolNamespace))

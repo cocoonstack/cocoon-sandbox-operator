@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync/atomic"
 	"time"
@@ -32,11 +33,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
@@ -106,7 +110,8 @@ func (r *SandboxWarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	oldStatus := warmPool.Status.DeepCopy()
 
 	// Reconcile the pool (create or delete Sandboxes as needed)
-	if err := r.reconcilePool(ctx, warmPool); err != nil {
+	requeueAfter, err := r.reconcilePool(ctx, warmPool)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -116,18 +121,18 @@ func (r *SandboxWarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
 // reconcilePool ensures the correct number of pre-allocated sandboxes exist in the pool.
-func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) error {
+func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) (time.Duration, error) {
 	logger := log.FromContext(ctx)
 
 	// In the L3 writable-aggregation design warm capacity lives per-node in
 	// sandboxd, not as Sandbox CRs, and creating CRs would fight the aggregated
 	// node-local claim path. When disabled, report status without any create/delete.
 	if r.DisableSandboxCRManagement {
-		return r.reconcilePoolStatusOnly(ctx, warmPool)
+		return 0, r.reconcilePoolStatusOnly(ctx, warmPool)
 	}
 
 	// Compute hash of the warm pool name for the pool label
@@ -139,12 +144,15 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 		warmPoolSandboxLabel: poolNameHash,
 	})
 
+	// Copy-free cache read: items are value snapshots sharing cache-owned maps
+	// and slices, so every member mutation below deep-copies its target first.
 	if err := r.List(ctx, sandboxList,
 		client.InNamespace(warmPool.Namespace),
 		client.MatchingFields{sandboxWarmPoolLabelIndex: poolNameHash},
+		client.UnsafeDisableDeepCopy,
 	); err != nil {
 		logger.Error(err, "Failed to list sandboxes")
-		return err
+		return 0, err
 	}
 
 	// Fetch template and compute hash once to avoid repeated expensive operations,
@@ -157,16 +165,23 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 
 	now := time.Now()
 	var healthySandboxes []sandboxv1beta1.Sandbox
+	var stuckRecheck time.Duration
 	for _, sb := range activeSandboxes {
-		if !isSandboxReady(&sb) && !sb.CreationTimestamp.IsZero() && now.Sub(sb.CreationTimestamp.Time) > warmPoolReadinessGracePeriod {
-			logger.Info("Deleting stuck warm pool sandbox",
-				"sandbox", sb.Name,
-				"age", now.Sub(sb.CreationTimestamp.Time).Round(time.Second))
-			if err := r.Delete(ctx, &sb); err != nil {
-				logger.Error(err, "Failed to delete stuck sandbox", "sandbox", sb.Name)
-				allErrors = errors.Join(allErrors, err)
+		if !isSandboxReady(&sb) && !sb.CreationTimestamp.IsZero() {
+			age := now.Sub(sb.CreationTimestamp.Time)
+			if age > warmPoolReadinessGracePeriod {
+				logger.Info("Deleting stuck warm pool sandbox",
+					"sandbox", sb.Name,
+					"age", age.Round(time.Second))
+				if err := r.Delete(ctx, &sb); err != nil {
+					logger.Error(err, "Failed to delete stuck sandbox", "sandbox", sb.Name)
+					allErrors = errors.Join(allErrors, err)
+				}
+				continue
 			}
-			continue
+			// Member events are change-filtered, so the grace deadline needs its
+			// own timer instead of riding on unrelated pool churn.
+			stuckRecheck = soonerRequeue(stuckRecheck, warmPoolReadinessGracePeriod-age)
 		}
 		healthySandboxes = append(healthySandboxes, sb)
 	}
@@ -253,7 +268,7 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 		allErrors = errors.Join(allErrors, tmplErr)
 	}
 
-	return allErrors
+	return stuckRecheck, allErrors
 }
 
 // reconcilePoolStatusOnly reports pool status without creating or deleting any
@@ -266,9 +281,11 @@ func (r *SandboxWarmPoolReconciler) reconcilePoolStatusOnly(ctx context.Context,
 	labelSelector := labels.SelectorFromSet(labels.Set{warmPoolSandboxLabel: poolNameHash})
 
 	sandboxList := &sandboxv1beta1.SandboxList{}
+	// Copy-free cache read; this branch only counts, never mutates members.
 	if err := r.List(ctx, sandboxList,
 		client.InNamespace(warmPool.Namespace),
 		client.MatchingFields{sandboxWarmPoolLabelIndex: poolNameHash},
+		client.UnsafeDisableDeepCopy,
 	); err != nil {
 		log.FromContext(ctx).Error(err, "Failed to list sandboxes (status-only reconcile)")
 		return err
@@ -313,6 +330,10 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 	var allErrors error
 
 	vettedHashes := make(map[string]bool)
+	var currentTemplateRefHash string
+	if template != nil {
+		currentTemplateRefHash = SandboxTemplateRefHash(template.Name)
+	}
 
 	// Determine the update strategy, defaulting to OnReplenish if not specified or unknown.
 	var updateStrategyType extensionsv1beta1.SandboxWarmPoolUpdateStrategyType
@@ -346,7 +367,7 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 		}
 
 		if tmplErr == nil && (updateStrategy == extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType || isOrphan) {
-			if r.isSandboxStale(ctx, &sb, template, currentSandboxBlueprintHash, vettedHashes) {
+			if r.isSandboxStale(ctx, &sb, template, currentTemplateRefHash, currentSandboxBlueprintHash, vettedHashes) {
 				logger.Info("Deleting stale sandbox", "sandbox", sb.Name, "isOrphan", isOrphan)
 				if err := r.Delete(ctx, &sb); err != nil {
 					logger.Error(err, "Failed to delete stale sandbox", "sandbox", sb.Name)
@@ -356,21 +377,27 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 			}
 		}
 
-		if isControlledByPool && setWarmLaunchTypeLabelIfNeeded(&sb) {
-			if err := r.Update(ctx, &sb); err != nil {
+		// sb shares cache-owned maps (copy-free List); mutate deep copies only.
+		if isControlledByPool && sb.Labels[sandboxv1beta1.SandboxLaunchTypeLabel] != sandboxv1beta1.SandboxLaunchTypeWarm {
+			fresh := sb.DeepCopy()
+			setWarmLaunchTypeLabelIfNeeded(fresh)
+			if err := r.Update(ctx, fresh); err != nil {
 				logger.Error(err, "Failed to update sandbox launch type label", "sandbox", sb.Name)
 				allErrors = errors.Join(allErrors, err)
 				continue
 			}
+			sb = *fresh
 		}
 
 		if isOrphan {
 			logger.Info("Adopting orphaned sandbox", "sandbox", sb.Name)
-			if err := r.adoptSandbox(ctx, warmPool, &sb); err != nil {
+			fresh := sb.DeepCopy()
+			if err := r.adoptSandbox(ctx, warmPool, fresh); err != nil {
 				logger.Error(err, "Failed to adopt sandbox", "sandbox", sb.Name)
 				allErrors = errors.Join(allErrors, err)
 				continue
 			}
+			sb = *fresh
 		}
 
 		activeSandboxes = append(activeSandboxes, sb)
@@ -539,13 +566,14 @@ func (r *SandboxWarmPoolReconciler) isSandboxStale(
 	ctx context.Context,
 	sandbox *sandboxv1beta1.Sandbox,
 	template *extensionsv1beta1.SandboxTemplate,
+	currentTemplateRefHash string,
 	currentSandboxBlueprintHash string,
 	vettedHashes map[string]bool,
 ) bool {
 	sandboxHash := sandbox.Labels[sandboxv1beta1.SandboxTemplateHashLabel]
 
 	// If the templateRefHash doesn't match, it's stale.
-	if sandbox.Labels[sandboxTemplateRefHash] != SandboxTemplateRefHash(template.Name) {
+	if sandbox.Labels[sandboxTemplateRefHash] != currentTemplateRefHash {
 		return true
 	}
 
@@ -670,13 +698,32 @@ func (r *SandboxWarmPoolReconciler) SetupWithManager(mgr ctrl.Manager, concurren
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&extensionsv1beta1.SandboxWarmPool{}).
-		Owns(&sandboxv1beta1.Sandbox{}).
+		Owns(&sandboxv1beta1.Sandbox{}, builder.WithPredicates(poolMemberChangePredicate())).
 		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
 		Watches(
 			&extensionsv1beta1.SandboxTemplate{},
 			handler.EnqueueRequestsFromMapFunc(r.findWarmPoolsForTemplate),
 		).
 		Complete(r)
+}
+
+// poolMemberChangePredicate passes only the member transitions reconcilePool
+// reads — ownership, labels, deletion, Ready flips. Every other member update
+// (PodIPs, other conditions, annotations) re-scanned the whole pool for nothing.
+func poolMemberChangePredicate() predicate.Funcs {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldSb, okOld := e.ObjectOld.(*sandboxv1beta1.Sandbox)
+			newSb, okNew := e.ObjectNew.(*sandboxv1beta1.Sandbox)
+			if !okOld || !okNew {
+				return true
+			}
+			return oldSb.DeletionTimestamp.IsZero() != newSb.DeletionTimestamp.IsZero() ||
+				!maps.Equal(oldSb.Labels, newSb.Labels) ||
+				!equality.Semantic.DeepEqual(oldSb.OwnerReferences, newSb.OwnerReferences) ||
+				isSandboxReady(oldSb) != isSandboxReady(newSb)
+		},
+	}
 }
 
 // findWarmPoolsForTemplate returns a list of reconcile.Requests for all SandboxWarmPools that reference the template.
