@@ -91,11 +91,6 @@ linters:
       # label names read worse behind an identifier than as the literal they are.
       - linters: [goconst]
         text: "string `(kind|object|apiVersion|app|name|namespace|true|None|controller|timeout|launch_type|v1beta1|1\\.1\\.1\\.1|8\\.8\\.8\\.8|sandbox-router|sandbox_template|warmpool_name|sandboxes\\.agents\\.x-k8s\\.io)`"
-      # The pre-rename hash and assigned-name keys are no longer written; the
-      # remaining reads clear or migrate residue on objects from older operators
-      # and go away, with these constants, in the next release.
-      - linters: [staticcheck]
-        text: "SA1019: \\w*v1beta1.Deprecated(SandboxPodTemplateHash|AssignedSandboxName)Label"
 
 formatters:
   enable:

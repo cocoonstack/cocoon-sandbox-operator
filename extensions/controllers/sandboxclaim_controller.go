@@ -984,7 +984,6 @@ func (r *SandboxClaimReconciler) completeAdoption(ctx context.Context, claim *ex
 
 	// Remove warm pool labels so the sandbox no longer appears in warm pool queries
 	delete(adopted.Labels, warmPoolSandboxLabel)
-	delete(adopted.Labels, v1beta1.DeprecatedSandboxPodTemplateHashLabel)
 	delete(adopted.Labels, v1beta1.SandboxTemplateHashLabel)
 	if adopted.Labels == nil {
 		adopted.Labels = make(map[string]string)
@@ -1468,17 +1467,6 @@ func validateVolumeClaimTemplates(vcts []v1beta1.PersistentVolumeClaimTemplate) 
 	return nil
 }
 
-// migrateLegacyAssignedSandboxLabel migrates legacy assigned Sandbox name from label to annotation.
-func (r *SandboxClaimReconciler) migrateLegacyAssignedSandboxLabel(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, sbName string) error {
-	patch := client.MergeFrom(claim.DeepCopy())
-	if claim.Annotations == nil {
-		claim.Annotations = make(map[string]string)
-	}
-	claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation] = sbName
-	delete(claim.Labels, extensionsv1beta1.DeprecatedAssignedSandboxNameLabel)
-	return r.Patch(ctx, claim, patch)
-}
-
 func (r *SandboxClaimReconciler) getOrCreateSandbox(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, _ *extensionsv1beta1.SandboxTemplate) (*v1beta1.Sandbox, error) {
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("Executing getOrCreateSandbox", "claim", claim.Name)
@@ -1528,7 +1516,6 @@ func (r *SandboxClaimReconciler) sandboxFromStatus(ctx context.Context, claim *e
 	r.triggeredAdoptions.Delete(types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace})
 	launchType := v1beta1.SandboxLaunchTypeCold
 	if claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation] == statusName ||
-		claim.Labels[extensionsv1beta1.DeprecatedAssignedSandboxNameLabel] == statusName ||
 		statusName != claim.Name {
 		launchType = v1beta1.SandboxLaunchTypeWarm
 	}
@@ -1538,16 +1525,16 @@ func (r *SandboxClaimReconciler) sandboxFromStatus(ctx context.Context, claim *e
 	return sandbox, nil
 }
 
-// sandboxFromClaimMetadata resolves the assigned-sandbox annotation (or the legacy
-// label it replaced). A Sandbox still owned by the warm pool means an adoption is
-// half-finished, which this completes.
+// sandboxFromClaimMetadata resolves the assigned-sandbox annotation. A Sandbox
+// still owned by the warm pool means an adoption is half-finished, which this
+// completes.
 func (r *SandboxClaimReconciler) sandboxFromClaimMetadata(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*v1beta1.Sandbox, error) {
-	sbName, fromLabel := assignedSandboxName(claim)
+	sbName := assignedSandboxName(claim)
 	if sbName == "" {
 		return nil, nil
 	}
 	logger := log.FromContext(ctx)
-	logger.V(1).Info("Checking assigned sandbox name", "sandboxName", sbName, "fromLabel", fromLabel, "claim", claim.Name)
+	logger.V(1).Info("Checking assigned sandbox name", "sandboxName", sbName, "claim", claim.Name)
 
 	sandbox := &v1beta1.Sandbox{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: sbName}, sandbox); err != nil {
@@ -1555,7 +1542,7 @@ func (r *SandboxClaimReconciler) sandboxFromClaimMetadata(ctx context.Context, c
 			return nil, fmt.Errorf("failed to get sandbox %q for sandbox name lookup: %w", sbName, err)
 		}
 		logger.Info("Sandbox recorded in claim metadata not found, removing stale reference", "sandboxName", sbName, "claim", claim.Name)
-		if err := r.clearAssignedSandboxName(ctx, claim, fromLabel); err != nil {
+		if err := r.clearAssignedSandboxName(ctx, claim); err != nil {
 			return nil, fmt.Errorf("failed to remove stale sandbox reference from claim metadata: %w", err)
 		}
 		logger.Info("Successfully removed stale sandbox reference from claim metadata", "sandbox", sbName, "claim", claim.Name)
@@ -1565,7 +1552,6 @@ func (r *SandboxClaimReconciler) sandboxFromClaimMetadata(ctx context.Context, c
 	if metav1.IsControlledBy(sandbox, claim) {
 		logger.V(4).Info("Found existing adopted sandbox", "sandbox", sbName, "claim", claim.Name)
 		r.triggeredAdoptions.Delete(types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace})
-		r.migrateLegacyLabelIfNeeded(ctx, claim, sbName, fromLabel, "")
 		if err := r.initializeSandboxLaunchTypeLabel(ctx, sandbox, v1beta1.SandboxLaunchTypeWarm); err != nil {
 			return nil, fmt.Errorf("failed to initialize launch type label on sandbox %q: %w", sandbox.Name, err)
 		}
@@ -1573,7 +1559,7 @@ func (r *SandboxClaimReconciler) sandboxFromClaimMetadata(ctx context.Context, c
 	}
 
 	if ref := metav1.GetControllerOf(sandbox); ref != nil && ref.Kind == warmPoolKind {
-		return nil, r.completePendingAdoption(ctx, claim, sandbox, sbName, fromLabel)
+		return nil, r.completePendingAdoption(ctx, claim, sandbox, sbName)
 	}
 	logger.V(4).Info("Sandbox recorded in claim metadata belongs to another claim, falling through", "sandbox", sbName, "claim", claim.Name)
 	return nil, nil
@@ -1582,13 +1568,13 @@ func (r *SandboxClaimReconciler) sandboxFromClaimMetadata(ctx context.Context, c
 // completePendingAdoption finishes an adoption the claim already recorded. It never
 // returns a Sandbox: the caller must requeue so a later pass observes the adopted
 // Sandbox once the informer cache converges.
-func (r *SandboxClaimReconciler) completePendingAdoption(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, sandbox *v1beta1.Sandbox, sbName string, fromLabel bool) error {
+func (r *SandboxClaimReconciler) completePendingAdoption(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, sandbox *v1beta1.Sandbox, sbName string) error {
 	logger := log.FromContext(ctx)
 	logger.Info("Sandbox found in claim metadata still in warm pool, trying to complete adoption", "sandbox", sbName, "claim", claim.Name)
 
 	if err := verifySandboxCandidate(sandbox, claim); err != nil {
-		logger.Info("Sandbox recorded in claim metadata cannot be adopted, removing stale reference", "sandboxName", sbName, "fromLabel", fromLabel, "claim", claim.Name, "reason", err.Error())
-		if err := r.clearAssignedSandboxName(ctx, claim, fromLabel); err != nil {
+		logger.Info("Sandbox recorded in claim metadata cannot be adopted, removing stale reference", "sandboxName", sbName, "claim", claim.Name, "reason", err.Error())
+		if err := r.clearAssignedSandboxName(ctx, claim); err != nil {
 			return fmt.Errorf("failed to remove invalid sandbox reference: %w", err)
 		}
 		return nil
@@ -1611,7 +1597,6 @@ func (r *SandboxClaimReconciler) completePendingAdoption(ctx context.Context, cl
 	}
 
 	r.triggeredAdoptions.Store(adoptionKey, triggeredAdoptionEntry{uid: claim.UID, sandbox: sbName})
-	r.migrateLegacyLabelIfNeeded(ctx, claim, sbName, fromLabel, " during adoption completion")
 	// completeAdoption patched our controllerRef and the Warm label. Requeue via the
 	// sentinel so this does not route through the exponential failure rate limiter,
 	// whose compounding backoff ballooned adoption tail latency (#1107).
@@ -1647,42 +1632,17 @@ func (r *SandboxClaimReconciler) sandboxByClaimName(ctx context.Context, claim *
 	return sandbox, nil
 }
 
-// assignedSandboxName reads the assigned-sandbox annotation, falling back to the
-// legacy label and reporting which one carried it.
-func assignedSandboxName(claim *extensionsv1beta1.SandboxClaim) (name string, fromLabel bool) {
-	if name = claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation]; name != "" {
-		return name, false
-	}
-	if name = claim.Labels[extensionsv1beta1.DeprecatedAssignedSandboxNameLabel]; name != "" {
-		return name, true
-	}
-	return "", false
+// assignedSandboxName reads the assigned-sandbox annotation.
+func assignedSandboxName(claim *extensionsv1beta1.SandboxClaim) string {
+	return claim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation]
 }
 
 // clearAssignedSandboxName drops a claim's reference to a Sandbox that no longer
 // exists or can no longer be adopted.
-func (r *SandboxClaimReconciler) clearAssignedSandboxName(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, fromLabel bool) error {
+func (r *SandboxClaimReconciler) clearAssignedSandboxName(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) error {
 	patch := client.MergeFrom(claim.DeepCopy())
-	if fromLabel {
-		delete(claim.Labels, extensionsv1beta1.DeprecatedAssignedSandboxNameLabel)
-	} else {
-		delete(claim.Annotations, extensionsv1beta1.AssignedSandboxNameAnnotation)
-	}
+	delete(claim.Annotations, extensionsv1beta1.AssignedSandboxNameAnnotation)
 	return r.Patch(ctx, claim, patch)
-}
-
-// migrateLegacyLabelIfNeeded moves a legacy assigned-sandbox label onto the
-// annotation. A failure is logged, never fatal: the claim is already resolved.
-func (r *SandboxClaimReconciler) migrateLegacyLabelIfNeeded(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, sbName string, fromLabel bool, phase string) {
-	if !fromLabel {
-		return
-	}
-	logger := log.FromContext(ctx)
-	if err := r.migrateLegacyAssignedSandboxLabel(ctx, claim, sbName); err != nil {
-		logger.Error(err, "Failed to migrate legacy sandbox label to annotation"+phase, "claim", claim.Name)
-		return
-	}
-	logger.Info("Successfully migrated legacy sandbox label to annotation"+phase, "claim", claim.Name)
 }
 
 func (r *SandboxClaimReconciler) initializeSandboxLaunchTypeLabel(ctx context.Context, sandbox *v1beta1.Sandbox, launchType string) error {

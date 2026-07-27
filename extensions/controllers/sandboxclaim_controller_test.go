@@ -4330,98 +4330,6 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 	}
 }
 
-func TestSandboxClaimLegacyLabelMigration(t *testing.T) {
-	scheme := newScheme(t)
-
-	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-claim-legacy",
-			Namespace: "default",
-			UID:       "claim-uid-legacy",
-			Labels: map[string]string{
-				extensionsv1beta1.DeprecatedAssignedSandboxNameLabel: "adopted-sb-legacy",
-			},
-		},
-		Spec: extensionsv1beta1.SandboxClaimSpec{
-			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
-		},
-	}
-
-	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-		Spec: extensionsv1beta1.SandboxTemplateSpec{
-			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{{Name: "c", Image: "img"}},
-				},
-			}},
-		},
-	}
-
-	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
-	}
-
-	adoptedSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "adopted-sb-legacy",
-			Namespace: "default",
-			UID:       "adopted-sb-legacy-uid",
-			Labels: map[string]string{
-				extensionsv1beta1.SandboxIDLabel: "claim-uid-legacy",
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-				Kind:       "SandboxClaim",
-				Name:       "test-claim-legacy",
-				UID:        "claim-uid-legacy",
-				Controller: ptr.To(true), // nolint:modernize
-			}},
-		},
-		Spec: sandboxv1beta1.SandboxSpec{
-			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
-				ObjectMeta: sandboxv1beta1.PodMetadata{
-					Labels: map[string]string{
-						extensionsv1beta1.SandboxIDLabel: "claim-uid-legacy",
-					},
-				},
-			}},
-		},
-	}
-
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(template, warmPool, claim, adoptedSandbox).
-		WithStatusSubresource(claim).
-		Build()
-
-	reconciler := &SandboxClaimReconciler{
-		Client:           fakeClient,
-		Scheme:           scheme,
-		Recorder:         events.NewFakeRecorder(10),
-		Tracer:           asmetrics.NewNoOp(),
-		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
-	}
-
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim-legacy", Namespace: "default"}}
-
-	// Run reconcile
-	_, err := reconciler.Reconcile(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Expected reconcile to succeed, but got error: %v", err)
-	}
-
-	// Verify that the claim was migrated: DeprecatedAssignedSandboxNameLabel removed, AssignedSandboxNameAnnotation added
-	updatedClaim := &extensionsv1beta1.SandboxClaim{}
-	if err := fakeClient.Get(context.Background(), req.NamespacedName, updatedClaim); err != nil {
-		t.Fatalf("failed to get claim: %v", err)
-	}
-
-	require.NotContains(t, updatedClaim.Labels, extensionsv1beta1.DeprecatedAssignedSandboxNameLabel)
-	require.Equal(t, "adopted-sb-legacy", updatedClaim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation])
-}
-
 func TestIsAdoptable_RejectsUnowned(t *testing.T) {
 	// 1. Create a warm pool template hash
 	poolNameHash := sandboxcontrollers.NameHash("test-pool")
@@ -5262,15 +5170,15 @@ func TestExpiredClaimStillPersistsItsObservabilityAnnotation(t *testing.T) {
 }
 
 func TestStagedAnnotationsSurviveAPartialClaimPatch(t *testing.T) {
-	// A partial patch (legacy-label migration, stale-reference clearing) advances
-	// the resourceVersion but its MergeFrom base was taken after staging, so its
-	// body carries only its own change. Treating any RV bump as "already written"
-	// would drop the observability annotation for this pass.
+	// A partial patch (stale-reference clearing) advances the resourceVersion but
+	// its MergeFrom base was taken after staging, so its body carries only its own
+	// change. Treating any RV bump as "already written" would drop the
+	// observability annotation for this pass.
 	scheme := newScheme(t)
 	claim := &extensionsv1beta1.SandboxClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "c", Namespace: "default", UID: "c-uid",
-			Labels: map[string]string{extensionsv1beta1.DeprecatedAssignedSandboxNameLabel: "sb-legacy"},
+			Annotations: map[string]string{extensionsv1beta1.AssignedSandboxNameAnnotation: "sb-stale"},
 		},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(claim).Build()
@@ -5280,15 +5188,15 @@ func TestStagedAnnotationsSurviveAPartialClaimPatch(t *testing.T) {
 	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, live))
 
 	flush := r.stageAnnotations(t.Context(), live)
-	require.NoError(t, r.migrateLegacyAssignedSandboxLabel(t.Context(), live, "sb-legacy"))
+	require.NoError(t, r.clearAssignedSandboxName(t.Context(), live))
 	require.NoError(t, flush())
 
 	stored := &extensionsv1beta1.SandboxClaim{}
 	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, stored))
 	require.NotEmpty(t, stored.Annotations[asmetrics.ObservabilityAnnotation],
 		"a partial patch bumped the resourceVersion and the staged annotation was dropped")
-	require.Equal(t, "sb-legacy", stored.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation],
-		"the migration's own change must survive too")
+	require.NotContains(t, stored.Annotations, extensionsv1beta1.AssignedSandboxNameAnnotation,
+		"the clearing patch's own change must survive too")
 }
 
 func TestFlushDoesNotResurrectAClearedAnnotation(t *testing.T) {
@@ -5310,7 +5218,7 @@ func TestFlushDoesNotResurrectAClearedAnnotation(t *testing.T) {
 	require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "c", Namespace: "default"}, live))
 
 	flush := r.stageAnnotations(t.Context(), live)
-	require.NoError(t, r.clearAssignedSandboxName(t.Context(), live, false))
+	require.NoError(t, r.clearAssignedSandboxName(t.Context(), live))
 	require.NoError(t, flush())
 
 	stored := &extensionsv1beta1.SandboxClaim{}

@@ -2128,7 +2128,7 @@ func TestNewPoolSandboxesCarryOnlyTheRenamedHashLabel(t *testing.T) {
 		"sandbox":     sb.Labels,
 		"podTemplate": sb.Spec.PodTemplate.ObjectMeta.Labels,
 	} {
-		if _, ok := labels[sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel]; ok {
+		if _, ok := labels["agents.x-k8s.io/sandbox-pod-template-hash"]; ok {
 			t.Errorf("%s labels still carry the retired pod-template-hash label", name)
 		}
 	}
@@ -2199,20 +2199,20 @@ func createPoolSandbox(poolName, namespace, poolNameHash string, template *exten
 			Namespace:         namespace,
 			CreationTimestamp: metav1.Now(),
 			Labels: map[string]string{
-				warmPoolSandboxLabel:                                 poolNameHash,
-				sandboxTemplateRefHash:                               templateRefHash,
-				sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel: podTemplateHash,
-				sandboxv1beta1.SandboxTemplateHashLabel:              sandboxBlueprintHash,
+				warmPoolSandboxLabel:                        poolNameHash,
+				sandboxTemplateRefHash:                      templateRefHash,
+				"agents.x-k8s.io/sandbox-pod-template-hash": podTemplateHash,
+				sandboxv1beta1.SandboxTemplateHashLabel:     sandboxBlueprintHash,
 			},
 		},
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: sandboxv1beta1.PodMetadata{
 					Labels: map[string]string{
-						warmPoolSandboxLabel:                                 poolNameHash,
-						sandboxTemplateRefHash:                               templateRefHash,
-						sandboxv1beta1.DeprecatedSandboxPodTemplateHashLabel: podTemplateHash,
-						sandboxv1beta1.SandboxTemplateHashLabel:              sandboxBlueprintHash,
+						warmPoolSandboxLabel:                        poolNameHash,
+						sandboxTemplateRefHash:                      templateRefHash,
+						"agents.x-k8s.io/sandbox-pod-template-hash": podTemplateHash,
+						sandboxv1beta1.SandboxTemplateHashLabel:     sandboxBlueprintHash,
 					},
 				},
 				Spec: podSpec,
