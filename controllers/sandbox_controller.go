@@ -1183,10 +1183,9 @@ func (r *SandboxReconciler) reconcilePVCs(ctx context.Context, sandbox *sandboxv
 
 // handles sandbox expiry by deleting child resources and the sandbox itself if needed.
 func (r *SandboxReconciler) handleSandboxExpiry(ctx context.Context, sandbox *sandboxv1beta1.Sandbox) (bool, error) {
-	logger := log.FromContext(ctx)
 	var allErrors error
 
-	// Delete pod only if owned by this sandbox
+	// Delete children only if owned by this sandbox
 	podName := resolvePodName(sandbox)
 	pod := &corev1.Pod{}
 	if err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: sandbox.Namespace}, pod); err != nil {
@@ -1194,43 +1193,16 @@ func (r *SandboxReconciler) handleSandboxExpiry(ctx context.Context, sandbox *sa
 			allErrors = errors.Join(allErrors, fmt.Errorf("failed to get pod: %w", err))
 		}
 	} else {
-		ownership, controllerRef := checkOwnership(pod, sandbox)
-		switch ownership {
-		case resourceOwnedBySandbox:
-			if err := r.Delete(ctx, pod); err != nil && !k8serrors.IsNotFound(err) {
-				allErrors = errors.Join(allErrors, fmt.Errorf("failed to delete pod: %w", err))
-			}
-		case resourceUnowned:
-			logger.Info("Skipping pod deletion during expiry: pod has no controllerRef pointing to this sandbox",
-				"Pod.Name", pod.Name, "Sandbox.Name", sandbox.Name)
-		case resourceOwnedByOther:
-			logger.Info("Skipping pod deletion during expiry: pod is owned by a different controller",
-				"Pod.Name", pod.Name, "Sandbox.Name", sandbox.Name,
-				"Owner.Kind", controllerRef.Kind, "Owner.Name", controllerRef.Name, "Owner.UID", controllerRef.UID)
-		}
+		allErrors = errors.Join(allErrors, r.deleteExpiredChild(ctx, sandbox, pod, "pod"))
 	}
 
-	// Delete service only if owned by this sandbox
 	service := &corev1.Service{}
 	if err := r.Get(ctx, types.NamespacedName{Name: sandbox.Name, Namespace: sandbox.Namespace}, service); err != nil {
 		if !k8serrors.IsNotFound(err) {
 			allErrors = errors.Join(allErrors, fmt.Errorf("failed to get service: %w", err))
 		}
 	} else {
-		ownership, controllerRef := checkOwnership(service, sandbox)
-		switch ownership {
-		case resourceOwnedBySandbox:
-			if err := r.Delete(ctx, service); err != nil && !k8serrors.IsNotFound(err) {
-				allErrors = errors.Join(allErrors, fmt.Errorf("failed to delete service: %w", err))
-			}
-		case resourceUnowned:
-			logger.Info("Skipping service deletion during expiry: service has no controllerRef pointing to this sandbox",
-				"Service.Name", service.Name, "Sandbox.Name", sandbox.Name)
-		case resourceOwnedByOther:
-			logger.Info("Skipping service deletion during expiry: service is owned by a different controller",
-				"Service.Name", service.Name, "Sandbox.Name", sandbox.Name,
-				"Owner.Kind", controllerRef.Kind, "Owner.Name", controllerRef.Name, "Owner.UID", controllerRef.UID)
-		}
+		allErrors = errors.Join(allErrors, r.deleteExpiredChild(ctx, sandbox, service, "service"))
 	}
 
 	if sandbox.Spec.ShutdownPolicy != nil && *sandbox.Spec.ShutdownPolicy == sandboxv1beta1.ShutdownPolicyDelete {
@@ -1247,17 +1219,31 @@ func (r *SandboxReconciler) handleSandboxExpiry(ctx context.Context, sandbox *sa
 		// Drop live-resource status while retaining terminal conditions.
 		conditions := sandbox.Status.Conditions
 		sandbox.Status = sandboxv1beta1.SandboxStatus{Conditions: conditions}
-		// Update status to mark as expired
-		meta.SetStatusCondition(&sandbox.Status.Conditions, metav1.Condition{
-			Type:               string(sandboxv1beta1.SandboxConditionReady),
-			Status:             metav1.ConditionFalse,
-			ObservedGeneration: sandbox.Generation,
-			Reason:             sandboxv1beta1.SandboxReasonExpired,
-			Message:            msgSandboxExpired,
-		})
+		setSandboxExpiredCondition(sandbox)
 	}
 
 	return false, allErrors
+}
+
+// deleteExpiredChild deletes one expired-sandbox child resource, but only when
+// this sandbox controls it.
+func (r *SandboxReconciler) deleteExpiredChild(ctx context.Context, sandbox *sandboxv1beta1.Sandbox, obj client.Object, kind string) error {
+	logger := log.FromContext(ctx)
+	ownership, controllerRef := checkOwnership(obj, sandbox)
+	switch ownership {
+	case resourceOwnedBySandbox:
+		if err := r.Delete(ctx, obj); err != nil && !k8serrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete %s: %w", kind, err)
+		}
+	case resourceUnowned:
+		logger.Info("Skipping "+kind+" deletion during expiry: no controllerRef pointing to this sandbox",
+			"Name", obj.GetName(), "Sandbox.Name", sandbox.Name)
+	case resourceOwnedByOther:
+		logger.Info("Skipping "+kind+" deletion during expiry: owned by a different controller",
+			"Name", obj.GetName(), "Sandbox.Name", sandbox.Name,
+			"Owner.Kind", controllerRef.Kind, "Owner.Name", controllerRef.Name, "Owner.UID", controllerRef.UID)
+	}
+	return nil
 }
 
 // checks if the sandbox has expired

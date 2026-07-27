@@ -24,7 +24,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -38,9 +37,8 @@ import (
 // SandboxTemplateReconciler reconciles a SandboxTemplate object.
 type SandboxTemplateReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder events.EventRecorder
-	Tracer   asmetrics.Instrumenter
+	Scheme *runtime.Scheme
+	Tracer asmetrics.Instrumenter
 	// RouterNamespace is the namespace the sandbox-router runs in — the same
 	// namespace the operator is installed into. The managed default NetworkPolicy
 	// only admits ingress from that namespace, so it must track the install

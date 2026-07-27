@@ -15,7 +15,6 @@
 package v1alpha1
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
@@ -31,13 +30,8 @@ const v1alpha1SandboxTemplateStateAnnotation = "api.agents.x-k8s.io/v1alpha1-san
 func (s *SandboxTemplate) ConvertTo(dstRaw conversion.Hub) error {
 	dst := dstRaw.(*v1beta1.SandboxTemplate)
 
-	// Copy object metadata
 	s.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
-
-	// Convert Spec
-	if err := convertTemplateSpecTo(&s.Spec, &dst.Spec); err != nil {
-		return fmt.Errorf("convert spec to v1beta1: %w", err)
-	}
+	convertTemplateSpecTo(&s.Spec, &dst.Spec)
 
 	// Restore v1beta1-only VolumeClaimTemplatesPolicy if present in annotations
 	if policy, ok := s.Annotations["api.agents.x-k8s.io/v1beta1-volume-claim-templates-policy"]; ok {
@@ -52,34 +46,15 @@ func (s *SandboxTemplate) ConvertTo(dstRaw conversion.Hub) error {
 		}
 	}
 
-	// Preserve the original v1alpha1 object state for lossless round-tripping
-	if dst.Annotations == nil {
-		dst.Annotations = make(map[string]string)
-	}
-	sCopy := s.DeepCopy()
-	if sCopy.Annotations != nil {
-		delete(sCopy.Annotations, v1alpha1SandboxTemplateStateAnnotation)
-	}
-	stateJSON, err := json.Marshal(sCopy)
-	if err != nil {
-		return fmt.Errorf("failed to marshal v1alpha1 SandboxTemplate state: %w", err)
-	}
-	dst.Annotations[v1alpha1SandboxTemplateStateAnnotation] = string(stateJSON)
-
-	return nil
+	return stashV1alpha1State(dst, v1alpha1SandboxTemplateStateAnnotation, "SandboxTemplate", s.DeepCopy())
 }
 
 // ConvertFrom converts from the Hub version (v1beta1) to this SandboxTemplate.
 func (s *SandboxTemplate) ConvertFrom(srcRaw conversion.Hub) error {
 	src := srcRaw.(*v1beta1.SandboxTemplate)
 
-	// Copy object metadata
 	src.ObjectMeta.DeepCopyInto(&s.ObjectMeta)
-
-	// Convert Spec
-	if err := convertTemplateSpecFrom(&src.Spec, &s.Spec); err != nil {
-		return fmt.Errorf("convert spec from v1beta1: %w", err)
-	}
+	convertTemplateSpecFrom(&src.Spec, &s.Spec)
 
 	// Strip the state annotation if present so it doesn't leak to clients and get sent back on updates
 	delete(s.Annotations, v1alpha1SandboxTemplateStateAnnotation)
@@ -97,27 +72,18 @@ func (s *SandboxTemplate) ConvertFrom(srcRaw conversion.Hub) error {
 	return nil
 }
 
-// Helper functions for SandboxTemplate conversion
+func convertTemplateSpecTo(src *SandboxTemplateSpec, dst *v1beta1.SandboxTemplateSpec) {
+	sandboxv1alpha1.ConvertPodTemplateTo(&src.PodTemplate, &dst.PodTemplate)
 
-func convertTemplateSpecTo(src *SandboxTemplateSpec, dst *v1beta1.SandboxTemplateSpec) error {
-	// PodTemplate
-	if err := sandboxv1alpha1.ConvertPodTemplateTo(&src.PodTemplate, &dst.PodTemplate); err != nil {
-		return fmt.Errorf("convert podTemplate to v1beta1: %w", err)
-	}
-
-	// VolumeClaimTemplates
 	if src.VolumeClaimTemplates != nil {
 		dst.VolumeClaimTemplates = make([]sandboxv1beta1.PersistentVolumeClaimTemplate, len(src.VolumeClaimTemplates))
 		for i := range src.VolumeClaimTemplates {
-			if err := sandboxv1alpha1.ConvertPVCClaimTemplateTo(&src.VolumeClaimTemplates[i], &dst.VolumeClaimTemplates[i]); err != nil {
-				return fmt.Errorf("convert volumeClaimTemplates[%d] to v1beta1: %w", i, err)
-			}
+			sandboxv1alpha1.ConvertPVCClaimTemplateTo(&src.VolumeClaimTemplates[i], &dst.VolumeClaimTemplates[i])
 		}
 	} else {
 		dst.VolumeClaimTemplates = nil
 	}
 
-	// NetworkPolicy
 	if src.NetworkPolicy != nil {
 		dst.NetworkPolicy = &v1beta1.NetworkPolicySpec{
 			Ingress: src.NetworkPolicy.Ingress,
@@ -127,37 +93,23 @@ func convertTemplateSpecTo(src *SandboxTemplateSpec, dst *v1beta1.SandboxTemplat
 		dst.NetworkPolicy = nil
 	}
 
-	// NetworkPolicyManagement
 	dst.NetworkPolicyManagement = v1beta1.NetworkPolicyManagement(src.NetworkPolicyManagement)
-
-	// EnvVarsInjectionPolicy
 	dst.EnvVarsInjectionPolicy = v1beta1.EnvVarsInjectionPolicy(src.EnvVarsInjectionPolicy)
-
-	// Service
 	dst.Service = src.Service
-
-	return nil
 }
 
-func convertTemplateSpecFrom(src *v1beta1.SandboxTemplateSpec, dst *SandboxTemplateSpec) error {
-	// PodTemplate
-	if err := sandboxv1alpha1.ConvertPodTemplateFrom(&src.PodTemplate, &dst.PodTemplate); err != nil {
-		return fmt.Errorf("convert podTemplate from v1beta1: %w", err)
-	}
+func convertTemplateSpecFrom(src *v1beta1.SandboxTemplateSpec, dst *SandboxTemplateSpec) {
+	sandboxv1alpha1.ConvertPodTemplateFrom(&src.PodTemplate, &dst.PodTemplate)
 
-	// VolumeClaimTemplates
 	if src.VolumeClaimTemplates != nil {
 		dst.VolumeClaimTemplates = make([]sandboxv1alpha1.PersistentVolumeClaimTemplate, len(src.VolumeClaimTemplates))
 		for i := range src.VolumeClaimTemplates {
-			if err := sandboxv1alpha1.ConvertPVCClaimTemplateFrom(&src.VolumeClaimTemplates[i], &dst.VolumeClaimTemplates[i]); err != nil {
-				return fmt.Errorf("convert volumeClaimTemplates[%d] from v1beta1: %w", i, err)
-			}
+			sandboxv1alpha1.ConvertPVCClaimTemplateFrom(&src.VolumeClaimTemplates[i], &dst.VolumeClaimTemplates[i])
 		}
 	} else {
 		dst.VolumeClaimTemplates = nil
 	}
 
-	// NetworkPolicy
 	if src.NetworkPolicy != nil {
 		dst.NetworkPolicy = &NetworkPolicySpec{
 			Ingress: src.NetworkPolicy.Ingress,
@@ -167,14 +119,7 @@ func convertTemplateSpecFrom(src *v1beta1.SandboxTemplateSpec, dst *SandboxTempl
 		dst.NetworkPolicy = nil
 	}
 
-	// NetworkPolicyManagement
 	dst.NetworkPolicyManagement = NetworkPolicyManagement(src.NetworkPolicyManagement)
-
-	// EnvVarsInjectionPolicy
 	dst.EnvVarsInjectionPolicy = EnvVarsInjectionPolicy(src.EnvVarsInjectionPolicy)
-
-	// Service
 	dst.Service = src.Service
-
-	return nil
 }

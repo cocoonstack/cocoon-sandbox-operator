@@ -303,9 +303,6 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 
 // decodeInto reads a bounded reply body into out.
 func decodeInto(resp *http.Response, out any, path string) error {
-	if out == nil {
-		return nil
-	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return fmt.Errorf("sandboxd: read %s reply: %w", path, err)

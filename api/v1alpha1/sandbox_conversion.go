@@ -25,32 +25,34 @@ import (
 
 const v1alpha1SandboxStateAnnotation = "api.agents.x-k8s.io/v1alpha1-sandbox-state"
 
+// v1alpha1State is the round-trip payload: the fields v1beta1 cannot represent
+// (replica counts collapse into OperatingMode). Legacy annotations carrying a
+// full v1alpha1 Sandbox JSON decode into this shape too.
+type v1alpha1State struct {
+	Spec struct {
+		Replicas *int32 `json:"replicas,omitempty"`
+	} `json:"spec"`
+	Status struct {
+		Replicas int32 `json:"replicas,omitempty"`
+	} `json:"status"`
+}
+
 // ConvertTo converts this Sandbox to the Hub version (v1beta1).
 func (s *Sandbox) ConvertTo(dstRaw conversion.Hub) error {
 	dst := dstRaw.(*v1beta1.Sandbox)
 
-	// Copy object metadata
 	s.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
+	ConvertSpecTo(&s.Spec, &dst.Spec)
+	ConvertStatusTo(&s.Status, &dst.Status)
 
-	// Convert Spec
-	if err := ConvertSpecTo(&s.Spec, &dst.Spec); err != nil {
-		return err
-	}
-
-	// Convert Status
-	if err := ConvertStatusTo(&s.Status, &dst.Status); err != nil {
-		return err
-	}
-
-	// Preserve the original v1alpha1 object state for lossless round-tripping
+	// Preserve the fields v1beta1 cannot represent for lossless round-tripping
 	if dst.Annotations == nil {
 		dst.Annotations = make(map[string]string)
 	}
-	sCopy := s.DeepCopy()
-	if sCopy.Annotations != nil {
-		delete(sCopy.Annotations, v1alpha1SandboxStateAnnotation)
-	}
-	stateJSON, err := json.Marshal(sCopy)
+	var state v1alpha1State
+	state.Spec.Replicas = s.Spec.Replicas
+	state.Status.Replicas = s.Status.Replicas
+	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("failed to marshal v1alpha1 Sandbox state: %w", err)
 	}
@@ -63,18 +65,9 @@ func (s *Sandbox) ConvertTo(dstRaw conversion.Hub) error {
 func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 	src := srcRaw.(*v1beta1.Sandbox)
 
-	// Copy object metadata
 	src.ObjectMeta.DeepCopyInto(&s.ObjectMeta)
-
-	// Convert Spec
-	if err := ConvertSpecFrom(&src.Spec, &s.Spec); err != nil {
-		return err
-	}
-
-	// Convert Status
-	if err := ConvertStatusFrom(&src.Status, &s.Status); err != nil {
-		return err
-	}
+	ConvertSpecFrom(&src.Spec, &s.Spec)
+	ConvertStatusFrom(&src.Status, &s.Status)
 
 	// Set best-effort default for Status.Replicas based on OperatingMode.
 	// This will be overridden by the restoration logic if the annotation exists.
@@ -89,7 +82,7 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 		// Strip the state annotation so it doesn't leak to clients and get sent back on updates
 		delete(s.Annotations, v1alpha1SandboxStateAnnotation)
 
-		var original Sandbox
+		var original v1alpha1State
 		if err := json.Unmarshal([]byte(stateJSON), &original); err != nil {
 			return fmt.Errorf("failed to unmarshal v1alpha1 Sandbox state: %w", err)
 		}
@@ -97,48 +90,34 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 		// Restore replicas field from original if OperatingMode matches original intent
 		switch src.Spec.OperatingMode {
 		case v1beta1.SandboxOperatingModeSuspended:
-			zero := int32(0)
-			s.Spec.Replicas = &zero
+			s.Spec.Replicas = new(int32(0))
 		case v1beta1.SandboxOperatingModeRunning:
 			if original.Spec.Replicas == nil || *original.Spec.Replicas != 0 {
 				s.Spec.Replicas = original.Spec.Replicas
 			} else {
-				one := int32(1)
-				s.Spec.Replicas = &one
+				s.Spec.Replicas = new(int32(1))
 			}
 		}
 
-		// Restore Status replicas
 		s.Status.Replicas = original.Status.Replicas
 	}
 
 	return nil
 }
 
-// Helper functions for Sandbox conversion
+func ConvertSpecTo(src *SandboxSpec, dst *v1beta1.SandboxSpec) {
+	ConvertPodTemplateTo(&src.PodTemplate, &dst.PodTemplate)
 
-func ConvertSpecTo(src *SandboxSpec, dst *v1beta1.SandboxSpec) error {
-	// PodTemplate
-	if err := ConvertPodTemplateTo(&src.PodTemplate, &dst.PodTemplate); err != nil {
-		return err
-	}
-
-	// VolumeClaimTemplates
 	if src.VolumeClaimTemplates != nil {
 		dst.VolumeClaimTemplates = make([]v1beta1.PersistentVolumeClaimTemplate, len(src.VolumeClaimTemplates))
 		for i := range src.VolumeClaimTemplates {
-			if err := ConvertPVCClaimTemplateTo(&src.VolumeClaimTemplates[i], &dst.VolumeClaimTemplates[i]); err != nil {
-				return err
-			}
+			ConvertPVCClaimTemplateTo(&src.VolumeClaimTemplates[i], &dst.VolumeClaimTemplates[i])
 		}
 	} else {
 		dst.VolumeClaimTemplates = nil
 	}
 
-	// Lifecycle
-	if err := ConvertLifecycleTo(&src.Lifecycle, &dst.Lifecycle); err != nil {
-		return err
-	}
+	ConvertLifecycleTo(&src.Lifecycle, &dst.Lifecycle)
 
 	// Replicas -> OperatingMode
 	if src.Replicas != nil && *src.Replicas == 0 {
@@ -147,79 +126,58 @@ func ConvertSpecTo(src *SandboxSpec, dst *v1beta1.SandboxSpec) error {
 		dst.OperatingMode = v1beta1.SandboxOperatingModeRunning
 	}
 
-	// Service
 	dst.Service = src.Service
-
-	return nil
 }
 
-func ConvertSpecFrom(src *v1beta1.SandboxSpec, dst *SandboxSpec) error {
-	// PodTemplate
-	if err := ConvertPodTemplateFrom(&src.PodTemplate, &dst.PodTemplate); err != nil {
-		return err
-	}
+func ConvertSpecFrom(src *v1beta1.SandboxSpec, dst *SandboxSpec) {
+	ConvertPodTemplateFrom(&src.PodTemplate, &dst.PodTemplate)
 
-	// VolumeClaimTemplates
 	if src.VolumeClaimTemplates != nil {
 		dst.VolumeClaimTemplates = make([]PersistentVolumeClaimTemplate, len(src.VolumeClaimTemplates))
 		for i := range src.VolumeClaimTemplates {
-			if err := ConvertPVCClaimTemplateFrom(&src.VolumeClaimTemplates[i], &dst.VolumeClaimTemplates[i]); err != nil {
-				return err
-			}
+			ConvertPVCClaimTemplateFrom(&src.VolumeClaimTemplates[i], &dst.VolumeClaimTemplates[i])
 		}
 	} else {
 		dst.VolumeClaimTemplates = nil
 	}
 
-	// Lifecycle
-	if err := ConvertLifecycleFrom(&src.Lifecycle, &dst.Lifecycle); err != nil {
-		return err
-	}
+	ConvertLifecycleFrom(&src.Lifecycle, &dst.Lifecycle)
 
 	// OperatingMode -> Replicas
-	one := int32(1)
-	zero := int32(0)
 	if src.OperatingMode == v1beta1.SandboxOperatingModeSuspended {
-		dst.Replicas = &zero
+		dst.Replicas = new(int32(0))
 	} else {
-		dst.Replicas = &one
+		dst.Replicas = new(int32(1))
 	}
 
-	// Service
 	dst.Service = src.Service
-
-	return nil
 }
 
-func ConvertStatusTo(src *SandboxStatus, dst *v1beta1.SandboxStatus) error {
+func ConvertStatusTo(src *SandboxStatus, dst *v1beta1.SandboxStatus) {
 	dst.ServiceFQDN = src.ServiceFQDN
 	dst.Service = src.Service
 	dst.Conditions = src.Conditions
 	dst.LabelSelector = src.LabelSelector
 	dst.PodIPs = src.PodIPs
 	dst.NodeName = "" // NodeName is new in v1beta1 and does not exist in v1alpha1
-	return nil
 }
 
-func ConvertStatusFrom(src *v1beta1.SandboxStatus, dst *SandboxStatus) error {
+func ConvertStatusFrom(src *v1beta1.SandboxStatus, dst *SandboxStatus) {
 	dst.ServiceFQDN = src.ServiceFQDN
 	dst.Service = src.Service
 	dst.Conditions = src.Conditions
 	dst.LabelSelector = src.LabelSelector
 	dst.PodIPs = src.PodIPs
-	return nil
 }
 
-func ConvertPodTemplateTo(src *PodTemplate, dst *v1beta1.PodTemplate) error {
+func ConvertPodTemplateTo(src *PodTemplate, dst *v1beta1.PodTemplate) {
 	dst.Spec = src.Spec
 	ConvertPodMetadataTo(&src.ObjectMeta, &dst.ObjectMeta)
-	return nil
 }
 
-func ConvertPodTemplateFrom(src *v1beta1.PodTemplate, dst *PodTemplate) error {
+func ConvertPodTemplateFrom(src *v1beta1.PodTemplate, dst *PodTemplate) {
 	dst.Spec = src.Spec
 	ConvertPodMetadataFrom(&src.ObjectMeta, &dst.ObjectMeta)
-	return nil
 }
 
 func ConvertPodMetadataTo(src *PodMetadata, dst *v1beta1.PodMetadata) {
@@ -232,16 +190,14 @@ func ConvertPodMetadataFrom(src *v1beta1.PodMetadata, dst *PodMetadata) {
 	dst.Annotations = src.Annotations
 }
 
-func ConvertPVCClaimTemplateTo(src *PersistentVolumeClaimTemplate, dst *v1beta1.PersistentVolumeClaimTemplate) error {
+func ConvertPVCClaimTemplateTo(src *PersistentVolumeClaimTemplate, dst *v1beta1.PersistentVolumeClaimTemplate) {
 	dst.Spec = src.Spec
 	ConvertEmbeddedMetadataTo(&src.EmbeddedObjectMetadata, &dst.EmbeddedObjectMetadata)
-	return nil
 }
 
-func ConvertPVCClaimTemplateFrom(src *v1beta1.PersistentVolumeClaimTemplate, dst *PersistentVolumeClaimTemplate) error {
+func ConvertPVCClaimTemplateFrom(src *v1beta1.PersistentVolumeClaimTemplate, dst *PersistentVolumeClaimTemplate) {
 	dst.Spec = src.Spec
 	ConvertEmbeddedMetadataFrom(&src.EmbeddedObjectMetadata, &dst.EmbeddedObjectMetadata)
-	return nil
 }
 
 func ConvertEmbeddedMetadataTo(src *EmbeddedObjectMetadata, dst *v1beta1.EmbeddedObjectMetadata) {
@@ -256,24 +212,20 @@ func ConvertEmbeddedMetadataFrom(src *v1beta1.EmbeddedObjectMetadata, dst *Embed
 	dst.Annotations = src.Annotations
 }
 
-func ConvertLifecycleTo(src *Lifecycle, dst *v1beta1.Lifecycle) error {
+func ConvertLifecycleTo(src *Lifecycle, dst *v1beta1.Lifecycle) {
 	dst.ShutdownTime = src.ShutdownTime
 	if src.ShutdownPolicy != nil {
-		policy := v1beta1.ShutdownPolicy(*src.ShutdownPolicy)
-		dst.ShutdownPolicy = &policy
+		dst.ShutdownPolicy = new(v1beta1.ShutdownPolicy(*src.ShutdownPolicy))
 	} else {
 		dst.ShutdownPolicy = nil
 	}
-	return nil
 }
 
-func ConvertLifecycleFrom(src *v1beta1.Lifecycle, dst *Lifecycle) error {
+func ConvertLifecycleFrom(src *v1beta1.Lifecycle, dst *Lifecycle) {
 	dst.ShutdownTime = src.ShutdownTime
 	if src.ShutdownPolicy != nil {
-		policy := ShutdownPolicy(*src.ShutdownPolicy)
-		dst.ShutdownPolicy = &policy
+		dst.ShutdownPolicy = new(ShutdownPolicy(*src.ShutdownPolicy))
 	} else {
 		dst.ShutdownPolicy = nil
 	}
-	return nil
 }

@@ -3,6 +3,7 @@ package warmpool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -216,6 +217,24 @@ func TestApplyBoundsEachNodeCall(t *testing.T) {
 	}
 }
 
+// BenchmarkReconcileOnce measures one global driver pass — the cost of every
+// wake-up, spurious or not — at the deployed fleet shape (26 nodes, 4 pools).
+func BenchmarkReconcileOnce(b *testing.B) {
+	objs := []client.Object{template()}
+	for i := range 4 {
+		objs = append(objs, warmPool(fmt.Sprintf("p%d", i), 500))
+	}
+	d, _, inv, _ := newTestDriver(b, objs...)
+	putNodes(inv, 26)
+	ctx := b.Context()
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := d.reconcileOnce(ctx); err != nil {
+			b.Fatalf("reconcile: %v", err)
+		}
+	}
+}
+
 // fakeSetter records the last pools set per node address and plays back the warm
 // counts a node reports in its PUT response — the driver's status source.
 type fakeSetter struct {
@@ -270,7 +289,7 @@ func (n *fakeNode) SetPools(ctx context.Context, pools []sandboxd.PoolSpec) (*sa
 	return info, nil
 }
 
-func newTestDriver(t *testing.T, objs ...client.Object) (*Driver, *fakeSetter, *scale.StaticInventorySource, client.Client) {
+func newTestDriver(t testing.TB, objs ...client.Object) (*Driver, *fakeSetter, *scale.StaticInventorySource, client.Client) {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := extv1beta1.AddToScheme(scheme); err != nil {

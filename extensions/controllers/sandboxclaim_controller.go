@@ -65,8 +65,6 @@ const (
 	claimKind    = "SandboxClaim"
 	warmPoolKind = "SandboxWarmPool"
 
-	ObservabilityAnnotation = "agents.x-k8s.io/controller-first-observed-at"
-
 	immediateRequeueDelay = time.Millisecond
 	// adoptionCacheLagRequeueDelay sets the latency floor for a warm-pool claim: the claim is only marked Bound on the pass that observes the adopted Sandbox.
 	adoptionCacheLagRequeueDelay = 5 * time.Millisecond
@@ -166,7 +164,7 @@ func (m *triggeredAdoptionMap) Delete(key types.NamespacedName) {
 type SandboxClaimReconciler struct {
 	client.Client
 	Scheme                  *runtime.Scheme
-	WarmSandboxQueue        queue.SandboxQueue
+	WarmSandboxQueue        *queue.SimpleSandboxQueue
 	Recorder                events.EventRecorder
 	Tracer                  asmetrics.Instrumenter
 	MaxConcurrentReconciles int
@@ -1074,12 +1072,13 @@ func isSandboxReady(sb *v1beta1.Sandbox) bool {
 }
 
 func isRestrictedDomain(domain string) bool {
-	for _, d := range restrictedDomains {
-		if domain == d || strings.HasSuffix(domain, "."+d) {
-			return true
-		}
-	}
-	return false
+	return domainInList(domain, restrictedDomains)
+}
+
+func domainInList(domain string, list []string) bool {
+	return slices.ContainsFunc(list, func(d string) bool {
+		return domain == d || strings.HasSuffix(domain, "."+d)
+	})
 }
 
 // validateAdditionalPodMetadata checks claimMeta for invalid domain or label values upfront.
@@ -1117,14 +1116,7 @@ func (r *SandboxClaimReconciler) validateAdditionalPodMetadata(claimMeta *v1beta
 
 		if isLabel {
 			// Strict Allowlist for labels
-			allowed := false
-			for _, d := range allowedDomains {
-				if domain == d || strings.HasSuffix(domain, "."+d) {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
+			if !domainInList(domain, allowedDomains) {
 				return fmt.Errorf("label domain %q is not in the allowlist", domain)
 			}
 		} else if isRestrictedDomain(domain) {
@@ -1416,11 +1408,7 @@ func mergeVolumeClaimTemplates(
 				return nil, fmt.Errorf("%w: cannot override template volume %q", ErrVolumeClaimTemplatesOverrideForbidden, vct.Name)
 			}
 		}
-		// Simply append claim VCTs to template VCTs
-		merged := make([]v1beta1.PersistentVolumeClaimTemplate, 0, len(templateVCTs)+len(claimVCTs))
-		merged = append(merged, templateVCTs...)
-		merged = append(merged, claimVCTs...)
-		return merged, nil
+		return slices.Concat(templateVCTs, claimVCTs), nil
 
 	case extensionsv1beta1.VolumeClaimTemplatesPolicyOverrides:
 		// Merge by Name: claim VCT replaces template VCT by name if they match, and new ones are appended.
@@ -1755,9 +1743,14 @@ func (r *SandboxClaimReconciler) mapWarmPoolToClaims(ctx context.Context, obj cl
 		log.FromContext(ctx).Error(err, "failed to list SandboxClaims for SandboxWarmPool", "namespace", warmPool.Namespace, "name", warmPool.Name)
 		return nil
 	}
-	requests := make([]ctrl.Request, 0, len(claims.Items))
+	var requests []ctrl.Request
 	for i := range claims.Items {
 		claim := &claims.Items[i]
+		// Bound claims are driven by their own Sandbox events; pool churn only
+		// matters to claims still waiting (e.g. WarmPoolNotFound).
+		if claim.Status.SandboxStatus.Name != "" {
+			continue
+		}
 		requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: claim.Namespace, Name: claim.Name}})
 	}
 	return requests
@@ -1767,16 +1760,7 @@ func (r *SandboxClaimReconciler) mapWarmPoolToClaims(ctx context.Context, obj cl
 func (r *SandboxClaimReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
 	r.MaxConcurrentReconciles = concurrentWorkers
 
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, func(rawObj client.Object) []string {
-		claim, ok := rawObj.(*extensionsv1beta1.SandboxClaim)
-		if !ok {
-			return nil
-		}
-		if claim.Spec.WarmPoolRef.Name == "" {
-			return nil
-		}
-		return []string{claim.Spec.WarmPoolRef.Name}
-	}); err != nil {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, warmPoolRefIndexer); err != nil {
 		return err
 	}
 
@@ -1794,6 +1778,15 @@ func (r *SandboxClaimReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWo
 		// claims when a missing template is created, instead of relying on the 1-minute fallback.
 		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
 		Complete(r)
+}
+
+// warmPoolRefIndexer indexes SandboxClaims by spec.warmPoolRef.name.
+func warmPoolRefIndexer(rawObj client.Object) []string {
+	claim, ok := rawObj.(*extensionsv1beta1.SandboxClaim)
+	if !ok || claim.Spec.WarmPoolRef.Name == "" {
+		return nil
+	}
+	return []string{claim.Spec.WarmPoolRef.Name}
 }
 
 // cleanupLegacyNetworkPolicy cleans up any deprecated per-claim NetworkPolicies.
@@ -1948,7 +1941,7 @@ func hasClaimExpiredCondition(conditions []metav1.Condition) bool {
 
 // sandboxEventHandler implements handler.EventHandler for the SandboxClaimReconciler.
 type sandboxEventHandler struct {
-	sandboxQueue queue.SandboxQueue
+	sandboxQueue *queue.SimpleSandboxQueue
 }
 
 func (h *sandboxEventHandler) Create(ctx context.Context, e event.CreateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
@@ -2055,7 +2048,7 @@ func (h *sandboxEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _
 }
 
 type warmPoolEventHandler struct {
-	sandboxQueue queue.SandboxQueue
+	sandboxQueue *queue.SimpleSandboxQueue
 }
 
 func (h *warmPoolEventHandler) Create(_ context.Context, _ event.CreateEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {

@@ -23,7 +23,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
@@ -41,6 +39,7 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/test/benchutil"
 )
 
 var (
@@ -70,12 +69,7 @@ const (
 	runVal   = "g0131-stress"
 )
 
-func must(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
-		os.Exit(2)
-	}
-}
+func must(err error) { benchutil.Must(err) }
 
 func main() {
 	flag.Parse()
@@ -157,19 +151,19 @@ func main() {
 			"client_list_sandboxes": msStats(sbLat),
 			"client_list_pods":      msStats(podLat),
 			// apiserver-side LIST mean over the window
-			"apiserver_list_sandboxes_avg_ms": round2(deltaAvgMs(prev, last, "list_sandboxes")),
-			"apiserver_list_pods_avg_ms":      round2(deltaAvgMs(prev, last, "list_pods")),
+			"apiserver_list_sandboxes_avg_ms": benchutil.Round2(deltaAvgMs(prev, last, "list_sandboxes")),
+			"apiserver_list_pods_avg_ms":      benchutil.Round2(deltaAvgMs(prev, last, "list_pods")),
 			// the vk LIST priority level under load
 			"vke_seats_nominal":            last["vke_nominal"],
-			"vke_seats_inuse_peak":         round2(peakInUse),
-			"vke_inqueue_peak":             round2(peakInqueue),
-			"vke_wait_avg_ms":              round2(deltaAvgMs(prev, last, "vke_wait")),
-			"vke_dispatched_delta":         round0(last["vke_dispatched"] - prev["vke_dispatched"]),
-			"vke_rejected_timeout_delta":   round0(last["vke_rej_timeout"] - prev["vke_rej_timeout"]),
-			"vke_rejected_cancelled_delta": round0(last["vke_rej_cancelled"] - prev["vke_rej_cancelled"]),
+			"vke_seats_inuse_peak":         benchutil.Round2(peakInUse),
+			"vke_inqueue_peak":             benchutil.Round2(peakInqueue),
+			"vke_wait_avg_ms":              benchutil.Round2(deltaAvgMs(prev, last, "vke_wait")),
+			"vke_dispatched_delta":         benchutil.Round0(last["vke_dispatched"] - prev["vke_dispatched"]),
+			"vke_rejected_timeout_delta":   benchutil.Round0(last["vke_rej_timeout"] - prev["vke_rej_timeout"]),
+			"vke_rejected_cancelled_delta": benchutil.Round0(last["vke_rej_cancelled"] - prev["vke_rej_cancelled"]),
 			"node_distribution":            dist,
 			"prod_intact":                  prodNow,
-			"window_sec":                   round1(curT.Sub(prevT).Seconds()),
+			"window_sec":                   benchutil.Round1(curT.Sub(prevT).Seconds()),
 		}
 		rounds = append(rounds, round)
 		fmt.Printf("[N=%d] sbCR=%d pods=%d | client LIST sb p50=%.0f/p95=%.0fms pods p50=%.0f/p95=%.0fms | apiserver LIST sb=%.0fms pods=%.1fms | %s seats %.0f/%.0f peak inq=%.0f wait=%.0fms disp+%.0f REJECT_timeout+%.0f | dist=%v prod=%d\n",
@@ -217,7 +211,7 @@ func main() {
 	result["new_list_timeout_rejections"] = newRejections
 	result["peak_vke_seats_inuse"] = maxInUse
 	result["vke_seats_nominal"] = nominal
-	result["client_list_sandboxes_p95_ratio"] = round2(ratio)
+	result["client_list_sandboxes_p95_ratio"] = benchutil.Round2(ratio)
 	result["wedge_observed"] = wedgeObserved
 	// This is an exploratory probe, not an acceptance gate: "pass" just means the
 	// run completed cleanly and did not harm production. The wedge finding is the
@@ -285,60 +279,15 @@ func ensureTemplate(ctx context.Context, hosts []string) {
 }
 
 func setReplicas(ctx context.Context, n int32) {
-	p := &extv1beta1.SandboxWarmPool{}
-	err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: poolName}, p)
-	if apierrors.IsNotFound(err) {
-		must(cl.Create(ctx, &extv1beta1.SandboxWarmPool{
-			ObjectMeta: metav1.ObjectMeta{Name: poolName, Namespace: *ns, Labels: map[string]string{runLabel: runVal}},
-			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: &n, TemplateRef: extv1beta1.SandboxTemplateRef{Name: tmplName}},
-		}))
-		return
-	}
-	must(err)
-	p.Spec.Replicas = &n
-	must(cl.Update(ctx, p))
+	benchutil.EnsurePool(ctx, cl, *ns, poolName, tmplName, n, map[string]string{runLabel: runVal})
 }
 
 func ourReady(ctx context.Context) (total, ready int) {
-	sl := &sandboxv1beta1.SandboxList{}
-	if err := cl.List(ctx, sl, ctrlclient.InNamespace(*ns)); err != nil {
-		return 0, 0
-	}
-	for i := range sl.Items {
-		owned := false
-		for _, o := range sl.Items[i].OwnerReferences {
-			if o.Kind == "SandboxWarmPool" && o.Name == poolName {
-				owned = true
-			}
-		}
-		if !owned {
-			continue
-		}
-		total++
-		for _, c := range sl.Items[i].Status.Conditions {
-			if c.Type == "Ready" && c.Status == metav1.ConditionTrue {
-				ready++
-			}
-		}
-	}
-	return
+	return benchutil.ReadySandboxes(ctx, cl, *ns, poolName)
 }
 
 func waitReady(ctx context.Context, target, timeoutSec int) int {
-	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
-	last := 0
-	for time.Now().Before(deadline) {
-		_, ready := ourReady(ctx)
-		if ready > last {
-			last = ready
-		}
-		if ready >= target {
-			return ready
-		}
-		time.Sleep(3 * time.Second)
-	}
-	_, ready := ourReady(ctx)
-	return ready
+	return benchutil.WaitReady(ctx, cl, *ns, poolName, target, timeoutSec)
 }
 
 func nodeDistribution(ctx context.Context) map[string]int {
@@ -490,21 +439,7 @@ func msStats(s latSamples) map[string]any {
 	}
 }
 
-func pct(xs []float64, p float64) float64 {
-	if len(xs) == 0 {
-		return 0
-	}
-	s := append([]float64(nil), xs...)
-	sort.Float64s(s)
-	if p >= 100 {
-		return round2(s[len(s)-1])
-	}
-	return round2(s[int(float64(len(s)-1)*p/100)])
-}
-
-func round0(f float64) float64 { return float64(int(f)) }
-func round1(f float64) float64 { return float64(int(f*10)) / 10 }
-func round2(f float64) float64 { return float64(int(f*100)) / 100 }
+func pct(xs []float64, p float64) float64 { return benchutil.Pct(xs, p, benchutil.Round2) }
 
 func splitCSV(s string) []string {
 	var out []string

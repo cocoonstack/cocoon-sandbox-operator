@@ -33,7 +33,7 @@ func TestRunIssuesExactlyTotal(t *testing.T) {
 		cleanup:        true,
 		releaseTimeout: 5 * time.Second,
 	}
-	s := run(t.Context(), cl, o)
+	s := createBatch(t.Context(), cl, o, new(int64), o.total)
 
 	if s.issued != 25 {
 		t.Fatalf("issued = %d, want exactly total (25)", s.issued)
@@ -75,7 +75,7 @@ func TestConcurrencyClampedToTotal(t *testing.T) {
 		cleanup:        true,
 		releaseTimeout: 5 * time.Second,
 	}
-	s := run(t.Context(), cl, o)
+	s := createBatch(t.Context(), cl, o, new(int64), o.total)
 	if s.issued != 2 || s.created != 2 {
 		t.Fatalf("issued=%d created=%d, want exactly 2/2", s.issued, s.created)
 	}

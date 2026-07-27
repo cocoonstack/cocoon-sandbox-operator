@@ -114,11 +114,6 @@ func WithLogger(log logr.Logger) StoreOption {
 	return func(s *scatterGatherStore) { s.log = log }
 }
 
-// WithConcurrency bounds the per-node fan-out. Values <=0 leave it unbounded.
-func WithConcurrency(n int) StoreOption {
-	return func(s *scatterGatherStore) { s.concurrency = n }
-}
-
 // WithWatchPollInterval sets how often Watch re-derives node inventory to emit
 // deltas. Defaults to one second.
 func WithWatchPollInterval(d time.Duration) StoreOption {
@@ -207,43 +202,25 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := s.src.ListNodes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
-	}
-
-	perNode := make([][]sandboxv1beta1.Sandbox, len(nodes))
-	g, gctx := errgroup.WithContext(ctx)
-	if s.concurrency > 0 {
-		g.SetLimit(s.concurrency)
-	}
-	for i, node := range nodes {
-		g.Go(func() error {
-			inv, err := s.src.NodeInventory(gctx, node)
-			if err != nil {
-				// Partitioned / lost inventory: skip this node's sandboxes rather
-				// than failing the list. They reappear on the node's next publish.
-				s.log.V(1).Info("node inventory unavailable; omitting from list (eventual consistency)",
-					"node", node, "err", err.Error())
-				return nil
-			}
-			perNode[i] = s.materialize(inv, opts.Namespace, labelSel, fieldSel)
+	items, err := fanOutNodes(ctx, s, func(gctx context.Context, node string) []sandboxv1beta1.Sandbox {
+		inv, invErr := s.src.NodeInventory(gctx, node)
+		if invErr != nil {
+			// Partitioned / lost inventory: skip this node's sandboxes rather
+			// than failing the list. They reappear on the node's next publish.
+			s.log.V(1).Info("node inventory unavailable; omitting from list (eventual consistency)",
+				"node", node, "err", invErr.Error())
 			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
-		return nil, fmt.Errorf("scale: fan-out to node inventories: %w", err)
-	}
-
-	total := 0
-	for _, chunk := range perNode {
-		total += len(chunk)
+		}
+		return s.materialize(inv, opts.Namespace, labelSel, fieldSel)
+	})
+	if err != nil {
+		return nil, err
 	}
 	list := &sandboxv1beta1.SandboxList{}
 	list.SetGroupVersionKind(sandboxv1beta1.GroupVersion.WithKind("SandboxList"))
-	list.Items = make([]sandboxv1beta1.Sandbox, 0, total)
-	for _, chunk := range perNode {
-		list.Items = append(list.Items, chunk...)
+	list.Items = items
+	if list.Items == nil {
+		list.Items = []sandboxv1beta1.Sandbox{} // an empty list serializes as [], not null
 	}
 	slices.SortFunc(list.Items, func(a, b sandboxv1beta1.Sandbox) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
@@ -251,33 +228,118 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	return list, nil
 }
 
+// fanOutNodes enumerates the node inventories and runs work per node with
+// List's bounded concurrency, concatenating per-node results in node order.
+// A node the work skips contributes nil.
+func fanOutNodes[T any](ctx context.Context, s *scatterGatherStore, work func(ctx context.Context, node string) []T) ([]T, error) {
+	nodes, err := s.src.ListNodes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
+	}
+	perNode := make([][]T, len(nodes))
+	g, gctx := errgroup.WithContext(ctx)
+	if s.concurrency > 0 {
+		g.SetLimit(s.concurrency)
+	}
+	for i, node := range nodes {
+		g.Go(func() error {
+			perNode[i] = work(gctx, node)
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return slices.Concat(perNode...), nil
+}
+
 // Get routes to the owning node's authoritative inventory. It resolves which
 // node holds namespace/name and returns that entry synthesized as a Sandbox.
+// The per-node sweep fans out like List and cancels on the first hit — a
+// sandbox lives on exactly one node, so first-found is the answer.
 //
 // In production this would RPC the owning node's live sandboxd for a
 // read-after-write answer; in this substrate the node's published NodeInventory
 // is the authoritative view available, so Get returns from it directly rather
 // than from an eventually-consistent cluster-wide summary.
 func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
+	found, err := s.findEntry(ctx, "get", func(inv *NodeInventory, i int) bool {
+		ens, ename := splitNamespacedName(inv.Entries[i].Name)
+		return ens == namespace && ename == name
+	})
+	if err != nil {
+		return nil, err
+	}
+	if found == nil {
+		return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), name)
+	}
+	return found, nil
+}
+
+// findEntry sweeps every node inventory with List's bounded fan-out and returns
+// the first entry matching match synthesized as a Sandbox, canceling the rest
+// of the sweep on the hit. Nil with a nil error means no entry matched.
+func (s *scatterGatherStore) findEntry(ctx context.Context, op string, match func(inv *NodeInventory, i int) bool) (*sandboxv1beta1.Sandbox, error) {
 	nodes, err := s.src.ListNodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
 	}
-	for _, node := range nodes {
-		inv, err := s.src.NodeInventory(ctx, node)
-		if err != nil {
-			s.log.V(1).Info("node inventory unavailable during get; trying next node",
-				"node", node, "err", err.Error())
-			continue
-		}
-		for i := range inv.Entries {
-			ens, ename := splitNamespacedName(inv.Entries[i].Name)
-			if ens == namespace && ename == name {
-				return entryToSandbox(inv.Node, inv.Entries[i]), nil
-			}
-		}
+	gctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	g := &errgroup.Group{}
+	if s.concurrency > 0 {
+		g.SetLimit(s.concurrency)
 	}
-	return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), name)
+	var (
+		mu    sync.Mutex
+		found *sandboxv1beta1.Sandbox
+	)
+	for _, node := range nodes {
+		g.Go(func() error {
+			if gctx.Err() != nil {
+				return nil
+			}
+			inv, err := s.src.NodeInventory(gctx, node)
+			if err != nil {
+				s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
+					"node", node, "err", err.Error())
+				return nil
+			}
+			for i := range inv.Entries {
+				if !match(inv, i) {
+					continue
+				}
+				mu.Lock()
+				if found == nil {
+					found = entryToSandbox(inv.Node, inv.Entries[i])
+				}
+				mu.Unlock()
+				cancel()
+				return nil
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return found, nil
+}
+
+// GetByClaimID resolves the sandbox whose node-local claim id satisfies match,
+// fanning out per node and canceling on the first hit; only the matching entry
+// is materialized. An empty namespace matches every namespace.
+func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error) {
+	found, err := s.findEntry(ctx, "claim-id get", func(inv *NodeInventory, i int) bool {
+		if inv.Entries[i].ID == "" || !match(inv.Entries[i].ID) {
+			return false
+		}
+		ns, _ := splitNamespacedName(inv.Entries[i].Name)
+		return namespace == "" || ns == namespace
+	})
+	if err != nil {
+		return nil, err
+	}
+	if found == nil {
+		return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), "")
+	}
+	return found, nil
 }
 
 // Claim picks the node with the most warm capacity for pool and hands over one of
@@ -341,32 +403,28 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 	return nil
 }
 
-// warmCandidates lists every node advertising warm capacity for pool. A node whose
-// inventory is unavailable is skipped, not fatal: the fleet stays claimable while
-// one node is partitioned.
+// warmCandidates lists every node advertising warm capacity for pool, fanning
+// out per node like List. A node whose inventory is unavailable is skipped, not
+// fatal: the fleet stays claimable while one node is partitioned.
 func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
-	nodes, err := s.src.ListNodes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
-	}
-	var out []warmCandidate
-	for _, n := range nodes {
-		inv, err := s.src.NodeInventory(ctx, n)
+	return fanOutNodes(ctx, s, func(gctx context.Context, n string) []warmCandidate {
+		inv, err := s.src.NodeInventory(gctx, n)
 		if err != nil {
 			s.log.V(1).Info("node inventory unavailable during claim node-pick; skipping",
 				"node", n, "err", err.Error())
-			continue
+			return nil
 		}
 		if inv.Address == "" {
-			continue
+			return nil
 		}
-		for i := range inv.Pools {
-			if pc := inv.Pools[i]; pc.Warm > 0 && poolCapacityMatches(pc, pool) {
+		var out []warmCandidate
+		for j := range inv.Pools {
+			if pc := inv.Pools[j]; pc.Warm > 0 && poolCapacityMatches(pc, pool) {
 				out = append(out, warmCandidate{node: n, addr: inv.Address, warm: pc.Warm})
 			}
 		}
-	}
-	return out, nil
+		return out
+	})
 }
 
 // Watch merges per-node inventory into a single Sandbox event stream. This
@@ -701,25 +759,6 @@ func (p *NodeInventoryPublisher) Publish(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("scale: apply node %q inventory: %w", p.node, err)
 	}
 	return len(entries), nil
-}
-
-// PublishPeriodically runs Publish on interval until ctx is canceled. Publish
-// failures are logged, not fatal — the next tick rebuilds from live state.
-func (p *NodeInventoryPublisher) PublishPeriodically(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		if n, err := p.Publish(ctx); err != nil {
-			p.log.Error(err, "node inventory publish failed; will retry on next tick", "node", p.node)
-		} else {
-			p.log.V(1).Info("published node inventory", "node", p.node, "entries", n)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
 }
 
 var _ InventoryApplier = (*ssaInventoryApplier)(nil)

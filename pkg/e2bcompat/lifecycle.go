@@ -310,9 +310,6 @@ func (s *Server) nodesWithSandboxes(r *http.Request) ([]string, error) {
 // empty body leaves the target at its zero value rather than failing, which is
 // what pause and fork require.
 func decodeOptional(w http.ResponseWriter, r *http.Request, out any) error {
-	if r.Body == nil {
-		return nil
-	}
 	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(out)
 	if errors.Is(err, io.EOF) {
 		return nil

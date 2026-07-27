@@ -204,6 +204,39 @@ func TestSandboxConversion(t *testing.T) {
 	}
 }
 
+// TestConvertFromLegacyFullObjectState pins backward compatibility: objects
+// written before the slim round-trip payload carry a full v1alpha1 Sandbox
+// JSON under the state annotation, and its replica fields must still restore.
+func TestConvertFromLegacyFullObjectState(t *testing.T) {
+	five := int32(5)
+	legacy := &Sandbox{
+		Spec:   SandboxSpec{Replicas: &five},
+		Status: SandboxStatus{Replicas: 4},
+	}
+	legacyJSON, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy state: %v", err)
+	}
+	hub := &v1beta1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "legacy",
+			Namespace:   "default",
+			Annotations: map[string]string{v1alpha1SandboxStateAnnotation: string(legacyJSON)},
+		},
+		Spec: v1beta1.SandboxSpec{OperatingMode: v1beta1.SandboxOperatingModeRunning},
+	}
+	got := &Sandbox{}
+	if err := got.ConvertFrom(hub); err != nil {
+		t.Fatalf("convert from: %v", err)
+	}
+	if got.Spec.Replicas == nil || *got.Spec.Replicas != 5 {
+		t.Fatalf("spec.replicas = %v, want 5", got.Spec.Replicas)
+	}
+	if got.Status.Replicas != 4 {
+		t.Fatalf("status.replicas = %d, want 4", got.Status.Replicas)
+	}
+}
+
 func TestSandboxConversionFromHub(t *testing.T) {
 	// Test conversion of a v1beta1 Sandbox created without v1alpha1 state annotation (e.g. created directly via v1beta1 API)
 	tests := []struct {

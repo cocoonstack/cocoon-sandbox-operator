@@ -287,6 +287,60 @@ func TestErrorBodyCarriesMessage(t *testing.T) {
 	}
 }
 
+// TestLookupUsesClaimIDResolver pins the id-keyed fast path over the real
+// scatter-gather store: both id spellings resolve without a fleet List, other
+// namespaces stay invisible, and a miss is a plain not-found.
+func TestLookupUsesClaimIDResolver(t *testing.T) {
+	src := scale.NewStaticInventorySource()
+	src.Put(&scale.NodeInventory{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
+		Node:       "node-a",
+		Address:    "10.0.0.1:7777",
+		Entries: []scale.InventoryEntry{
+			{Name: "sandboxes/sb-1", ID: "sb_0123abcd", Phase: "Running", Address: "10.0.0.1:7777"},
+			{Name: "elsewhere/sb-2", ID: "sb_ffff0000", Phase: "Running", Address: "10.0.0.1:7777"},
+		},
+	})
+	s, err := NewServer(scale.NewScatterGatherStore(src), Options{Namespace: "sandboxes", AllowAnonymous: true})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/sandboxes/x", nil)
+
+	for _, id := range []string{"sb_0123abcd", publicID("sb_0123abcd")} {
+		sb, err := s.lookup(req, id)
+		if err != nil {
+			t.Fatalf("lookup(%q): %v", id, err)
+		}
+		if sb.Name != "sb-1" || sb.Namespace != "sandboxes" {
+			t.Fatalf("lookup(%q) = %s/%s, want sandboxes/sb-1", id, sb.Namespace, sb.Name)
+		}
+	}
+	if _, err := s.lookup(req, "sb_ffff0000"); err != errSandboxNotFound {
+		t.Fatalf("cross-namespace id resolved, want errSandboxNotFound, got %v", err)
+	}
+	if _, err := s.lookup(req, "sb_missing"); err != errSandboxNotFound {
+		t.Fatalf("missing id: want errSandboxNotFound, got %v", err)
+	}
+}
+
+// TestDetailStateFollowsThePhaseLabel pins the e2b state mapping: a Hibernated
+// phase reports paused, anything else running.
+func TestDetailStateFollowsThePhaseLabel(t *testing.T) {
+	s, err := NewServer(&fakeStore{}, Options{AllowAnonymous: true})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	sb := liveSandbox("sb-1", "sb_0123abcd", "node-a", "img", "tok")
+	if got := s.detailFor(&sb).State; got != StateRunning {
+		t.Fatalf("running sandbox state = %q, want %q", got, StateRunning)
+	}
+	sb.Labels = map[string]string{scale.PhaseLabel: phaseHibernated}
+	if got := s.detailFor(&sb).State; got != StatePaused {
+		t.Fatalf("hibernated sandbox state = %q, want %q", got, StatePaused)
+	}
+}
+
 // fakeStore records what the compat layer asked of the store and replays canned
 // answers, so the tests assert the translation rather than the node behavior.
 type fakeStore struct {

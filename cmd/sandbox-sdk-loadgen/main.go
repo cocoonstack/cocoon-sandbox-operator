@@ -270,7 +270,8 @@ func main() {
 	fmt.Printf("sandbox-sdk-loadgen %s: ns=%s total=%d concurrency=%d cleanup=%v release-timeout=%s image=%s\n",
 		version, o.namespace, o.total, o.concurrency, o.cleanup, o.releaseTimeout, o.image)
 
-	summary := run(ctx, cl, &o)
+	var seq int64
+	summary := createBatch(ctx, cl, &o, &seq, o.total)
 	fmt.Println(summary)
 	if summary.leaked > 0 {
 		fmt.Printf("ERROR: %d sandbox(es) leaked — their node claims were left for the TTL reaper. Do NOT scale this run up until the leak is explained.\n", summary.leaked)
@@ -327,8 +328,9 @@ func runCycles(ctx context.Context, cl client.Client, o *options) {
 	}
 }
 
-// createBatch issues exactly n creates at o.concurrency without cleanup,
-// drawing names from seq. Failures consume their slot and are not retried.
+// createBatch issues exactly n creates at o.concurrency, drawing names from
+// seq and recording each outcome (release included under --cleanup). Failures
+// consume their slot and are not retried.
 func createBatch(ctx context.Context, cl client.Client, o *options, seq *int64, n int) runSummary {
 	var s runSummary
 	var issued atomic.Int64
@@ -344,11 +346,8 @@ func createBatch(ctx context.Context, cl client.Client, o *options, seq *int64, 
 					return
 				}
 				name := fmt.Sprintf("%s-%d", o.namegen, atomic.AddInt64(seq, 1))
-				if _, err := createOne(ctx, cl, o, name); err != nil {
-					atomic.AddInt64(&s.failed, 1)
-				} else {
-					atomic.AddInt64(&s.created, 1)
-				}
+				sb, err := createOne(ctx, cl, o, name)
+				recordOutcome(ctx, cl, o, &s, sb, err)
 				if o.interval > 0 {
 					sleepCtx(ctx, o.interval)
 				}
@@ -406,44 +405,6 @@ func sleepCtx(ctx context.Context, d time.Duration) {
 	case <-ctx.Done():
 	case <-time.After(d):
 	}
-}
-
-// run fans out o.concurrency workers. A worker RESERVES a slot from the shared
-// issue counter before each create, so across all workers exactly o.total
-// creates are issued — failures consume their slot and are not retried (a retry
-// would exceed the requested count).
-func run(ctx context.Context, cl client.Client, o *options) runSummary {
-	var s runSummary
-	var issued atomic.Int64
-	start := time.Now()
-	var wg sync.WaitGroup
-	for range o.concurrency {
-		wg.Go(func() {
-			for {
-				if ctx.Err() != nil {
-					return
-				}
-				slot := issued.Add(1)
-				if slot > int64(o.total) {
-					return
-				}
-				name := fmt.Sprintf("%s-%d", o.namegen, slot)
-				sb, err := createOne(ctx, cl, o, name)
-				recordOutcome(ctx, cl, o, &s, sb, err)
-				if o.interval > 0 {
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(o.interval):
-					}
-				}
-			}
-		})
-	}
-	wg.Wait()
-	s.issued = min(issued.Load(), int64(o.total))
-	s.elapsed = time.Since(start)
-	return s
 }
 
 // recordOutcome tallies one create attempt and, with --cleanup, its release. A

@@ -20,6 +20,7 @@
 package e2bcompat
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -82,6 +84,13 @@ type Options struct {
 	Inventory scale.InventorySource
 	// Log receives request-level errors.
 	Log logr.Logger
+}
+
+// claimIDResolver is the store fast path resolving one sandbox by node-local
+// claim id without materializing the fleet; the scatter-gather store
+// implements it, and lookup falls back to a List scan for stores that don't.
+type claimIDResolver interface {
+	GetByClaimID(ctx context.Context, namespace string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error)
 }
 
 // Server translates e2b REST calls onto a scale.SandboxStore.
@@ -312,6 +321,18 @@ func (s *Server) lookup(r *http.Request, id string) (*sandboxv1beta1.Sandbox, er
 	if strings.TrimSpace(id) == "" {
 		return nil, errSandboxNotFound
 	}
+	if resolver, ok := s.store.(claimIDResolver); ok {
+		sb, err := resolver.GetByClaimID(r.Context(), s.opts.Namespace, func(claimID string) bool {
+			return matchesID(claimID, id)
+		})
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				return nil, errSandboxNotFound
+			}
+			return nil, err
+		}
+		return sb, nil
+	}
 	list, err := s.store.List(r.Context(), scale.ListOptions{Namespace: s.opts.Namespace})
 	if err != nil {
 		return nil, err
@@ -341,13 +362,17 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	if started.IsZero() {
 		started = time.Now()
 	}
+	state := StateRunning
+	if sb.Labels[scale.PhaseLabel] == phaseHibernated {
+		state = StatePaused
+	}
 	return SandboxDetail{
 		TemplateID:      templateOf(sb),
 		SandboxID:       publicID(sb.Annotations[scale.ClaimIDAnnotation]),
 		ClientID:        sb.Status.NodeName,
 		StartedAt:       started.UTC().Format(time.RFC3339),
 		EndAt:           started.Add(DefaultTimeoutSeconds * time.Second).UTC().Format(time.RFC3339),
-		State:           StateRunning,
+		State:           state,
 		EnvdVersion:     s.opts.EnvdVersion,
 		EnvdAccessToken: sb.Annotations[tokenAnnotation],
 		Domain:          s.opts.Domain,

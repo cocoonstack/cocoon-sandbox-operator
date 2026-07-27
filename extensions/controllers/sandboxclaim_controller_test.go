@@ -1642,7 +1642,7 @@ func TestSandboxClaimTTLCleanupRequiresPersistedExpiredStatus(t *testing.T) {
 			Namespace: "default",
 			UID:       "stale-ttl-claim",
 			Annotations: map[string]string{
-				ObservabilityAnnotation: time.Now().Format(time.RFC3339Nano),
+				asmetrics.ObservabilityAnnotation: time.Now().Format(time.RFC3339Nano),
 			},
 		},
 		Spec: extensionsv1beta1.SandboxClaimSpec{
@@ -4286,6 +4286,13 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "claim-other", Namespace: "default"},
 		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "other-warmpool"}},
 	}
+	claimBound := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "claim-bound", Namespace: "default"},
+		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPoolName}},
+		Status: extensionsv1beta1.SandboxClaimStatus{
+			SandboxStatus: extensionsv1beta1.SandboxStatus{Name: "claim-bound-sandbox"},
+		},
+	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
 		ObjectMeta: metav1.ObjectMeta{Name: warmPoolName, Namespace: "default"},
@@ -4298,14 +4305,8 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 	// Let's use the WithIndex option on the fake client builder to support the matchingFields query!
 	fakeClientWithIndex := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(claim1, claim2, claimOther, warmPool).
-		WithIndex(&extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, func(obj client.Object) []string {
-			c := obj.(*extensionsv1beta1.SandboxClaim)
-			if c.Spec.WarmPoolRef.Name == "" {
-				return nil
-			}
-			return []string{c.Spec.WarmPoolRef.Name}
-		}).
+		WithObjects(claim1, claim2, claimOther, claimBound, warmPool).
+		WithIndex(&extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, warmPoolRefIndexer).
 		Build()
 
 	reconciler := &SandboxClaimReconciler{
@@ -4316,7 +4317,7 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 	requests := reconciler.mapWarmPoolToClaims(t.Context(), warmPool)
 
 	if len(requests) != 2 {
-		t.Fatalf("expected 2 requests, got %d", len(requests))
+		t.Fatalf("expected 2 requests (bound and other-pool claims excluded), got %d", len(requests))
 	}
 
 	expectedNames := map[string]bool{"claim-1": true, "claim-2": true}
@@ -5229,7 +5230,7 @@ func TestFlushDoesNotResurrectAClearedAnnotation(t *testing.T) {
 		"the staged observability annotation still has to land")
 }
 
-func newScheme(t *testing.T) *runtime.Scheme {
+func newScheme(t testing.TB) *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add to scheme: (%v)", err)

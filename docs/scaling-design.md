@@ -115,10 +115,8 @@ immediately. The `SandboxClaim` is marked `Bound` **asynchronously** — the rec
 follows the action, exactly as kubelet static Pods record to the apiserver after
 the container is already running.
 
-**Authorization stays central (correctly).** The gateway runs a
-`SubjectAccessReview` + `ResourceQuota` check before delivery. Policy is the part
-of Kubernetes that *should* stay centralized; only the ownership-transfer
-transaction moves to the node.
+**Authorization stays central.** The gateway runs a `SubjectAccessReview`
+before delivery; only ownership transfer moves to the node.
 
 ```go
 // ClaimGateway is the node-local fast path for warm-pool claims.
@@ -126,8 +124,8 @@ transaction moves to the node.
 // SandboxClaim object is reconciled to Bound asynchronously afterward.
 type ClaimGateway interface {
     // Claim transfers ownership of a node-local warm sandbox to the caller,
-    // returning connection info. It performs the SubjectAccessReview +
-    // quota check inline; it does NOT block on writing the SandboxClaim.
+    // returning connection info. It performs SubjectAccessReview inline;
+    // it does NOT block on writing the SandboxClaim.
     Claim(ctx context.Context, req ClaimRequest) (Assignment, error)
     // Release returns a sandbox to the node-local pool (or tears it down).
     Release(ctx context.Context, assignment Assignment) error
@@ -140,7 +138,6 @@ type ClaimGateway interface {
 |---|---|---|
 | Gateway crashes after delivery, before recording `Bound` | Orphan binding → audit-only orphan GC + adopt reconciles the record (the VM is never destroyed on pod-level state — see the delete-authorization contract) | No — eventual consistency |
 | Node has no warm VM | Falls back to the L1 Kubernetes path (create a new Sandbox) | No |
-| Quota exceeded | Gateway rejects inline before delivery | No |
 
 **Acceptance:** claim p50 sub-millisecond on the sandboxd tier; orphan-binding
 rate converges to 0 via GC; `kubectl get sandboxclaims` still shows every claim.
@@ -309,4 +306,3 @@ apiserver round-trip, sandboxd delivery (0.2–0.7 ms), and informer convergence
 the real-microVM claim p95 (926 ms, ~7× the p50) is single-node
 optimistic-concurrency contention under 100 simultaneous claims — exactly the tail L1's per-pool operator
 sharding is designed to spread across shards and nodes.
-

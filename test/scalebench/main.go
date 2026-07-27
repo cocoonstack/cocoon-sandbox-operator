@@ -52,6 +52,7 @@ import (
 	ctrls "github.com/cocoonstack/sandbox-operator/extensions/controllers"
 	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
+	"github.com/cocoonstack/sandbox-operator/test/benchutil"
 )
 
 const (
@@ -67,12 +68,7 @@ var (
 	maxPasses = flag.Int("max-passes", 8, "max reconcile passes per claim before giving up")
 )
 
-func must(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
-		os.Exit(2)
-	}
-}
+func must(err error) { benchutil.Must(err) }
 
 func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
@@ -126,7 +122,7 @@ func claim(idx int) *extv1beta1.SandboxClaim {
 
 // fixture returns a fake client seeded with N warm sandboxes + N claims, plus the
 // warm-pool queue populated with the N sandbox keys (as the event handler would).
-func fixture(n int) (ctrlclient.Client, queue.SandboxQueue, []*extv1beta1.SandboxClaim, *runtime.Scheme) {
+func fixture(n int) (ctrlclient.Client, *queue.SimpleSandboxQueue, []*extv1beta1.SandboxClaim, *runtime.Scheme) {
 	scheme := newScheme()
 	poolHash := sandboxcontrollers.NameHash(poolName)
 	tmplHash := ctrls.SandboxTemplateRefHash(tmplName)
@@ -259,19 +255,7 @@ func adoptViaList(ctx context.Context, fc ctrlclient.Client, cl *extv1beta1.Sand
 	return false
 }
 
-func pct(xs []float64, p float64) float64 {
-	if len(xs) == 0 {
-		return 0
-	}
-	s := append([]float64(nil), xs...)
-	sort.Float64s(s)
-	if p >= 100 {
-		return round3(s[len(s)-1])
-	}
-	return round3(s[int(float64(len(s)-1)*p/100)])
-}
-
-func round3(f float64) float64 { return float64(int(f*1000)) / 1000 }
+func pct(xs []float64, p float64) float64 { return benchutil.Pct(xs, p, benchutil.Round3) }
 
 type sizeResult struct {
 	N         int     `json:"n"`
@@ -335,8 +319,8 @@ func main() {
 		"substrate":        "controller-runtime fake apiserver; real SandboxClaimReconciler",
 		"sizes":            sizes,
 		"threshold_ratio":  *threshold,
-		"fast_p50_ratio":   round3(fastRatio),
-		"naive_p50_ratio":  round3(naiveRatio),
+		"fast_p50_ratio":   benchutil.Round3(fastRatio),
+		"naive_p50_ratio":  benchutil.Round3(naiveRatio),
 		"all_claims_bound": allBound,
 		"near_constant":    nearConstant,
 		"sensitive":        sensitive,

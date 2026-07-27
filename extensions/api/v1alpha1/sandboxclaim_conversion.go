@@ -41,18 +41,9 @@ const (
 func (s *SandboxClaim) ConvertTo(dstRaw conversion.Hub) error {
 	dst := dstRaw.(*v1beta1.SandboxClaim)
 
-	// Copy object metadata
 	s.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
-
-	// Convert Spec
-	if err := convertClaimSpecTo(&s.Spec, &dst.Spec, s.Name, s.Status.SandboxStatus.Name); err != nil {
-		return err
-	}
-
-	// Convert Status
-	if err := convertClaimStatusTo(&s.Status, &dst.Status); err != nil {
-		return err
-	}
+	convertClaimSpecTo(&s.Spec, &dst.Spec, s.Name, s.Status.SandboxStatus.Name)
+	convertClaimStatusTo(&s.Status, &dst.Status)
 
 	// Restore the v1beta1-only volumeClaimTemplates from its preservation
 	// annotation, so a v1beta1-authored claim keeps its PVCs after a v1alpha1 hop.
@@ -67,39 +58,16 @@ func (s *SandboxClaim) ConvertTo(dstRaw conversion.Hub) error {
 		}
 	}
 
-	// Preserve the original v1alpha1 object state for lossless round-tripping
-	if dst.Annotations == nil {
-		dst.Annotations = make(map[string]string)
-	}
-	sCopy := s.DeepCopy()
-	if sCopy.Annotations != nil {
-		delete(sCopy.Annotations, v1alpha1SandboxClaimStateAnnotation)
-	}
-	stateJSON, err := json.Marshal(sCopy)
-	if err != nil {
-		return fmt.Errorf("failed to marshal v1alpha1 SandboxClaim state: %w", err)
-	}
-	dst.Annotations[v1alpha1SandboxClaimStateAnnotation] = string(stateJSON)
-
-	return nil
+	return stashV1alpha1State(dst, v1alpha1SandboxClaimStateAnnotation, "SandboxClaim", s.DeepCopy())
 }
 
 // ConvertFrom converts from the Hub version (v1beta1) to this SandboxClaim.
 func (s *SandboxClaim) ConvertFrom(srcRaw conversion.Hub) error {
 	src := srcRaw.(*v1beta1.SandboxClaim)
 
-	// Copy object metadata
 	src.ObjectMeta.DeepCopyInto(&s.ObjectMeta)
-
-	// Convert Spec
-	if err := convertClaimSpecFrom(&src.Spec, &s.Spec); err != nil {
-		return err
-	}
-
-	// Convert Status
-	if err := convertClaimStatusFrom(&src.Status, &s.Status); err != nil {
-		return err
-	}
+	convertClaimSpecFrom(&src.Spec, &s.Spec)
+	convertClaimStatusFrom(&src.Status, &s.Status)
 
 	if err := restoreV1alpha1Spec(s, src); err != nil {
 		return err
@@ -151,8 +119,7 @@ func restoreV1alpha1Spec(s *SandboxClaim, src *v1beta1.SandboxClaim) error {
 		s.Spec.WarmPool = original.Spec.WarmPool
 		return nil
 	}
-	policy := WarmPoolPolicy(src.Spec.WarmPoolRef.Name)
-	s.Spec.WarmPool = &policy
+	s.Spec.WarmPool = new(WarmPoolPolicy(src.Spec.WarmPoolRef.Name))
 	return nil
 }
 
@@ -176,10 +143,7 @@ func stripRandomSuffix(name string) string {
 	return name
 }
 
-// Helper functions for SandboxClaim conversion
-
-func convertClaimSpecTo(src *SandboxClaimSpec, dst *v1beta1.SandboxClaimSpec, claimName, sandboxName string) error {
-	// Lifecycle
+func convertClaimSpecTo(src *SandboxClaimSpec, dst *v1beta1.SandboxClaimSpec, claimName, sandboxName string) {
 	if src.Lifecycle != nil {
 		dst.Lifecycle = &v1beta1.Lifecycle{
 			ShutdownTime:            src.Lifecycle.ShutdownTime,
@@ -210,12 +174,8 @@ func convertClaimSpecTo(src *SandboxClaimSpec, dst *v1beta1.SandboxClaimSpec, cl
 		}
 	}
 
-	// AdditionalPodMetadata
-	if err := convertPodMetadataToClaim(&src.AdditionalPodMetadata, &dst.AdditionalPodMetadata); err != nil {
-		return err
-	}
+	sandboxv1alpha1.ConvertPodMetadataTo(&src.AdditionalPodMetadata, &dst.AdditionalPodMetadata)
 
-	// Env
 	if src.Env != nil {
 		dst.Env = make([]v1beta1.EnvVar, len(src.Env))
 		for i := range src.Env {
@@ -228,12 +188,9 @@ func convertClaimSpecTo(src *SandboxClaimSpec, dst *v1beta1.SandboxClaimSpec, cl
 	} else {
 		dst.Env = nil
 	}
-
-	return nil
 }
 
-func convertClaimSpecFrom(src *v1beta1.SandboxClaimSpec, dst *SandboxClaimSpec) error {
-	// Lifecycle
+func convertClaimSpecFrom(src *v1beta1.SandboxClaimSpec, dst *SandboxClaimSpec) {
 	if src.Lifecycle != nil {
 		dst.Lifecycle = &Lifecycle{
 			ShutdownTime:            src.Lifecycle.ShutdownTime,
@@ -249,22 +206,16 @@ func convertClaimSpecFrom(src *v1beta1.SandboxClaimSpec, dst *SandboxClaimSpec) 
 		dst.TemplateRef = SandboxTemplateRef{
 			Name: templateName,
 		}
-		policy := WarmPoolPolicyDefault
-		dst.WarmPool = &policy
+		dst.WarmPool = new(WarmPoolPolicyDefault)
 	} else {
-		policy := WarmPoolPolicy(src.WarmPoolRef.Name)
-		dst.WarmPool = &policy
+		dst.WarmPool = new(WarmPoolPolicy(src.WarmPoolRef.Name))
 		dst.TemplateRef = SandboxTemplateRef{
 			Name: src.WarmPoolRef.Name,
 		}
 	}
 
-	// AdditionalPodMetadata
-	if err := convertPodMetadataFromClaim(&src.AdditionalPodMetadata, &dst.AdditionalPodMetadata); err != nil {
-		return err
-	}
+	sandboxv1alpha1.ConvertPodMetadataFrom(&src.AdditionalPodMetadata, &dst.AdditionalPodMetadata)
 
-	// Env
 	if src.Env != nil {
 		dst.Env = make([]EnvVar, len(src.Env))
 		for i := range src.Env {
@@ -277,36 +228,20 @@ func convertClaimSpecFrom(src *v1beta1.SandboxClaimSpec, dst *SandboxClaimSpec) 
 	} else {
 		dst.Env = nil
 	}
-
-	return nil
 }
 
-func convertClaimStatusTo(src *SandboxClaimStatus, dst *v1beta1.SandboxClaimStatus) error {
+func convertClaimStatusTo(src *SandboxClaimStatus, dst *v1beta1.SandboxClaimStatus) {
 	dst.Conditions = src.Conditions
 	dst.SandboxStatus = v1beta1.SandboxStatus{
 		Name:   src.SandboxStatus.Name,
 		PodIPs: src.SandboxStatus.PodIPs,
 	}
-	return nil
 }
 
-func convertClaimStatusFrom(src *v1beta1.SandboxClaimStatus, dst *SandboxClaimStatus) error {
+func convertClaimStatusFrom(src *v1beta1.SandboxClaimStatus, dst *SandboxClaimStatus) {
 	dst.Conditions = src.Conditions
 	dst.SandboxStatus = SandboxStatus{
 		Name:   src.SandboxStatus.Name,
 		PodIPs: src.SandboxStatus.PodIPs,
 	}
-	return nil
-}
-
-func convertPodMetadataToClaim(src *sandboxv1alpha1.PodMetadata, dst *sandboxv1beta1.PodMetadata) error {
-	dst.Labels = src.Labels
-	dst.Annotations = src.Annotations
-	return nil
-}
-
-func convertPodMetadataFromClaim(src *sandboxv1beta1.PodMetadata, dst *sandboxv1alpha1.PodMetadata) error {
-	dst.Labels = src.Labels
-	dst.Annotations = src.Annotations
-	return nil
 }
