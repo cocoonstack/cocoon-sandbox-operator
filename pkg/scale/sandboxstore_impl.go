@@ -253,6 +253,8 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 
 // Get routes to the owning node's authoritative inventory. It resolves which
 // node holds namespace/name and returns that entry synthesized as a Sandbox.
+// The per-node sweep fans out like List and cancels on the first hit — a
+// sandbox lives on exactly one node, so first-found is the answer.
 //
 // In production this would RPC the owning node's live sandboxd for a
 // read-after-write answer; in this substrate the node's published NodeInventory
@@ -263,21 +265,47 @@ func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*
 	if err != nil {
 		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
 	}
-	for _, node := range nodes {
-		inv, err := s.src.NodeInventory(ctx, node)
-		if err != nil {
-			s.log.V(1).Info("node inventory unavailable during get; trying next node",
-				"node", node, "err", err.Error())
-			continue
-		}
-		for i := range inv.Entries {
-			ens, ename := splitNamespacedName(inv.Entries[i].Name)
-			if ens == namespace && ename == name {
-				return entryToSandbox(inv.Node, inv.Entries[i]), nil
-			}
-		}
+	gctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	g := &errgroup.Group{}
+	if s.concurrency > 0 {
+		g.SetLimit(s.concurrency)
 	}
-	return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), name)
+	var (
+		mu    sync.Mutex
+		found *sandboxv1beta1.Sandbox
+	)
+	for _, node := range nodes {
+		g.Go(func() error {
+			if gctx.Err() != nil {
+				return nil
+			}
+			inv, err := s.src.NodeInventory(gctx, node)
+			if err != nil {
+				s.log.V(1).Info("node inventory unavailable during get; skipping node",
+					"node", node, "err", err.Error())
+				return nil
+			}
+			for i := range inv.Entries {
+				ens, ename := splitNamespacedName(inv.Entries[i].Name)
+				if ens == namespace && ename == name {
+					mu.Lock()
+					if found == nil {
+						found = entryToSandbox(inv.Node, inv.Entries[i])
+					}
+					mu.Unlock()
+					cancel()
+					return nil
+				}
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	if found == nil {
+		return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), name)
+	}
+	return found, nil
 }
 
 // Claim picks the node with the most warm capacity for pool and hands over one of
@@ -341,32 +369,40 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 	return nil
 }
 
-// warmCandidates lists every node advertising warm capacity for pool. A node whose
-// inventory is unavailable is skipped, not fatal: the fleet stays claimable while
-// one node is partitioned.
+// warmCandidates lists every node advertising warm capacity for pool, fanning
+// out per node like List. A node whose inventory is unavailable is skipped, not
+// fatal: the fleet stays claimable while one node is partitioned.
 func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
 	nodes, err := s.src.ListNodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
 	}
-	var out []warmCandidate
-	for _, n := range nodes {
-		inv, err := s.src.NodeInventory(ctx, n)
-		if err != nil {
-			s.log.V(1).Info("node inventory unavailable during claim node-pick; skipping",
-				"node", n, "err", err.Error())
-			continue
-		}
-		if inv.Address == "" {
-			continue
-		}
-		for i := range inv.Pools {
-			if pc := inv.Pools[i]; pc.Warm > 0 && poolCapacityMatches(pc, pool) {
-				out = append(out, warmCandidate{node: n, addr: inv.Address, warm: pc.Warm})
-			}
-		}
+	perNode := make([][]warmCandidate, len(nodes))
+	g, gctx := errgroup.WithContext(ctx)
+	if s.concurrency > 0 {
+		g.SetLimit(s.concurrency)
 	}
-	return out, nil
+	for i, n := range nodes {
+		g.Go(func() error {
+			inv, err := s.src.NodeInventory(gctx, n)
+			if err != nil {
+				s.log.V(1).Info("node inventory unavailable during claim node-pick; skipping",
+					"node", n, "err", err.Error())
+				return nil
+			}
+			if inv.Address == "" {
+				return nil
+			}
+			for j := range inv.Pools {
+				if pc := inv.Pools[j]; pc.Warm > 0 && poolCapacityMatches(pc, pool) {
+					perNode[i] = append(perNode[i], warmCandidate{node: n, addr: inv.Address, warm: pc.Warm})
+				}
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return slices.Concat(perNode...), nil
 }
 
 // Watch merges per-node inventory into a single Sandbox event stream. This
