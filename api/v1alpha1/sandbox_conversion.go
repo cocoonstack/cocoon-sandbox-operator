@@ -25,6 +25,19 @@ import (
 
 const v1alpha1SandboxStateAnnotation = "api.agents.x-k8s.io/v1alpha1-sandbox-state"
 
+// v1alpha1State is the round-trip payload: exactly the fields v1beta1 cannot
+// represent (replica counts collapse into OperatingMode). Objects written by
+// older operators carry a full v1alpha1 Sandbox JSON under the same annotation;
+// that decodes into this shape too, so reads stay compatible both ways.
+type v1alpha1State struct {
+	Spec struct {
+		Replicas *int32 `json:"replicas,omitempty"`
+	} `json:"spec"`
+	Status struct {
+		Replicas int32 `json:"replicas,omitempty"`
+	} `json:"status"`
+}
+
 // ConvertTo converts this Sandbox to the Hub version (v1beta1).
 func (s *Sandbox) ConvertTo(dstRaw conversion.Hub) error {
 	dst := dstRaw.(*v1beta1.Sandbox)
@@ -42,15 +55,14 @@ func (s *Sandbox) ConvertTo(dstRaw conversion.Hub) error {
 		return err
 	}
 
-	// Preserve the original v1alpha1 object state for lossless round-tripping
+	// Preserve the fields v1beta1 cannot represent for lossless round-tripping
 	if dst.Annotations == nil {
 		dst.Annotations = make(map[string]string)
 	}
-	sCopy := s.DeepCopy()
-	if sCopy.Annotations != nil {
-		delete(sCopy.Annotations, v1alpha1SandboxStateAnnotation)
-	}
-	stateJSON, err := json.Marshal(sCopy)
+	var state v1alpha1State
+	state.Spec.Replicas = s.Spec.Replicas
+	state.Status.Replicas = s.Status.Replicas
+	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("failed to marshal v1alpha1 Sandbox state: %w", err)
 	}
@@ -89,7 +101,7 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 		// Strip the state annotation so it doesn't leak to clients and get sent back on updates
 		delete(s.Annotations, v1alpha1SandboxStateAnnotation)
 
-		var original Sandbox
+		var original v1alpha1State
 		if err := json.Unmarshal([]byte(stateJSON), &original); err != nil {
 			return fmt.Errorf("failed to unmarshal v1alpha1 Sandbox state: %w", err)
 		}
