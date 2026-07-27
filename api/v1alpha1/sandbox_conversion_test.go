@@ -204,7 +204,6 @@ func TestSandboxConversion(t *testing.T) {
 	}
 }
 
-
 // TestConvertFromLegacyFullObjectState pins backward compatibility: objects
 // written before the slim round-trip payload carry a full v1alpha1 Sandbox
 // JSON under the state annotation, and its replica fields must still restore.

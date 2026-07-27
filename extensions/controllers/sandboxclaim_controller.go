@@ -1772,16 +1772,7 @@ func (r *SandboxClaimReconciler) mapWarmPoolToClaims(ctx context.Context, obj cl
 func (r *SandboxClaimReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
 	r.MaxConcurrentReconciles = concurrentWorkers
 
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, func(rawObj client.Object) []string {
-		claim, ok := rawObj.(*extensionsv1beta1.SandboxClaim)
-		if !ok {
-			return nil
-		}
-		if claim.Spec.WarmPoolRef.Name == "" {
-			return nil
-		}
-		return []string{claim.Spec.WarmPoolRef.Name}
-	}); err != nil {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, warmPoolRefIndexer); err != nil {
 		return err
 	}
 
@@ -1799,6 +1790,15 @@ func (r *SandboxClaimReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWo
 		// claims when a missing template is created, instead of relying on the 1-minute fallback.
 		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
 		Complete(r)
+}
+
+// warmPoolRefIndexer indexes SandboxClaims by spec.warmPoolRef.name.
+func warmPoolRefIndexer(rawObj client.Object) []string {
+	claim, ok := rawObj.(*extensionsv1beta1.SandboxClaim)
+	if !ok || claim.Spec.WarmPoolRef.Name == "" {
+		return nil
+	}
+	return []string{claim.Spec.WarmPoolRef.Name}
 }
 
 // cleanupLegacyNetworkPolicy cleans up any deprecated per-claim NetworkPolicies.

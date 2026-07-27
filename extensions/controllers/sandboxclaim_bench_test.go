@@ -37,13 +37,7 @@ func BenchmarkMapWarmPoolToClaims(b *testing.B) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
-		WithIndex(&extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, func(obj client.Object) []string {
-			c := obj.(*extensionsv1beta1.SandboxClaim)
-			if c.Spec.WarmPoolRef.Name == "" {
-				return nil
-			}
-			return []string{c.Spec.WarmPoolRef.Name}
-		}).
+		WithIndex(&extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, warmPoolRefIndexer).
 		Build()
 	r := &SandboxClaimReconciler{Client: cl, Scheme: scheme}
 

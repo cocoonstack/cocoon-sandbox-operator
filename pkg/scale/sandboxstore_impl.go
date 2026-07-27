@@ -207,48 +207,53 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	if err != nil {
 		return nil, err
 	}
+	items, err := fanOutNodes(ctx, s, func(gctx context.Context, node string) []sandboxv1beta1.Sandbox {
+		inv, invErr := s.src.NodeInventory(gctx, node)
+		if invErr != nil {
+			// Partitioned / lost inventory: skip this node's sandboxes rather
+			// than failing the list. They reappear on the node's next publish.
+			s.log.V(1).Info("node inventory unavailable; omitting from list (eventual consistency)",
+				"node", node, "err", invErr.Error())
+			return nil
+		}
+		return s.materialize(inv, opts.Namespace, labelSel, fieldSel)
+	})
+	if err != nil {
+		return nil, err
+	}
+	list := &sandboxv1beta1.SandboxList{}
+	list.SetGroupVersionKind(sandboxv1beta1.GroupVersion.WithKind("SandboxList"))
+	list.Items = items
+	if list.Items == nil {
+		list.Items = []sandboxv1beta1.Sandbox{} // an empty list serializes as [], not null
+	}
+	slices.SortFunc(list.Items, func(a, b sandboxv1beta1.Sandbox) int {
+		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+	})
+	return list, nil
+}
+
+// fanOutNodes enumerates the node inventories and runs work per node with
+// List's bounded concurrency, concatenating per-node results in node order.
+// A node the work skips contributes nil.
+func fanOutNodes[T any](ctx context.Context, s *scatterGatherStore, work func(ctx context.Context, node string) []T) ([]T, error) {
 	nodes, err := s.src.ListNodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
 	}
-
-	perNode := make([][]sandboxv1beta1.Sandbox, len(nodes))
+	perNode := make([][]T, len(nodes))
 	g, gctx := errgroup.WithContext(ctx)
 	if s.concurrency > 0 {
 		g.SetLimit(s.concurrency)
 	}
 	for i, node := range nodes {
 		g.Go(func() error {
-			inv, err := s.src.NodeInventory(gctx, node)
-			if err != nil {
-				// Partitioned / lost inventory: skip this node's sandboxes rather
-				// than failing the list. They reappear on the node's next publish.
-				s.log.V(1).Info("node inventory unavailable; omitting from list (eventual consistency)",
-					"node", node, "err", err.Error())
-				return nil
-			}
-			perNode[i] = s.materialize(inv, opts.Namespace, labelSel, fieldSel)
+			perNode[i] = work(gctx, node)
 			return nil
 		})
 	}
-	if err := g.Wait(); err != nil {
-		return nil, fmt.Errorf("scale: fan-out to node inventories: %w", err)
-	}
-
-	total := 0
-	for _, chunk := range perNode {
-		total += len(chunk)
-	}
-	list := &sandboxv1beta1.SandboxList{}
-	list.SetGroupVersionKind(sandboxv1beta1.GroupVersion.WithKind("SandboxList"))
-	list.Items = make([]sandboxv1beta1.Sandbox, 0, total)
-	for _, chunk := range perNode {
-		list.Items = append(list.Items, chunk...)
-	}
-	slices.SortFunc(list.Items, func(a, b sandboxv1beta1.Sandbox) int {
-		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
-	})
-	return list, nil
+	_ = g.Wait()
+	return slices.Concat(perNode...), nil
 }
 
 // Get routes to the owning node's authoritative inventory. It resolves which
@@ -408,36 +413,24 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 // out per node like List. A node whose inventory is unavailable is skipped, not
 // fatal: the fleet stays claimable while one node is partitioned.
 func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
-	nodes, err := s.src.ListNodes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
-	}
-	perNode := make([][]warmCandidate, len(nodes))
-	g, gctx := errgroup.WithContext(ctx)
-	if s.concurrency > 0 {
-		g.SetLimit(s.concurrency)
-	}
-	for i, n := range nodes {
-		g.Go(func() error {
-			inv, err := s.src.NodeInventory(gctx, n)
-			if err != nil {
-				s.log.V(1).Info("node inventory unavailable during claim node-pick; skipping",
-					"node", n, "err", err.Error())
-				return nil
-			}
-			if inv.Address == "" {
-				return nil
-			}
-			for j := range inv.Pools {
-				if pc := inv.Pools[j]; pc.Warm > 0 && poolCapacityMatches(pc, pool) {
-					perNode[i] = append(perNode[i], warmCandidate{node: n, addr: inv.Address, warm: pc.Warm})
-				}
-			}
+	return fanOutNodes(ctx, s, func(gctx context.Context, n string) []warmCandidate {
+		inv, err := s.src.NodeInventory(gctx, n)
+		if err != nil {
+			s.log.V(1).Info("node inventory unavailable during claim node-pick; skipping",
+				"node", n, "err", err.Error())
 			return nil
-		})
-	}
-	_ = g.Wait()
-	return slices.Concat(perNode...), nil
+		}
+		if inv.Address == "" {
+			return nil
+		}
+		var out []warmCandidate
+		for j := range inv.Pools {
+			if pc := inv.Pools[j]; pc.Warm > 0 && poolCapacityMatches(pc, pool) {
+				out = append(out, warmCandidate{node: n, addr: inv.Address, warm: pc.Warm})
+			}
+		}
+		return out
+	})
 }
 
 // Watch merges per-node inventory into a single Sandbox event stream. This

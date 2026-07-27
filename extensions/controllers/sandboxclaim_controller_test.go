@@ -4306,13 +4306,7 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 	fakeClientWithIndex := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(claim1, claim2, claimOther, claimBound, warmPool).
-		WithIndex(&extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, func(obj client.Object) []string {
-			c := obj.(*extensionsv1beta1.SandboxClaim)
-			if c.Spec.WarmPoolRef.Name == "" {
-				return nil
-			}
-			return []string{c.Spec.WarmPoolRef.Name}
-		}).
+		WithIndex(&extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, warmPoolRefIndexer).
 		Build()
 
 	reconciler := &SandboxClaimReconciler{

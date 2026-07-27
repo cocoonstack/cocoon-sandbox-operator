@@ -1,6 +1,9 @@
 package e2bcompat
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // A sandboxd claim id is "sb_" + hex (sandboxd pool/claim.go), whose underscore
 // is not legal in a DNS label. The e2b SDK derives the in-sandbox envd host as
@@ -33,16 +36,43 @@ func publicID(claimID string) string {
 
 // matchesID reports whether a live sandbox's claim id is the one a client asked
 // for, accepting both the raw claim id and its published DNS-safe rendering so
-// an id observed through either surface keeps working.
+// an id observed through either surface keeps working. The rendering is
+// compared in place — the id-keyed store sweep calls this once per scanned
+// entry, so building publicID per candidate would allocate O(fleet) per lookup.
 func matchesID(claimID, requested string) bool {
 	if claimID == "" || requested == "" {
 		return false
 	}
-	return claimID == requested || publicID(claimID) == requested
+	if claimID == requested {
+		return true
+	}
+	if !isASCII(claimID) {
+		return publicID(claimID) == requested
+	}
+	if len(claimID) != len(requested) {
+		return false
+	}
+	for i := range len(claimID) {
+		c := claimID[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if !isDNSSafe(rune(c)) {
+			c = '-'
+		}
+		if requested[i] != c {
+			return false
+		}
+	}
+	return true
 }
 
 func needsRewrite(s string) bool {
 	return strings.ContainsFunc(s, func(r rune) bool { return !isDNSSafe(r) })
+}
+
+func isASCII(s string) bool {
+	return !strings.ContainsFunc(s, func(r rune) bool { return r >= utf8.RuneSelf })
 }
 
 // isDNSSafe reports whether r is legal inside a DNS label (RFC 1123): lowercase

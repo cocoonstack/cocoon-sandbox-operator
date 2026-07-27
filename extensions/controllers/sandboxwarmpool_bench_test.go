@@ -6,10 +6,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
@@ -73,7 +72,7 @@ func newBenchPool(b *testing.B) (*SandboxWarmPoolReconciler, *extensionsv1beta1.
 	}
 	poolNameHash := sandboxcontrollers.NameHash(pool.Name)
 	members := make([]sandboxv1beta1.Sandbox, benchPoolMembers)
-	objs := make([]client.Object, 0, benchPoolMembers+2)
+	objs := make([]runtime.Object, 0, benchPoolMembers+2)
 	objs = append(objs, pool, template)
 	for i := range members {
 		members[i] = sandboxv1beta1.Sandbox{
@@ -106,11 +105,6 @@ func newBenchPool(b *testing.B) (*SandboxWarmPoolReconciler, *extensionsv1beta1.
 		}
 		objs = append(objs, &members[i])
 	}
-	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithStatusSubresource(&extensionsv1beta1.SandboxWarmPool{}).
-		WithObjects(objs...).
-		WithIndex(&sandboxv1beta1.Sandbox{}, sandboxWarmPoolLabelIndex, sandboxWarmPoolLabelIndexer).
-		Build()
+	cl := newFakeClient(scheme, objs...)
 	return &SandboxWarmPoolReconciler{Client: cl, Scheme: scheme, MaxBatchSize: sandboxCreateDeleteMaxBatchSize, Tracer: asmetrics.NewNoOp()}, pool, members
 }

@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"sync/atomic"
 	"time"
@@ -308,19 +307,15 @@ func (r *SandboxWarmPoolReconciler) adoptSandbox(ctx context.Context, warmPool *
 	if err := controllerutil.SetControllerReference(warmPool, sb, r.Scheme); err != nil {
 		return err
 	}
-	setWarmLaunchTypeLabelIfNeeded(sb)
+	setWarmLaunchTypeLabel(sb)
 	return r.Update(ctx, sb)
 }
 
-func setWarmLaunchTypeLabelIfNeeded(sb *sandboxv1beta1.Sandbox) bool {
+func setWarmLaunchTypeLabel(sb *sandboxv1beta1.Sandbox) {
 	if sb.Labels == nil {
 		sb.Labels = make(map[string]string)
 	}
-	if sb.Labels[sandboxv1beta1.SandboxLaunchTypeLabel] == sandboxv1beta1.SandboxLaunchTypeWarm {
-		return false
-	}
 	sb.Labels[sandboxv1beta1.SandboxLaunchTypeLabel] = sandboxv1beta1.SandboxLaunchTypeWarm
-	return true
 }
 
 // filterActiveSandboxes filters the list of sandboxes, deleting stale ones and adopting orphans.
@@ -380,7 +375,7 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 		// sb shares cache-owned maps (copy-free List); mutate deep copies only.
 		if isControlledByPool && sb.Labels[sandboxv1beta1.SandboxLaunchTypeLabel] != sandboxv1beta1.SandboxLaunchTypeWarm {
 			fresh := sb.DeepCopy()
-			setWarmLaunchTypeLabelIfNeeded(fresh)
+			setWarmLaunchTypeLabel(fresh)
 			if err := r.Update(ctx, fresh); err != nil {
 				logger.Error(err, "Failed to update sandbox launch type label", "sandbox", sb.Name)
 				allErrors = errors.Join(allErrors, err)
@@ -698,7 +693,7 @@ func (r *SandboxWarmPoolReconciler) SetupWithManager(mgr ctrl.Manager, concurren
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&extensionsv1beta1.SandboxWarmPool{}).
-		Owns(&sandboxv1beta1.Sandbox{}, builder.WithPredicates(poolMemberChangePredicate())).
+		Owns(&sandboxv1beta1.Sandbox{}, builder.WithPredicates(predicate.Or(predicate.LabelChangedPredicate{}, poolMemberChangePredicate()))).
 		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
 		Watches(
 			&extensionsv1beta1.SandboxTemplate{},
@@ -707,9 +702,11 @@ func (r *SandboxWarmPoolReconciler) SetupWithManager(mgr ctrl.Manager, concurren
 		Complete(r)
 }
 
-// poolMemberChangePredicate passes only the member transitions reconcilePool
-// reads — ownership, labels, deletion, Ready flips. Every other member update
-// (PodIPs, other conditions, annotations) re-scanned the whole pool for nothing.
+// poolMemberChangePredicate passes the non-label member transitions
+// reconcilePool reads — ownership, deletion, Ready flips, and spec edits (the
+// generation bump re-triggers orphan blueprint vetting) — and is composed with
+// LabelChangedPredicate at registration. Every other member update (PodIPs,
+// other conditions, annotations) re-scanned the whole pool for nothing.
 func poolMemberChangePredicate() predicate.Funcs {
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
@@ -718,8 +715,8 @@ func poolMemberChangePredicate() predicate.Funcs {
 			if !okOld || !okNew {
 				return true
 			}
-			return oldSb.DeletionTimestamp.IsZero() != newSb.DeletionTimestamp.IsZero() ||
-				!maps.Equal(oldSb.Labels, newSb.Labels) ||
+			return oldSb.Generation != newSb.Generation ||
+				oldSb.DeletionTimestamp.IsZero() != newSb.DeletionTimestamp.IsZero() ||
 				!equality.Semantic.DeepEqual(oldSb.OwnerReferences, newSb.OwnerReferences) ||
 				isSandboxReady(oldSb) != isSandboxReady(newSb)
 		},
