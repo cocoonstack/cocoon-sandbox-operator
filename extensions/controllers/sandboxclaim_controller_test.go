@@ -5229,7 +5229,7 @@ func TestFlushDoesNotResurrectAClearedAnnotation(t *testing.T) {
 		"the staged observability annotation still has to land")
 }
 
-func newScheme(t *testing.T) *runtime.Scheme {
+func newScheme(t testing.TB) *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add to scheme: (%v)", err)
