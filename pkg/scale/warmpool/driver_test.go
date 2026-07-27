@@ -205,9 +205,6 @@ func TestDrainOnZeroReplicas(t *testing.T) {
 	}
 }
 
-// TestApplyBoundsEachNodeCall pins the sandboxd client contract: the client has
-// no HTTP timeout, so the driver must bound every SetPools with a deadline or a
-// connected-but-silent node wedges the global reconcile forever.
 func TestApplyBoundsEachNodeCall(t *testing.T) {
 	d, setter, inv, _ := newTestDriver(t, warmPool("p", 3), template())
 	putNodes(inv, 2)
@@ -228,8 +225,7 @@ type fakeSetter struct {
 	// accepted, nothing filled yet).
 	warm map[string]int
 	// failAddr, when set, makes that node's PUT fail.
-	failAddr string
-	// sawDeadline records whether the most recent PUT carried a context deadline.
+	failAddr    string
 	sawDeadline bool
 }
 

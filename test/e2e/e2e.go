@@ -230,8 +230,7 @@ func execInPod(ctx context.Context, pod, container string, cmd []string) (string
 	return stdout.String() + stderr.String(), err
 }
 
-// deleteSandbox detaches from the scenario context: cleanup defers must still
-// run after that context's timeout has expired.
+// Background: cleanup defers run after the scenario ctx's timeout.
 func deleteSandbox(name string) {
 	s := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: *ns}}
 	_ = cl.Delete(context.Background(), s)
