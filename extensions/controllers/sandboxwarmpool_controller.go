@@ -239,7 +239,6 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 
 	maxBatchSize := int32(r.MaxBatchSize)
 
-	// Create new sandboxes if we need more
 	if currentReplicas < desiredReplicas && tmplErr == nil {
 		sandboxesToCreate := min(desiredReplicas-currentReplicas, maxBatchSize)
 		logger.Info("Creating new pool sandboxes", "count", sandboxesToCreate)
@@ -260,7 +259,6 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 		}
 	}
 
-	// Delete excess sandboxes if we have too many
 	if currentReplicas > desiredReplicas {
 		sandboxesToDelete := min(currentReplicas-desiredReplicas, maxBatchSize)
 		logger.Info("Deleting excess sandboxes", "count", sandboxesToDelete)
@@ -511,7 +509,6 @@ func (r *SandboxWarmPoolReconciler) buildSandboxCR(
 	// Apply secure defaults to the sandbox pod spec
 	ApplySandboxSecureDefaults(template, &sandbox.Spec.PodTemplate.Spec)
 
-	// Set controller reference so the Sandbox is owned by the SandboxWarmPool
 	if err := ctrl.SetControllerReference(warmPool, sandbox, r.Scheme); err != nil {
 		return nil, fmt.Errorf("SetControllerReference for Sandbox failed: %w", err)
 	}

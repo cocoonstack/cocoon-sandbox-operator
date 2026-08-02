@@ -230,8 +230,6 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	originalClaimStatus := claim.Status.DeepCopy()
 
-	// Check Expiration
-	// We calculate this upfront to decide the flow.
 	claimExpired, timeLeft := r.checkExpiration(claim)
 	if claimExpired && !hasClaimExpiredCondition(claim.Status.Conditions) {
 		// Status writes cannot carry metadata, so the staged annotations must be
@@ -251,9 +249,8 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	logger.V(1).Info("Expiration check", "isExpired", claimExpired, "timeLeft", timeLeft, "request", req.NamespacedName)
 
-	// Handle "Delete" and "DeleteForeground" policies immediately.
-	// If we delete the claim, we return immediately.
-	// Continuing would try to update the status of a deleted object, causing a crash/error.
+	// Delete policies return immediately: a status update on the deleted object
+	// would error.
 	if claimExpired && claim.Spec.Lifecycle != nil &&
 		(claim.Spec.Lifecycle.ShutdownPolicy == extensionsv1beta1.ShutdownPolicyDelete ||
 			claim.Spec.Lifecycle.ShutdownPolicy == extensionsv1beta1.ShutdownPolicyDeleteForeground) {
@@ -280,16 +277,12 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Manage Resources based on State
 	var sandbox *v1beta1.Sandbox
 	var reconcileErr error
 
 	if claimExpired {
-		// Policy=Retain (since Delete handled above)
-		// Ensure Sandbox is deleted, but keep the Claim.
 		sandbox, reconcileErr = r.reconcileExpired(ctx, claim)
 	} else {
-		// Ensure Sandbox exists and is configured.
 		sandbox, reconcileErr = r.reconcileActive(ctx, claim)
 	}
 
@@ -299,7 +292,6 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, errors.Join(reconcileErr, err)
 	}
 
-	// Update Status & Events
 	r.computeAndSetStatus(claim, sandbox, reconcileErr, claimExpired)
 	postExpiration, _ := r.checkExpiration(claim)
 	if postExpiration && !hasClaimExpiredCondition(claim.Status.Conditions) {
@@ -707,7 +699,6 @@ func (r *SandboxClaimReconciler) computeReadyCondition(claim *extensionsv1beta1.
 		return notReady(claim, failure{reason: "SandboxMissing", message: "Sandbox does not exist"})
 	}
 
-	// Check if Core Controller marked it as Expired
 	if hasSandboxExpiredCondition(sandbox.Status.Conditions) {
 		return notReady(claim, failure{reason: v1beta1.SandboxReasonExpired, message: "Underlying Sandbox resource has expired independently of the Claim."})
 	}
@@ -1006,13 +997,11 @@ func (r *SandboxClaimReconciler) completeAdoption(ctx context.Context, claim *ex
 		delete(adopted.Spec.PodTemplate.ObjectMeta.Annotations, warmPoolEvictionAnnotation)
 	}
 
-	// Transfer ownership from SandboxWarmPool to SandboxClaim
 	adopted.OwnerReferences = nil
 	if err := controllerutil.SetControllerReference(claim, adopted, r.Scheme); err != nil {
 		return fmt.Errorf("failed to set controller reference on adopted sandbox: %w", err)
 	}
 
-	// Propagate trace context from claim
 	if adopted.Annotations == nil {
 		adopted.Annotations = make(map[string]string)
 	}
@@ -1166,14 +1155,12 @@ func (r *SandboxClaimReconciler) mergePodMetadata(templateMeta *v1beta1.PodMetad
 		return err
 	}
 
-	// Check for overrides in labels
 	for k, v := range claimMeta.Labels {
 		if tv, ok := templateMeta.Labels[k]; ok && tv != v {
 			return fmt.Errorf("metadata override conflict: label %q is defined in template with value %q, but claim requests %q", k, tv, v)
 		}
 	}
 
-	// Check for overrides in annotations
 	for k, v := range claimMeta.Annotations {
 		if tv, ok := templateMeta.Annotations[k]; ok && tv != v {
 			return fmt.Errorf("metadata override conflict: annotation %q is defined in template with value %q, but claim requests %q", k, tv, v)

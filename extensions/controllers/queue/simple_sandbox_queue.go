@@ -93,8 +93,8 @@ func (q *synchronizedQueue) Remove(key SandboxKey) {
 	}
 }
 
-// We should remove the queue from the sync.Map when the corresponding
-// SandboxWarmPool is deleted to prevent memory leaks.
+// synchronizedQueue is one warm pool's FIFO of adoptable sandbox keys;
+// RemoveQueue drops it when its SandboxWarmPool goes away.
 type synchronizedQueue struct {
 	mu    sync.Mutex
 	items []SandboxKey
@@ -117,7 +117,7 @@ func (q *synchronizedQueue) Push(key SandboxKey) {
 		q.set[uniqueID] = struct{}{}
 		q.items = append(q.items, key)
 	} else {
-		// Key already exists. Always update the NodeName to reflect latest placement state.
+		// An existing key still refreshes NodeName: placement may have settled since.
 		for i := range q.items {
 			if q.items[i].Namespace == key.Namespace && q.items[i].Name == key.Name {
 				q.items[i].NodeName = key.NodeName
@@ -136,14 +136,12 @@ func (q *synchronizedQueue) Pop() (SandboxKey, bool) {
 		return SandboxKey{}, false
 	}
 
-	// Grab the first item
 	item := q.items[0]
 
 	// This removes the pointer references so the Garbage Collector
 	// can free the strings in memory!
 	q.items[0] = SandboxKey{}
 
-	// Remove it from slice and set
 	q.items = q.items[1:]
 	delete(q.set, item.Namespace+"/"+item.Name)
 
@@ -160,7 +158,6 @@ func (q *synchronizedQueue) PopWithStrategy(pick func([]SandboxKey) (SandboxKey,
 			return SandboxKey{}, false
 		}
 
-		// Snapshot the queue items
 		snapshot := make([]SandboxKey, len(q.items))
 		copy(snapshot, q.items)
 		q.mu.Unlock()
@@ -180,7 +177,6 @@ func (q *synchronizedQueue) PopWithStrategy(pick func([]SandboxKey) (SandboxKey,
 			continue
 		}
 
-		// Find the picked key in q.items and remove it
 		for i, k := range q.items {
 			if k.Namespace == key.Namespace && k.Name == key.Name {
 				// Shift left and clear the tail slot

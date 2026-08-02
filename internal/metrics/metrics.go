@@ -37,59 +37,41 @@ const (
 )
 
 var (
-	// ClaimStartupLatency measures the time from SandboxClaim creation to SandboxClaim Ready state.
-	// Labels:
-	// - launch_type: "warm", "cold", "unknown"
-	// - sandbox_template: the resolved SandboxTemplateRef used to create the Sandbox.
-	// - warmpool_name: the requested warm pool reference name (from SandboxClaim spec.warmPoolRef.name).
+	// ClaimStartupLatency measures SandboxClaim creation to Ready; sandbox_template
+	// is the resolved ref, warmpool_name the requested one.
 	ClaimStartupLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name: "agent_sandbox_claim_startup_latency_ms",
-			Help: "End-to-end latency from SandboxClaim creation to Sandbox Ready state in milliseconds.",
-			// Buckets for latency from 100ms to 4 minutes
+			Name:    "agent_sandbox_claim_startup_latency_ms",
+			Help:    "End-to-end latency from SandboxClaim creation to Sandbox Ready state in milliseconds.",
 			Buckets: []float64{100, 250, 500, 750, 1000, 1250, 1500, 2000, 2500, 5000, 10000, 30000, 60000, 120000, 240000},
 		},
 		[]string{"launch_type", "sandbox_template", "warmpool_name"},
 	)
 
-	// ClaimControllerStartupLatency measures the time from controller first observed timestamp to SandboxClaim Ready state.
-	// Labels:
-	// - launch_type: "warm", "cold", "unknown"
-	// - sandbox_template: the resolved SandboxTemplateRef used to create the Sandbox.
-	// - warmpool_name: the requested warm pool reference name (from SandboxClaim spec.warmPoolRef.name).
+	// ClaimControllerStartupLatency measures controller-first-observed to Ready,
+	// excluding webhook/apiserver time; labels as on ClaimStartupLatency.
 	ClaimControllerStartupLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name: "agent_sandbox_claim_controller_startup_latency_ms",
-			Help: "Latency from controller first observed SandboxClaim to Sandbox Ready state in milliseconds.",
-			// Buckets for latency from 100ms to 4 minutes
+			Name:    "agent_sandbox_claim_controller_startup_latency_ms",
+			Help:    "Latency from controller first observed SandboxClaim to Sandbox Ready state in milliseconds.",
 			Buckets: []float64{100, 250, 500, 750, 1000, 1250, 1500, 2000, 2500, 5000, 10000, 30000, 60000, 120000, 240000},
 		},
 		[]string{"launch_type", "sandbox_template", "warmpool_name"},
 	)
 
-	// SandboxCreationLatency measures the time from Sandbox creation to Pod Ready state.
-	// Labels:
-	// - namespace: the namespace of the sandbox
-	// - launch_type: "warm", "cold", "unknown"
-	// - sandbox_template: the SandboxTemplateRef.
+	// SandboxCreationLatency measures Sandbox creation to Pod Ready.
 	SandboxCreationLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name: "agent_sandbox_creation_latency_ms",
-			Help: "Latency from Sandbox creation to Pod Ready state in milliseconds. For warm launches, this measures controller synchronization overhead since the Pod is pre-provisioned.",
-			// Buckets for latency from 50ms to 10 minutes
+			Name:    "agent_sandbox_creation_latency_ms",
+			Help:    "Latency from Sandbox creation to Pod Ready state in milliseconds. For warm launches, this measures controller synchronization overhead since the Pod is pre-provisioned.",
 			Buckets: []float64{50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 240000, 300000, 600000},
 		},
 		[]string{"namespace", "launch_type", "sandbox_template"},
 	)
 
-	// SandboxClaimCreationTotal calculates the total number of SandboxClaims created.
-	// Labels:
-	// - namespace: the namespace of the claim
-	// - sandbox_template: the SandboxTemplateRef
-	// - launch_type: "warm", "cold", "unknown"
-	// - warmpool_name: the requested warm pool reference name (from SandboxClaim spec.warmPoolRef.name).
-	// - pod_condition: "ready", "not_ready".
-	// - created_by: the component that created the claim (e.g. "go-client", "python-client", "controller", "unknown").
+	// SandboxClaimCreationTotal counts created SandboxClaims. Label values:
+	// pod_condition "ready"|"not_ready"; created_by "go-client"|"python-client"|
+	// "controller"|"unknown".
 	SandboxClaimCreationTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "agent_sandbox_claim_creation_total",
@@ -102,9 +84,6 @@ var (
 	// controller (pool fill and claim-consumed replacement alike). Event-level
 	// counter so per-interval fill rates survive scrape gaps and do not depend
 	// on any external watcher.
-	// Labels:
-	// - namespace: the namespace of the warm pool
-	// - warmpool_name: the SandboxWarmPool that created the sandbox.
 	WarmPoolSandboxCreatedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "agent_sandbox_warm_created_total",
@@ -113,15 +92,9 @@ var (
 		[]string{"namespace", "warmpool_name"},
 	)
 
-	// AgentSandboxesDesc describes the agent_sandboxes metric point-in-time counts.
-	// Labels:
-	// - namespace: the namespace of the sandbox
-	// - ready_condition: "true" | "false"
-	// - expired: "true" | "false"
-	// - launch_type: "warm" | "cold"
-	// - sandbox_template: sandboxTemplateRef.
-	// - owned_by: "SandboxClaim" | "SandboxWarmPool" | "None".
-	// - created_by: the component that created the sandbox (e.g. "go-client", "python-client", "controller", "unknown").
+	// AgentSandboxesDesc describes the point-in-time agent_sandboxes gauge.
+	// Label values: owned_by "SandboxClaim"|"SandboxWarmPool"|"None"; created_by
+	// as on SandboxClaimCreationTotal.
 	AgentSandboxesDesc = prometheus.NewDesc(
 		"agent_sandboxes",
 		"Monitor the point-in-time number of sandboxes in the cluster.",
