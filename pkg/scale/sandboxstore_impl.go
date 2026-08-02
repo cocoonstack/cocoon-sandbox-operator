@@ -761,40 +761,6 @@ func (p *NodeInventoryPublisher) Publish(ctx context.Context) (int, error) {
 	return len(entries), nil
 }
 
-var _ InventoryApplier = (*ssaInventoryApplier)(nil)
-
-// ssaInventoryApplier is the production applier: it server-side-applies the
-// NodeInventory through a controller-runtime client, which resolves the resource
-// via its RESTMapper from the object's GVK — never a naive kind+"s"
-// pluralization. It works on any client (a cache-fed client in production).
-type ssaInventoryApplier struct {
-	c          client.Client
-	fieldOwner string
-}
-
-// NewSSAInventoryApplier returns the default server-side-apply InventoryApplier.
-func NewSSAInventoryApplier(c client.Client, fieldOwner string) InventoryApplier {
-	if fieldOwner == "" {
-		fieldOwner = "cocoon-node-inventory-publisher"
-	}
-	return &ssaInventoryApplier{c: c, fieldOwner: fieldOwner}
-}
-
-func (a *ssaInventoryApplier) Apply(ctx context.Context, inv *NodeInventory) error {
-	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(inv)
-	if err != nil {
-		return fmt.Errorf("scale: encode node inventory: %w", err)
-	}
-	u := &unstructured.Unstructured{Object: raw}
-	u.SetGroupVersionKind(NodeInventoryGVK)
-	u.SetName(inv.Node)
-	ac := client.ApplyConfigurationFromUnstructured(u)
-	if err := a.c.Apply(ctx, ac, client.FieldOwner(a.fieldOwner), client.ForceOwnership); err != nil {
-		return fmt.Errorf("scale: server-side-apply node inventory: %w", err)
-	}
-	return nil
-}
-
 var (
 	_ InventorySource  = (*StaticInventorySource)(nil)
 	_ InventoryApplier = (*StaticInventorySource)(nil)

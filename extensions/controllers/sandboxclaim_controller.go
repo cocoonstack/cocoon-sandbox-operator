@@ -732,11 +732,6 @@ func (r *SandboxClaimReconciler) getCandidate(ctx context.Context, claim *extens
 
 		if err := verifySandboxCandidate(adopted, claim); err != nil {
 			logger.V(1).Info("sandbox candidate can't be adopted", "sandbox", adopted.Name, "warmPool", claim.Spec.WarmPoolRef.Name, "reason", err.Error())
-			// If it is a good sandbox in the wrong namespace, put it back.
-			// (Though pickSmart makes this impossible, we keep it for safety).
-			if errors.Is(err, ErrCrossNamespaceAdoption) {
-				skipped = append(skipped, adoptedKey)
-			}
 			continue
 		}
 

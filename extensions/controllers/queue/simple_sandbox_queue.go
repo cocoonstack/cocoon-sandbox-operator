@@ -68,29 +68,10 @@ func (s *SimpleSandboxQueue) RemoveItem(namespacedWarmPoolName string, item Sand
 	}
 }
 
-// Remove scans the slice and deletes the item to prevent Ghost Pods.
-func (q *synchronizedQueue) Remove(key SandboxKey) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	uniqueID := key.Namespace + "/" + key.Name
-	if _, exists := q.set[uniqueID]; !exists {
-		return
-	}
-
-	delete(q.set, uniqueID)
-
-	for i, k := range q.items {
-		if k.Namespace == key.Namespace && k.Name == key.Name {
-			// Shift left and clear the tail slot so removed keys don't linger.
-			// Same pattern as Pop()
-			last := len(q.items) - 1
-			copy(q.items[i:], q.items[i+1:])
-			q.items[last] = SandboxKey{}
-			q.items = q.items[:last]
-			break
-		}
-	}
+// RemoveQueue completely deletes a warm pool's queue from the sync.Map
+// to prevent memory leaks when SandboxTemplates or WarmPools are deleted.
+func (s *SimpleSandboxQueue) RemoveQueue(namespacedWarmPoolName string) {
+	s.queues.Delete(namespacedWarmPoolName)
 }
 
 // synchronizedQueue is one warm pool's FIFO of adoptable sandbox keys;
@@ -177,27 +158,39 @@ func (q *synchronizedQueue) PopWithStrategy(pick func([]SandboxKey) (SandboxKey,
 			continue
 		}
 
-		for i, k := range q.items {
-			if k.Namespace == key.Namespace && k.Name == key.Name {
-				// Shift left and clear the tail slot
-				last := len(q.items) - 1
-				copy(q.items[i:], q.items[i+1:])
-				q.items[last] = SandboxKey{}
-				q.items = q.items[:last]
-				break
-			}
-		}
-		delete(q.set, uniqueID)
+		q.removeLocked(key, uniqueID)
 		q.mu.Unlock()
 
 		return key, true
 	}
 }
 
-// RemoveQueue completely deletes a warm pool's queue from the sync.Map
-// to prevent memory leaks when SandboxTemplates or WarmPools are deleted.
-func (s *SimpleSandboxQueue) RemoveQueue(namespacedWarmPoolName string) {
-	s.queues.Delete(namespacedWarmPoolName)
+// Remove scans the slice and deletes the item to prevent Ghost Pods.
+func (q *synchronizedQueue) Remove(key SandboxKey) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	uniqueID := key.Namespace + "/" + key.Name
+	if _, exists := q.set[uniqueID]; !exists {
+		return
+	}
+
+	q.removeLocked(key, uniqueID)
+}
+
+// removeLocked drops key's row and set entry, clearing the vacated tail slot
+// so removed keys don't linger. Callers hold mu.
+func (q *synchronizedQueue) removeLocked(key SandboxKey, uniqueID string) {
+	delete(q.set, uniqueID)
+	for i, k := range q.items {
+		if k.Namespace == key.Namespace && k.Name == key.Name {
+			last := len(q.items) - 1
+			copy(q.items[i:], q.items[i+1:])
+			q.items[last] = SandboxKey{}
+			q.items = q.items[:last]
+			break
+		}
+	}
 }
 
 // GetNamespacedWarmPoolName forms the namespace-aware index value to use as a key to a SimpleSandboxQueue type.
