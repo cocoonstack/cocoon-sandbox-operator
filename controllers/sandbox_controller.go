@@ -77,77 +77,6 @@ var Scheme = func() *runtime.Scheme {
 // resourceOwnership represents the ownership state of a Kubernetes resource relative to a Sandbox.
 type resourceOwnership int
 
-// podReadiness describes the pod half of the Sandbox Ready condition. A pod is
-// only ready once it also has a podIP, since callers cannot reach it before that.
-func podReadiness(pod *corev1.Pod) (message string, ready bool) {
-	if pod == nil {
-		return "Pod does not exist", false
-	}
-	if pod.Status.Phase != corev1.PodRunning {
-		return "Pod exists with phase: " + string(pod.Status.Phase), false
-	}
-	idx := slices.IndexFunc(pod.Status.Conditions, func(c corev1.PodCondition) bool {
-		return c.Type == corev1.PodReady
-	})
-	if idx < 0 || pod.Status.Conditions[idx].Status != corev1.ConditionTrue {
-		return "Pod is Running but not Ready", false
-	}
-	if len(pod.Status.PodIPs) == 0 {
-		return "Pod is Ready but has no podIPs yet", false
-	}
-	return "Pod is Ready", true
-}
-
-// checkOwnership determines whether a Kubernetes resource is owned by the given Sandbox,
-// has no controller, or is owned by a different controller.
-// It returns both the ownership classification and the controller reference (if any),
-// so callers can log owner details without redundant GetControllerOf calls.
-func checkOwnership(obj client.Object, sandbox *sandboxv1beta1.Sandbox) (resourceOwnership, *metav1.OwnerReference) {
-	controllerRef := metav1.GetControllerOf(obj)
-	if controllerRef == nil {
-		return resourceUnowned, nil
-	}
-	if controllerRef.UID == sandbox.UID {
-		return resourceOwnedBySandbox, controllerRef
-	}
-	return resourceOwnedByOther, controllerRef
-}
-
-// isAdoptable reports whether obj carries the warm-pool adoptable label.
-func isAdoptable(obj client.Object) bool {
-	return obj.GetLabels()[sandboxv1beta1.SandboxAdoptableLabel] == "true"
-}
-
-// resolvePodName returns the name of the pod associated with the given Sandbox.
-// If the sandbox has adopted a warm pool pod, the pod name is tracked in the
-// agents.x-k8s.io/pod-name annotation and may differ from sandbox.Name.
-func resolvePodName(sandbox *sandboxv1beta1.Sandbox) string {
-	if name, ok := sandbox.Annotations[sandboxv1beta1.SandboxPodNameAnnotation]; ok && name != "" {
-		return name
-	}
-	return sandbox.Name
-}
-
-// MergeVolumeClaimVolumes merges PVC-backed volumes into an existing volume
-// list, replacing any volumes with matching names. This follows StatefulSet
-// semantics where volumeClaimTemplate volumes take priority.
-func MergeVolumeClaimVolumes(existing []corev1.Volume, pvcVolumes []corev1.Volume) []corev1.Volume {
-	if len(pvcVolumes) == 0 {
-		return existing
-	}
-	vctNames := make(map[string]struct{}, len(pvcVolumes))
-	for _, v := range pvcVolumes {
-		vctNames[v.Name] = struct{}{}
-	}
-	filtered := make([]corev1.Volume, 0, len(existing))
-	for _, v := range existing {
-		if _, ok := vctNames[v.Name]; !ok {
-			filtered = append(filtered, v)
-		}
-	}
-	return append(filtered, pvcVolumes...)
-}
-
 // SandboxReconciler reconciles a Sandbox object.
 type SandboxReconciler struct {
 	client.Client
@@ -455,18 +384,6 @@ func (r *SandboxReconciler) computeFinishedCondition(sandbox *sandboxv1beta1.San
 	return condition
 }
 
-// podIPsFromStatus converts the K8s PodIP slice to a plain string slice.
-func podIPsFromStatus(podIPs []corev1.PodIP) []string {
-	if len(podIPs) == 0 {
-		return nil
-	}
-	ips := make([]string, len(podIPs))
-	for i, pip := range podIPs {
-		ips[i] = pip.IP
-	}
-	return ips
-}
-
 func (r *SandboxReconciler) updateStatus(ctx context.Context, oldStatus *sandboxv1beta1.SandboxStatus, sandbox *sandboxv1beta1.Sandbox) error {
 	logger := log.FromContext(ctx)
 
@@ -481,54 +398,6 @@ func (r *SandboxReconciler) updateStatus(ctx context.Context, oldStatus *sandbox
 
 	// Surface error
 	return nil
-}
-
-// GetNumericHash generates a raw FNV-1a hash value.
-func GetNumericHash(input string) uint32 {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(input))
-	return h.Sum32()
-}
-
-// NameHash generates an FNV-1a hash from a string and returns
-// it as a fixed-length hexadecimal string.
-func NameHash(objectName string) string {
-	return fmt.Sprintf("%08x", GetNumericHash(objectName))
-}
-
-// hasSystemReservedPrefix reports whether a key uses a label/annotation prefix
-// reserved for the sandbox system or its extensions.
-func hasSystemReservedPrefix(key string) bool {
-	return strings.HasPrefix(key, "agents.x-k8s.io/") ||
-		strings.HasPrefix(key, "extensions.agents.x-k8s.io/")
-}
-
-// isSystemLabel reports whether a label key is reserved for the sandbox system.
-// Such keys must never be settable through a user-supplied PodTemplate, otherwise a
-// tenant could override security-critical labels (e.g. the headless Service selector
-// label) and hijack another Sandbox's network traffic.
-func isSystemLabel(key string) bool {
-	return hasSystemReservedPrefix(key)
-}
-
-// isSystemAnnotation reports whether an annotation key is reserved for the sandbox
-// system and therefore must not be settable through a user-supplied PodTemplate.
-func isSystemAnnotation(key string) bool {
-	return hasSystemReservedPrefix(key) ||
-		key == asmetrics.TraceContextAnnotation
-}
-
-// isControllerManagedPodAnnotation reports whether a system-reserved annotation is one
-// the core controller itself sets on a Pod during metadata reconciliation, and
-// therefore must not be scrubbed during cleanup of previously-propagated annotations.
-func isControllerManagedPodAnnotation(key string) bool {
-	switch key {
-	case sandboxv1beta1.SandboxPropagatedLabelsAnnotation,
-		sandboxv1beta1.SandboxPropagatedAnnotationsAnnotation:
-		return true
-	default:
-		return false
-	}
 }
 
 func (r *SandboxReconciler) reconcileService(ctx context.Context, sandbox *sandboxv1beta1.Sandbox, nameHash string) (*corev1.Service, error) {
@@ -960,22 +829,6 @@ func (r *SandboxReconciler) ensurePodNameAnnotation(ctx context.Context, sandbox
 	return nil
 }
 
-// filterSystemKeys copies src minus system-reserved keys, returning the copy and
-// the sorted-by-caller list of keys it carries.
-func filterSystemKeys(src map[string]string, isSystem func(string) bool, onSkip func(string)) (map[string]string, []string) {
-	out := make(map[string]string, len(src))
-	var kept []string
-	for k, v := range src {
-		if isSystem(k) {
-			onSkip(k)
-			continue
-		}
-		out[k] = v
-		kept = append(kept, k)
-	}
-	return out, kept
-}
-
 func (r *SandboxReconciler) updatePodMetadata(ctx context.Context, pod *corev1.Pod, sandbox *sandboxv1beta1.Sandbox, nameHash string) bool {
 	logger := log.FromContext(ctx)
 	if pod.Labels == nil {
@@ -1021,96 +874,6 @@ func (r *SandboxReconciler) updatePodMetadata(ctx context.Context, pod *corev1.P
 	slices.Sort(managedAnnotations)
 	updated = setEntry(pod.Annotations, sandboxv1beta1.SandboxPropagatedLabelsAnnotation, strings.Join(managedLabels, ",")) || updated
 	updated = setEntry(pod.Annotations, sandboxv1beta1.SandboxPropagatedAnnotationsAnnotation, strings.Join(managedAnnotations, ",")) || updated
-	return updated
-}
-
-// extensionOwnedHashes returns the warm-pool and template-ref hashes the Pod should
-// carry, which are only meaningful while an extensions controller owns the Sandbox.
-func extensionOwnedHashes(sandbox *sandboxv1beta1.Sandbox) (warmPool, templateRef string) {
-	ref := metav1.GetControllerOf(sandbox)
-	if ref == nil {
-		return "", ""
-	}
-	gvk := schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind)
-	if gvk.Group != extensionsv1beta1.GroupVersion.Group {
-		return "", ""
-	}
-	if gvk.Kind == warmPoolKind {
-		warmPool = sandbox.Labels[sandboxv1beta1.SandboxWarmPoolLabel]
-	}
-	return warmPool, sandbox.Labels[sandboxv1beta1.SandboxTemplateRefHashLabel]
-}
-
-// setOrDelete forces m[key] to want, removing the entry when want is empty.
-// It reports whether m changed.
-func setOrDelete(m map[string]string, key, want string) bool {
-	if want == "" {
-		_, exists := m[key]
-		delete(m, key)
-		return exists
-	}
-	if m[key] == want {
-		return false
-	}
-	m[key] = want
-	return true
-}
-
-// setEntry writes m[key] = want, keeping an empty value as an empty entry rather
-// than removing it. It reports whether m changed.
-func setEntry(m map[string]string, key, want string) bool {
-	if m[key] == want {
-		return false
-	}
-	m[key] = want
-	return true
-}
-
-// propagateKeys copies template into live, skipping system-reserved keys, and
-// returns the keys it now manages plus whether live changed.
-func propagateKeys(live, template map[string]string, isSystem func(string) bool, onSkip func(string)) ([]string, bool) {
-	var managed []string
-	updated := false
-	for k, v := range template {
-		if isSystem(k) {
-			onSkip(k)
-			continue
-		}
-		if live[k] != v {
-			live[k] = v
-			updated = true
-		}
-		managed = append(managed, k)
-	}
-	return managed, updated
-}
-
-// prunePropagated drops previously propagated keys the template no longer carries.
-// A system key recorded by an older controller is scrubbed unless keep claims it.
-func prunePropagated(live map[string]string, recorded string, template map[string]string, isSystem, keep func(string) bool, onScrub func(string)) bool {
-	updated := false
-	for k := range strings.SplitSeq(recorded, ",") {
-		if k == "" {
-			continue
-		}
-		if isSystem(k) {
-			if keep(k) {
-				continue
-			}
-			if _, exists := live[k]; exists {
-				delete(live, k)
-				updated = true
-				onScrub(k)
-			}
-			continue
-		}
-		if _, ok := template[k]; !ok {
-			if _, exists := live[k]; exists {
-				delete(live, k)
-				updated = true
-			}
-		}
-	}
 	return updated
 }
 
@@ -1304,4 +1067,241 @@ func podSandboxNameHashIndexer(obj client.Object) []string {
 		return []string{v}
 	}
 	return nil
+}
+
+// podReadiness describes the pod half of the Sandbox Ready condition. A pod is
+// only ready once it also has a podIP, since callers cannot reach it before that.
+func podReadiness(pod *corev1.Pod) (message string, ready bool) {
+	if pod == nil {
+		return "Pod does not exist", false
+	}
+	if pod.Status.Phase != corev1.PodRunning {
+		return "Pod exists with phase: " + string(pod.Status.Phase), false
+	}
+	idx := slices.IndexFunc(pod.Status.Conditions, func(c corev1.PodCondition) bool {
+		return c.Type == corev1.PodReady
+	})
+	if idx < 0 || pod.Status.Conditions[idx].Status != corev1.ConditionTrue {
+		return "Pod is Running but not Ready", false
+	}
+	if len(pod.Status.PodIPs) == 0 {
+		return "Pod is Ready but has no podIPs yet", false
+	}
+	return "Pod is Ready", true
+}
+
+// checkOwnership determines whether a Kubernetes resource is owned by the given Sandbox,
+// has no controller, or is owned by a different controller.
+// It returns both the ownership classification and the controller reference (if any),
+// so callers can log owner details without redundant GetControllerOf calls.
+func checkOwnership(obj client.Object, sandbox *sandboxv1beta1.Sandbox) (resourceOwnership, *metav1.OwnerReference) {
+	controllerRef := metav1.GetControllerOf(obj)
+	if controllerRef == nil {
+		return resourceUnowned, nil
+	}
+	if controllerRef.UID == sandbox.UID {
+		return resourceOwnedBySandbox, controllerRef
+	}
+	return resourceOwnedByOther, controllerRef
+}
+
+// isAdoptable reports whether obj carries the warm-pool adoptable label.
+func isAdoptable(obj client.Object) bool {
+	return obj.GetLabels()[sandboxv1beta1.SandboxAdoptableLabel] == "true"
+}
+
+// resolvePodName returns the name of the pod associated with the given Sandbox.
+// If the sandbox has adopted a warm pool pod, the pod name is tracked in the
+// agents.x-k8s.io/pod-name annotation and may differ from sandbox.Name.
+func resolvePodName(sandbox *sandboxv1beta1.Sandbox) string {
+	if name, ok := sandbox.Annotations[sandboxv1beta1.SandboxPodNameAnnotation]; ok && name != "" {
+		return name
+	}
+	return sandbox.Name
+}
+
+// MergeVolumeClaimVolumes merges PVC-backed volumes into an existing volume
+// list, replacing any volumes with matching names. This follows StatefulSet
+// semantics where volumeClaimTemplate volumes take priority.
+func MergeVolumeClaimVolumes(existing []corev1.Volume, pvcVolumes []corev1.Volume) []corev1.Volume {
+	if len(pvcVolumes) == 0 {
+		return existing
+	}
+	vctNames := make(map[string]struct{}, len(pvcVolumes))
+	for _, v := range pvcVolumes {
+		vctNames[v.Name] = struct{}{}
+	}
+	filtered := make([]corev1.Volume, 0, len(existing))
+	for _, v := range existing {
+		if _, ok := vctNames[v.Name]; !ok {
+			filtered = append(filtered, v)
+		}
+	}
+	return append(filtered, pvcVolumes...)
+}
+
+// podIPsFromStatus converts the K8s PodIP slice to a plain string slice.
+func podIPsFromStatus(podIPs []corev1.PodIP) []string {
+	if len(podIPs) == 0 {
+		return nil
+	}
+	ips := make([]string, len(podIPs))
+	for i, pip := range podIPs {
+		ips[i] = pip.IP
+	}
+	return ips
+}
+
+// GetNumericHash generates a raw FNV-1a hash value.
+func GetNumericHash(input string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(input))
+	return h.Sum32()
+}
+
+// NameHash generates an FNV-1a hash from a string and returns
+// it as a fixed-length hexadecimal string.
+func NameHash(objectName string) string {
+	return fmt.Sprintf("%08x", GetNumericHash(objectName))
+}
+
+// hasSystemReservedPrefix reports whether a key uses a label/annotation prefix
+// reserved for the sandbox system or its extensions.
+func hasSystemReservedPrefix(key string) bool {
+	return strings.HasPrefix(key, "agents.x-k8s.io/") ||
+		strings.HasPrefix(key, "extensions.agents.x-k8s.io/")
+}
+
+// isSystemLabel reports whether a label key is reserved for the sandbox system.
+// Such keys must never be settable through a user-supplied PodTemplate, otherwise a
+// tenant could override security-critical labels (e.g. the headless Service selector
+// label) and hijack another Sandbox's network traffic.
+func isSystemLabel(key string) bool {
+	return hasSystemReservedPrefix(key)
+}
+
+// isSystemAnnotation reports whether an annotation key is reserved for the sandbox
+// system and therefore must not be settable through a user-supplied PodTemplate.
+func isSystemAnnotation(key string) bool {
+	return hasSystemReservedPrefix(key) ||
+		key == asmetrics.TraceContextAnnotation
+}
+
+// isControllerManagedPodAnnotation reports whether a system-reserved annotation is one
+// the core controller itself sets on a Pod during metadata reconciliation, and
+// therefore must not be scrubbed during cleanup of previously-propagated annotations.
+func isControllerManagedPodAnnotation(key string) bool {
+	switch key {
+	case sandboxv1beta1.SandboxPropagatedLabelsAnnotation,
+		sandboxv1beta1.SandboxPropagatedAnnotationsAnnotation:
+		return true
+	default:
+		return false
+	}
+}
+
+// filterSystemKeys copies src minus system-reserved keys, returning the copy and
+// the sorted-by-caller list of keys it carries.
+func filterSystemKeys(src map[string]string, isSystem func(string) bool, onSkip func(string)) (map[string]string, []string) {
+	out := make(map[string]string, len(src))
+	var kept []string
+	for k, v := range src {
+		if isSystem(k) {
+			onSkip(k)
+			continue
+		}
+		out[k] = v
+		kept = append(kept, k)
+	}
+	return out, kept
+}
+
+// extensionOwnedHashes returns the warm-pool and template-ref hashes the Pod should
+// carry, which are only meaningful while an extensions controller owns the Sandbox.
+func extensionOwnedHashes(sandbox *sandboxv1beta1.Sandbox) (warmPool, templateRef string) {
+	ref := metav1.GetControllerOf(sandbox)
+	if ref == nil {
+		return "", ""
+	}
+	gvk := schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind)
+	if gvk.Group != extensionsv1beta1.GroupVersion.Group {
+		return "", ""
+	}
+	if gvk.Kind == warmPoolKind {
+		warmPool = sandbox.Labels[sandboxv1beta1.SandboxWarmPoolLabel]
+	}
+	return warmPool, sandbox.Labels[sandboxv1beta1.SandboxTemplateRefHashLabel]
+}
+
+// setOrDelete forces m[key] to want, removing the entry when want is empty.
+// It reports whether m changed.
+func setOrDelete(m map[string]string, key, want string) bool {
+	if want == "" {
+		_, exists := m[key]
+		delete(m, key)
+		return exists
+	}
+	if m[key] == want {
+		return false
+	}
+	m[key] = want
+	return true
+}
+
+// setEntry writes m[key] = want, keeping an empty value as an empty entry rather
+// than removing it. It reports whether m changed.
+func setEntry(m map[string]string, key, want string) bool {
+	if m[key] == want {
+		return false
+	}
+	m[key] = want
+	return true
+}
+
+// propagateKeys copies template into live, skipping system-reserved keys, and
+// returns the keys it now manages plus whether live changed.
+func propagateKeys(live, template map[string]string, isSystem func(string) bool, onSkip func(string)) ([]string, bool) {
+	var managed []string
+	updated := false
+	for k, v := range template {
+		if isSystem(k) {
+			onSkip(k)
+			continue
+		}
+		if live[k] != v {
+			live[k] = v
+			updated = true
+		}
+		managed = append(managed, k)
+	}
+	return managed, updated
+}
+
+// prunePropagated drops previously propagated keys the template no longer carries.
+// A system key recorded by an older controller is scrubbed unless keep claims it.
+func prunePropagated(live map[string]string, recorded string, template map[string]string, isSystem, keep func(string) bool, onScrub func(string)) bool {
+	updated := false
+	for k := range strings.SplitSeq(recorded, ",") {
+		if k == "" {
+			continue
+		}
+		if isSystem(k) {
+			if keep(k) {
+				continue
+			}
+			if _, exists := live[k]; exists {
+				delete(live, k)
+				updated = true
+				onScrub(k)
+			}
+			continue
+		}
+		if _, ok := template[k]; !ok {
+			if _, exists := live[k]; exists {
+				delete(live, k)
+				updated = true
+			}
+		}
+	}
+	return updated
 }

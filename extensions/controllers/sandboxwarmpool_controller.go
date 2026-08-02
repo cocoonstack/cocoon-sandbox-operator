@@ -336,13 +336,6 @@ func (r *SandboxWarmPoolReconciler) adoptSandbox(ctx context.Context, warmPool *
 	return r.Update(ctx, sb)
 }
 
-func setWarmLaunchTypeLabel(sb *sandboxv1beta1.Sandbox) {
-	if sb.Labels == nil {
-		sb.Labels = make(map[string]string)
-	}
-	sb.Labels[sandboxv1beta1.SandboxLaunchTypeLabel] = sandboxv1beta1.SandboxLaunchTypeWarm
-}
-
 // filterActiveSandboxes filters the list of sandboxes, deleting stale ones and adopting orphans.
 func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool, sandboxes []sandboxv1beta1.Sandbox, template *extensionsv1beta1.SandboxTemplate, currentSandboxBlueprintHash string, tmplErr error) ([]sandboxv1beta1.Sandbox, error) {
 	logger := log.FromContext(ctx)
@@ -423,15 +416,6 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 		activeSandboxes = append(activeSandboxes, sb)
 	}
 	return activeSandboxes, allErrors
-}
-
-// computeSandboxBlueprintHash computes a hash of the sandbox template's Spec.SandboxBlueprint.
-func computeSandboxBlueprintHash(template *extensionsv1beta1.SandboxTemplate) (string, error) {
-	specJSON, err := json.Marshal(template.Spec.SandboxBlueprint)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal sandbox blueprint for hashing: %w", err)
-	}
-	return sandboxcontrollers.NameHash(string(specJSON)), nil
 }
 
 // fetchTemplateAndHash fetches the sandbox template and computes its hash.
@@ -678,51 +662,6 @@ func (r *SandboxWarmPoolReconciler) compareSandboxBlueprint(template *extensions
 		equality.Semantic.DeepEqual(template.Spec.Service, actualSandboxSpec.Service)
 }
 
-// sandboxWarmPoolLabelIndexer extracts the warmPoolSandboxLabel value for the
-// sandboxWarmPoolLabelIndex cache field index. Shared with tests so fake clients
-// register the same index the manager does.
-func sandboxWarmPoolLabelIndexer(obj client.Object) []string {
-	if v, ok := obj.GetLabels()[warmPoolSandboxLabel]; ok {
-		return []string{v}
-	}
-	return nil
-}
-
-// sandboxTemplateRefNameIndexer extracts the template reference name for the
-// TemplateRefField cache field index. Shared with tests so fake clients
-// register the same index the manager does.
-func sandboxTemplateRefNameIndexer(obj client.Object) []string {
-	wp := obj.(*extensionsv1beta1.SandboxWarmPool)
-	if wp.Spec.TemplateRef.Name == "" {
-		return nil
-	}
-	return []string{wp.Spec.TemplateRef.Name}
-}
-
-// poolMemberChangePredicate passes the non-label member transitions
-// reconcilePool reads — ownership, deletion, Ready flips, and generation bumps
-// (orphan blueprint re-vetting); LabelChangedPredicate joins it at registration.
-// Anything else (PodIPs, other conditions) would re-scan the pool for nothing.
-func poolMemberChangePredicate() predicate.Funcs {
-	return predicate.Funcs{
-		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldSb, okOld := e.ObjectOld.(*sandboxv1beta1.Sandbox)
-			newSb, okNew := e.ObjectNew.(*sandboxv1beta1.Sandbox)
-			if !okOld || !okNew {
-				return true
-			}
-			// The reconcile reads only the controller ref, so compare that —
-			// DeepEqual over the owner slice costs ~200x per member event.
-			oldRef, newRef := metav1.GetControllerOf(oldSb), metav1.GetControllerOf(newSb)
-			return oldSb.Generation != newSb.Generation ||
-				oldSb.DeletionTimestamp.IsZero() != newSb.DeletionTimestamp.IsZero() ||
-				(oldRef == nil) != (newRef == nil) ||
-				(oldRef != nil && oldRef.UID != newRef.UID) ||
-				isSandboxReady(oldSb) != isSandboxReady(newSb)
-		},
-	}
-}
-
 // findWarmPoolsForTemplate returns a list of reconcile.Requests for all SandboxWarmPools that reference the template.
 func (r *SandboxWarmPoolReconciler) findWarmPoolsForTemplate(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
@@ -785,4 +724,65 @@ func slowStartBatch(ctx context.Context, count int, initialBatchSize int, fn fun
 	}
 
 	return successes, nil
+}
+
+func setWarmLaunchTypeLabel(sb *sandboxv1beta1.Sandbox) {
+	if sb.Labels == nil {
+		sb.Labels = make(map[string]string)
+	}
+	sb.Labels[sandboxv1beta1.SandboxLaunchTypeLabel] = sandboxv1beta1.SandboxLaunchTypeWarm
+}
+
+// computeSandboxBlueprintHash computes a hash of the sandbox template's Spec.SandboxBlueprint.
+func computeSandboxBlueprintHash(template *extensionsv1beta1.SandboxTemplate) (string, error) {
+	specJSON, err := json.Marshal(template.Spec.SandboxBlueprint)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal sandbox blueprint for hashing: %w", err)
+	}
+	return sandboxcontrollers.NameHash(string(specJSON)), nil
+}
+
+// sandboxWarmPoolLabelIndexer extracts the warmPoolSandboxLabel value for the
+// sandboxWarmPoolLabelIndex cache field index. Shared with tests so fake clients
+// register the same index the manager does.
+func sandboxWarmPoolLabelIndexer(obj client.Object) []string {
+	if v, ok := obj.GetLabels()[warmPoolSandboxLabel]; ok {
+		return []string{v}
+	}
+	return nil
+}
+
+// sandboxTemplateRefNameIndexer extracts the template reference name for the
+// TemplateRefField cache field index. Shared with tests so fake clients
+// register the same index the manager does.
+func sandboxTemplateRefNameIndexer(obj client.Object) []string {
+	wp := obj.(*extensionsv1beta1.SandboxWarmPool)
+	if wp.Spec.TemplateRef.Name == "" {
+		return nil
+	}
+	return []string{wp.Spec.TemplateRef.Name}
+}
+
+// poolMemberChangePredicate passes the non-label member transitions
+// reconcilePool reads — ownership, deletion, Ready flips, and generation bumps
+// (orphan blueprint re-vetting); LabelChangedPredicate joins it at registration.
+// Anything else (PodIPs, other conditions) would re-scan the pool for nothing.
+func poolMemberChangePredicate() predicate.Funcs {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldSb, okOld := e.ObjectOld.(*sandboxv1beta1.Sandbox)
+			newSb, okNew := e.ObjectNew.(*sandboxv1beta1.Sandbox)
+			if !okOld || !okNew {
+				return true
+			}
+			// The reconcile reads only the controller ref, so compare that —
+			// DeepEqual over the owner slice costs ~200x per member event.
+			oldRef, newRef := metav1.GetControllerOf(oldSb), metav1.GetControllerOf(newSb)
+			return oldSb.Generation != newSb.Generation ||
+				oldSb.DeletionTimestamp.IsZero() != newSb.DeletionTimestamp.IsZero() ||
+				(oldRef == nil) != (newRef == nil) ||
+				(oldRef != nil && oldRef.UID != newRef.UID) ||
+				isSandboxReady(oldSb) != isSandboxReady(newSb)
+		},
+	}
 }
