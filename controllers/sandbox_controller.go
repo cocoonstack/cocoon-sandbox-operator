@@ -174,15 +174,8 @@ type PodMutator interface {
 //+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch
 //+kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;update;patch,resourceNames=sandboxes.agents.x-k8s.io;sandboxclaims.extensions.agents.x-k8s.io;sandboxtemplates.extensions.agents.x-k8s.io;sandboxwarmpools.extensions.agents.x-k8s.io
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Sandbox object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.1/pkg/reconcile
+// Reconcile drives a Sandbox toward its declared spec: child Service/Pod/PVCs,
+// status conditions, and expiry.
 func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -195,7 +188,6 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	// Start Tracing Span
 	initialAttrs := map[string]string{
 		"sandbox.name":      sandbox.Name,
 		"sandbox.namespace": sandbox.Namespace,
@@ -261,6 +253,34 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	// return errors seen
 	return result, err
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, podSandboxNameHashIndex,
+		podSandboxNameHashIndexer); err != nil {
+		return fmt.Errorf("failed to index pods by sandbox label: %w", err)
+	}
+
+	labelSelectorPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{
+			{
+				Key:      sandboxLabel,
+				Operator: metav1.LabelSelectorOpExists,
+				Values:   []string{},
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&sandboxv1beta1.Sandbox{}).
+		Owns(&corev1.Pod{}, builder.WithPredicates(labelSelectorPredicate)).
+		Owns(&corev1.Service{}, builder.WithPredicates(labelSelectorPredicate)).
+		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
+		Complete(r)
 }
 
 func (r *SandboxReconciler) reconcileChildResources(ctx context.Context, sandbox *sandboxv1beta1.Sandbox) error {
@@ -1291,32 +1311,4 @@ func podSandboxNameHashIndexer(obj client.Object) []string {
 		return []string{v}
 	}
 	return nil
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, podSandboxNameHashIndex,
-		podSandboxNameHashIndexer); err != nil {
-		return fmt.Errorf("failed to index pods by sandbox label: %w", err)
-	}
-
-	labelSelectorPredicate, err := predicate.LabelSelectorPredicate(metav1.LabelSelector{
-		MatchExpressions: []metav1.LabelSelectorRequirement{
-			{
-				Key:      sandboxLabel,
-				Operator: metav1.LabelSelectorOpExists,
-				Values:   []string{},
-			},
-		},
-	})
-	if err != nil {
-		return err
-	}
-
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&sandboxv1beta1.Sandbox{}).
-		Owns(&corev1.Pod{}, builder.WithPredicates(labelSelectorPredicate)).
-		Owns(&corev1.Service{}, builder.WithPredicates(labelSelectorPredicate)).
-		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
-		Complete(r)
 }

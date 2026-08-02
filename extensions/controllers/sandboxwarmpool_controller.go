@@ -123,6 +123,33 @@ func (r *SandboxWarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
+// SetupWithManager sets up the controller with the Manager.
+func (r *SandboxWarmPoolReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
+	if r.MaxBatchSize <= 0 {
+		r.MaxBatchSize = sandboxCreateDeleteMaxBatchSize
+	}
+
+	ctx := context.Background()
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &sandboxv1beta1.Sandbox{},
+		sandboxWarmPoolLabelIndex, sandboxWarmPoolLabelIndexer); err != nil {
+		return fmt.Errorf("failed to index sandboxes by warm pool label: %w", err)
+	}
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &extensionsv1beta1.SandboxWarmPool{},
+		extensionsv1beta1.TemplateRefField, sandboxTemplateRefNameIndexer); err != nil {
+		return fmt.Errorf("failed to index warm pools by template reference name: %w", err)
+	}
+
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&extensionsv1beta1.SandboxWarmPool{}).
+		Owns(&sandboxv1beta1.Sandbox{}, builder.WithPredicates(predicate.Or(predicate.LabelChangedPredicate{}, poolMemberChangePredicate()))).
+		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
+		Watches(
+			&extensionsv1beta1.SandboxTemplate{},
+			handler.EnqueueRequestsFromMapFunc(r.findWarmPoolsForTemplate),
+		).
+		Complete(r)
+}
+
 // reconcilePool ensures the correct number of pre-allocated sandboxes exist in the pool.
 func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) (time.Duration, error) {
 	logger := log.FromContext(ctx)
@@ -673,33 +700,6 @@ func sandboxTemplateRefNameIndexer(obj client.Object) []string {
 		return nil
 	}
 	return []string{wp.Spec.TemplateRef.Name}
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *SandboxWarmPoolReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
-	if r.MaxBatchSize <= 0 {
-		r.MaxBatchSize = sandboxCreateDeleteMaxBatchSize
-	}
-
-	ctx := context.Background()
-	if err := mgr.GetFieldIndexer().IndexField(ctx, &sandboxv1beta1.Sandbox{},
-		sandboxWarmPoolLabelIndex, sandboxWarmPoolLabelIndexer); err != nil {
-		return fmt.Errorf("failed to index sandboxes by warm pool label: %w", err)
-	}
-	if err := mgr.GetFieldIndexer().IndexField(ctx, &extensionsv1beta1.SandboxWarmPool{},
-		extensionsv1beta1.TemplateRefField, sandboxTemplateRefNameIndexer); err != nil {
-		return fmt.Errorf("failed to index warm pools by template reference name: %w", err)
-	}
-
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&extensionsv1beta1.SandboxWarmPool{}).
-		Owns(&sandboxv1beta1.Sandbox{}, builder.WithPredicates(predicate.Or(predicate.LabelChangedPredicate{}, poolMemberChangePredicate()))).
-		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
-		Watches(
-			&extensionsv1beta1.SandboxTemplate{},
-			handler.EnqueueRequestsFromMapFunc(r.findWarmPoolsForTemplate),
-		).
-		Complete(r)
 }
 
 // poolMemberChangePredicate passes the non-label member transitions

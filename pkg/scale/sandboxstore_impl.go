@@ -274,54 +274,6 @@ func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*
 	return found, nil
 }
 
-// findEntry sweeps every node inventory with List's bounded fan-out and returns
-// the first entry matching match synthesized as a Sandbox, canceling the rest
-// of the sweep on the hit. Nil with a nil error means no entry matched.
-func (s *scatterGatherStore) findEntry(ctx context.Context, op string, match func(inv *NodeInventory, i int) bool) (*sandboxv1beta1.Sandbox, error) {
-	nodes, err := s.src.ListNodes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
-	}
-	gctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	g := &errgroup.Group{}
-	if s.concurrency > 0 {
-		g.SetLimit(s.concurrency)
-	}
-	var (
-		mu    sync.Mutex
-		found *sandboxv1beta1.Sandbox
-	)
-	for _, node := range nodes {
-		g.Go(func() error {
-			if gctx.Err() != nil {
-				return nil
-			}
-			inv, err := s.src.NodeInventory(gctx, node)
-			if err != nil {
-				s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
-					"node", node, "err", err.Error())
-				return nil
-			}
-			for i := range inv.Entries {
-				if !match(inv, i) {
-					continue
-				}
-				mu.Lock()
-				if found == nil {
-					found = entryToSandbox(inv.Node, inv.Entries[i])
-				}
-				mu.Unlock()
-				cancel()
-				return nil
-			}
-			return nil
-		})
-	}
-	_ = g.Wait()
-	return found, nil
-}
-
 // GetByClaimID resolves the sandbox whose node-local claim id satisfies match,
 // fanning out per node and canceling on the first hit; only the matching entry
 // is materialized. An empty namespace matches every namespace.
@@ -403,6 +355,67 @@ func (s *scatterGatherStore) Release(ctx context.Context, node, id string) error
 	return nil
 }
 
+// Watch merges per-node inventory into a single Sandbox event stream. This
+// minimal-correct implementation re-derives the fanned-out list on a slow cadence
+// and translates the diff into Added/Modified/Deleted events; a production
+// implementation would merge real per-node watch streams instead of polling.
+func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch.Interface, error) {
+	if _, _, err := parseSelectors(opts); err != nil {
+		return nil, err
+	}
+	w := newInventoryWatcher()
+	go s.runWatch(ctx, opts, w)
+	return w, nil
+}
+
+// findEntry sweeps every node inventory with List's bounded fan-out and returns
+// the first entry matching match synthesized as a Sandbox, canceling the rest
+// of the sweep on the hit. Nil with a nil error means no entry matched.
+func (s *scatterGatherStore) findEntry(ctx context.Context, op string, match func(inv *NodeInventory, i int) bool) (*sandboxv1beta1.Sandbox, error) {
+	nodes, err := s.src.ListNodes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
+	}
+	gctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	g := &errgroup.Group{}
+	if s.concurrency > 0 {
+		g.SetLimit(s.concurrency)
+	}
+	var (
+		mu    sync.Mutex
+		found *sandboxv1beta1.Sandbox
+	)
+	for _, node := range nodes {
+		g.Go(func() error {
+			if gctx.Err() != nil {
+				return nil
+			}
+			inv, err := s.src.NodeInventory(gctx, node)
+			if err != nil {
+				s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
+					"node", node, "err", err.Error())
+				return nil
+			}
+			for i := range inv.Entries {
+				if !match(inv, i) {
+					continue
+				}
+				mu.Lock()
+				if found == nil {
+					found = entryToSandbox(inv.Node, inv.Entries[i])
+				}
+				mu.Unlock()
+				cancel()
+				return nil
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return found, nil
+}
+
 // warmCandidates lists every node advertising warm capacity for pool, fanning
 // out per node like List. A node whose inventory is unavailable is skipped, not
 // fatal: the fleet stays claimable while one node is partitioned.
@@ -425,19 +438,6 @@ func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) (
 		}
 		return out
 	})
-}
-
-// Watch merges per-node inventory into a single Sandbox event stream. This
-// minimal-correct implementation re-derives the fanned-out list on a slow cadence
-// and translates the diff into Added/Modified/Deleted events; a production
-// implementation would merge real per-node watch streams instead of polling.
-func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch.Interface, error) {
-	if _, _, err := parseSelectors(opts); err != nil {
-		return nil, err
-	}
-	w := newInventoryWatcher()
-	go s.runWatch(ctx, opts, w)
-	return w, nil
 }
 
 func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *inventoryWatcher) {

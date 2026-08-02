@@ -331,6 +331,30 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return result, reconcileErr
 }
 
+// SetupWithManager sets up the controller with the Manager.
+func (r *SandboxClaimReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
+	r.MaxConcurrentReconciles = concurrentWorkers
+
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, warmPoolRefIndexer); err != nil {
+		return err
+	}
+
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&extensionsv1beta1.SandboxClaim{}, builder.WithPredicates(r.getTimingPredicate())).
+		Owns(&v1beta1.Sandbox{}).
+		Watches(&v1beta1.Sandbox{}, &sandboxEventHandler{sandboxQueue: r.WarmSandboxQueue}).
+		Watches(&extensionsv1beta1.SandboxWarmPool{}, &warmPoolEventHandler{sandboxQueue: r.WarmSandboxQueue}).
+		Watches(
+			&extensionsv1beta1.SandboxWarmPool{},
+			handler.EnqueueRequestsFromMapFunc(r.mapWarmPoolToClaims),
+			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}),
+		).
+		// TODO: Keep a lightweight SandboxTemplate -> claims map watch to promptly reconcile
+		// claims when a missing template is created, instead of relying on the 1-minute fallback.
+		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
+		Complete(r)
+}
+
 // resultFor turns the reconcile outcome into a requeue decision. The bool reports
 // that the error is deliberately swallowed: a missing dependency, an adoption
 // waiting on cache convergence, or a user-configuration error that must not drive
@@ -774,18 +798,17 @@ func (r *SandboxClaimReconciler) getCandidate(ctx context.Context, claim *extens
 	var fallbackKey queue.SandboxKey
 	var adoptingFallback bool
 
-	// Instantly returns unused keys the moment we find a valid/ready candidate!
+	// Skipped and unadopted-fallback keys must go back in the queue or their
+	// warm sandboxes would be stranded until the next pool resync.
 	defer func() {
 		for _, key := range skipped {
 			r.WarmSandboxQueue.Add(namespacedWarmPoolName, key)
 		}
-		// If we parked a fallback sandbox but never ended up adopting it (due to error or adopting a ready one), requeue it.
 		if fallbackSandbox != nil && !adoptingFallback {
 			r.WarmSandboxQueue.Add(namespacedWarmPoolName, fallbackKey)
 		}
 	}()
 
-	// Strategy helper to pick candidate using in-memory NodeSpread and FIFO tie-breaking
 	pickSmart := func(keys []queue.SandboxKey) (queue.SandboxKey, bool) {
 		namespaceKeys := keys
 
@@ -796,7 +819,6 @@ func (r *SandboxClaimReconciler) getCandidate(ctx context.Context, claim *extens
 			return namespaceKeys[0], true
 		}
 
-		// Group candidates into scheduled vs unscheduled
 		var scheduledKeys []queue.SandboxKey
 		var unscheduledKeys []queue.SandboxKey
 		for _, key := range namespaceKeys {
@@ -807,9 +829,8 @@ func (r *SandboxClaimReconciler) getCandidate(ctx context.Context, claim *extens
 			}
 		}
 
-		// NodeSpread strategy: spread workloads by round-robinning nodes.
-		// We count the remaining warmpool sandboxes per node in the queue.
-		// The node with the most remaining sandboxes has been selected the least.
+		// NodeSpread: the node with the most remaining warm sandboxes has been
+		// picked the least, so drain it first.
 		if len(scheduledKeys) > 0 {
 			nodeCounts := make(map[string]int)
 			for _, key := range scheduledKeys {
@@ -830,18 +851,15 @@ func (r *SandboxClaimReconciler) getCandidate(ctx context.Context, claim *extens
 				}
 			}
 
-			// Ties (equal counts) are resolved using oldest first (first in the slice)
 			return bestCandidates[0], true
 		}
 
-		// Fall back to oldest first (FIFO) for unscheduled keys
 		return unscheduledKeys[0], true
 	}
 
 	for {
 		adoptedKey, ok := r.WarmSandboxQueue.GetWithStrategy(namespacedWarmPoolName, pickSmart)
 		if !ok {
-			// No more candidates in our namespace. If we found an unready fallback sandbox, return it.
 			if fallbackSandbox != nil {
 				adoptingFallback = true
 				return fallbackSandbox, fallbackKey, nil
@@ -853,11 +871,9 @@ func (r *SandboxClaimReconciler) getCandidate(ctx context.Context, claim *extens
 		err := r.Get(ctx, client.ObjectKey{Namespace: adoptedKey.Namespace, Name: adoptedKey.Name}, adopted)
 		if err != nil {
 			if k8errors.IsNotFound(err) {
-				// Ghost Pod detected: It was deleted from the cluster but was still in our queue.
-				// Ignore it and instantly pop the next one.
+				// The queue can hold keys for sandboxes already deleted from the cluster.
 				continue
 			}
-			// For real errors, put the key back in line and error out
 			r.WarmSandboxQueue.Add(namespacedWarmPoolName, adoptedKey)
 			return nil, queue.SandboxKey{}, err
 		}
@@ -872,19 +888,15 @@ func (r *SandboxClaimReconciler) getCandidate(ctx context.Context, claim *extens
 			continue
 		}
 
-		// Candidate is valid! Now check if it is Ready
 		if isSandboxReady(adopted) {
-			// Found a Ready sandbox! Adopt it immediately.
 			return adopted, adoptedKey, nil
 		}
 
-		// Sandbox is valid but NOT Ready.
-		// Keep the first unready sandbox we found as fallback.
+		// The first unready-but-valid sandbox is kept as the fallback adoption.
 		if fallbackSandbox == nil {
 			fallbackSandbox = adopted
 			fallbackKey = adoptedKey
 		} else {
-			// Push subsequent unready sandboxes to skipped so they go back to the queue
 			skipped = append(skipped, adoptedKey)
 		}
 	}
@@ -1754,30 +1766,6 @@ func (r *SandboxClaimReconciler) mapWarmPoolToClaims(ctx context.Context, obj cl
 		requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: claim.Namespace, Name: claim.Name}})
 	}
 	return requests
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *SandboxClaimReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
-	r.MaxConcurrentReconciles = concurrentWorkers
-
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, warmPoolRefIndexer); err != nil {
-		return err
-	}
-
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&extensionsv1beta1.SandboxClaim{}, builder.WithPredicates(r.getTimingPredicate())).
-		Owns(&v1beta1.Sandbox{}).
-		Watches(&v1beta1.Sandbox{}, &sandboxEventHandler{sandboxQueue: r.WarmSandboxQueue}).
-		Watches(&extensionsv1beta1.SandboxWarmPool{}, &warmPoolEventHandler{sandboxQueue: r.WarmSandboxQueue}).
-		Watches(
-			&extensionsv1beta1.SandboxWarmPool{},
-			handler.EnqueueRequestsFromMapFunc(r.mapWarmPoolToClaims),
-			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}),
-		).
-		// TODO: Keep a lightweight SandboxTemplate -> claims map watch to promptly reconcile
-		// claims when a missing template is created, instead of relying on the 1-minute fallback.
-		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
-		Complete(r)
 }
 
 // warmPoolRefIndexer indexes SandboxClaims by spec.warmPoolRef.name.

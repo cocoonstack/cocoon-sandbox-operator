@@ -59,7 +59,6 @@ const defaultRouterNamespace = "sandbox-system"
 func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// 1. Fetch the SandboxTemplate
 	template := &extensionsv1beta1.SandboxTemplate{}
 	if err := r.Get(ctx, req.NamespacedName, template); err != nil {
 		if k8errors.IsNotFound(err) {
@@ -79,7 +78,6 @@ func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 
-	// 2. Determine Scope and Desired State
 	npName := template.Name + "-network-policy"
 	npNamespace := template.Namespace
 
@@ -92,7 +90,6 @@ func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, r.dropManagedNetworkPolicy(ctx, template, npName, npNamespace)
 	}
 
-	// 4. Construct Desired NetworkPolicy Spec
 	var desiredSpec networkingv1.NetworkPolicySpec
 	if template.Spec.NetworkPolicy == nil {
 		desiredSpec = buildDefaultNetworkPolicySpec(template.Name, r.RouterNamespace)
@@ -118,9 +115,8 @@ func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if !metav1.IsControlledBy(existingNP, template) {
 			return ctrl.Result{}, fmt.Errorf("refusing to update NetworkPolicy %q as it is not controlled by SandboxTemplate %q", npName, template.Name)
 		}
-		// Policy exists: Semantic DeepEqual check for drift
 		if equality.Semantic.DeepEqual(existingNP.Spec, desiredSpec) {
-			return ctrl.Result{}, nil // Perfect match, O(1) efficiency.
+			return ctrl.Result{}, nil
 		}
 
 		existingNP.Spec = desiredSpec
@@ -152,6 +148,15 @@ func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	logger.Info("Successfully created shared NetworkPolicy", "name", npName)
 	return ctrl.Result{}, nil
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *SandboxTemplateReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&extensionsv1beta1.SandboxTemplate{}).
+		Owns(&networkingv1.NetworkPolicy{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
+		Complete(r)
 }
 
 func (r *SandboxTemplateReconciler) ensureTemplateRefHashLabel(ctx context.Context, template *extensionsv1beta1.SandboxTemplate) error {
@@ -270,13 +275,4 @@ func buildDefaultNetworkPolicySpec(templateName, routerNamespace string) network
 			},
 		},
 	}
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *SandboxTemplateReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&extensionsv1beta1.SandboxTemplate{}).
-		Owns(&networkingv1.NetworkPolicy{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
-		Complete(r)
 }

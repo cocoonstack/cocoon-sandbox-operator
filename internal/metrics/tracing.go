@@ -38,6 +38,14 @@ const (
 	TraceContextAnnotation = "opentelemetry.io/trace-context"
 )
 
+// Instrumenter defines the operations needed for tracing sandbox lifecycles.
+type Instrumenter interface {
+	StartSpan(ctx context.Context, obj metav1.Object, spanName string, attrs map[string]string) (context.Context, func())
+	GetTraceContext(ctx context.Context) string
+	AddEvent(ctx context.Context, name string, attrs map[string]string)
+	IsRecording(ctx context.Context) bool
+}
+
 type noopInstrumenter struct{}
 
 func (n *noopInstrumenter) StartSpan(ctx context.Context, _ metav1.Object, _ string, _ map[string]string) (context.Context, func()) {
@@ -47,14 +55,6 @@ func (n *noopInstrumenter) GetTraceContext(_ context.Context) string            
 func (n *noopInstrumenter) AddEvent(_ context.Context, _ string, _ map[string]string) {}
 func (n *noopInstrumenter) IsRecording(_ context.Context) bool                        { return false }
 func NewNoOp() Instrumenter                                                           { return &noopInstrumenter{} }
-
-// Instrumenter defines the operations needed for tracing sandbox lifecycles.
-type Instrumenter interface {
-	StartSpan(ctx context.Context, obj metav1.Object, spanName string, attrs map[string]string) (context.Context, func())
-	GetTraceContext(ctx context.Context) string
-	AddEvent(ctx context.Context, name string, attrs map[string]string)
-	IsRecording(ctx context.Context) bool
-}
 
 type otelInstrumenter struct {
 	tracer     trace.Tracer
