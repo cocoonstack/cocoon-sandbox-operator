@@ -57,6 +57,25 @@ manages both externally.
 Use `--enable-pprof-debug` only in controlled environments because it exposes
 process details and enables block/mutex sampling.
 
+### Metrics
+
+Beyond the controller-runtime defaults, `--metrics-bind-address` serves:
+
+| Metric | Type | Notes |
+|---|---|---|
+| `agent_sandbox_claim_startup_latency_ms{launch_type,sandbox_template,warmpool_name}` | Histogram | SandboxClaim creation → Sandbox Ready, end to end. The number a caller feels |
+| `agent_sandbox_claim_controller_startup_latency_ms{…}` | Histogram | Controller-first-observed → Ready. Same path minus webhook and apiserver time, so the gap between the two is admission overhead |
+| `agent_sandbox_creation_latency_ms{namespace,launch_type,sandbox_template}` | Histogram | Sandbox creation → Pod Ready; for a warm launch this is controller sync overhead only, since the Pod is already up |
+| `agent_sandbox_claim_creation_total{namespace,sandbox_template,launch_type,warmpool_name,pod_condition,created_by}` | Counter | Claims created; `created_by` separates go-client / python-client / controller |
+| `agent_sandbox_warm_created_total{namespace,warmpool_name}` | Counter | Sandboxes the warm-pool controller created — both initial fill and claim-consumed replacement. Event-level, so fill rate survives scrape gaps |
+| `agent_sandboxes{namespace,ready_condition,expired,launch_type,sandbox_template,owned_by,created_by}` | Gauge | Point-in-time sandbox inventory, collected on scrape |
+| `agent_sandbox_build_info` | Gauge | Constant 1 carrying version / commit / build-date labels |
+
+`launch_type` is `warm` when a claim adopted a pre-booted sandbox and `cold`
+when one was created for it (`unknown` only on a failure with no Sandbox) —
+the ratio is the warm pool's hit rate, and the latency split between the two
+is the reason the pool exists.
+
 ## Example patch
 
 ```yaml
