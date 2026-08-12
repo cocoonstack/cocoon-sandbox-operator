@@ -77,15 +77,6 @@ var Scheme = func() *runtime.Scheme {
 // resourceOwnership represents the ownership state of a Kubernetes resource relative to a Sandbox.
 type resourceOwnership int
 
-// SandboxReconciler reconciles a Sandbox object.
-type SandboxReconciler struct {
-	client.Client
-	Scheme        *runtime.Scheme
-	Tracer        asmetrics.Instrumenter
-	ClusterDomain string
-	PodMutator    PodMutator
-}
-
 // PodMutator applies runtime-specific defaults to a newly-created Sandbox Pod.
 // Implementations must preserve every field explicitly supplied through the
 // Sandbox API and return an error instead of silently overriding conflicts.
@@ -102,6 +93,15 @@ type PodMutator interface {
 //+kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch
 //+kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;update;patch,resourceNames=sandboxes.agents.x-k8s.io;sandboxclaims.extensions.agents.x-k8s.io;sandboxtemplates.extensions.agents.x-k8s.io;sandboxwarmpools.extensions.agents.x-k8s.io
+
+// SandboxReconciler reconciles a Sandbox object.
+type SandboxReconciler struct {
+	client.Client
+	Scheme        *runtime.Scheme
+	Tracer        asmetrics.Instrumenter
+	ClusterDomain string
+	PodMutator    PodMutator
+}
 
 // Reconcile drives a Sandbox toward its declared spec: child Service/Pod/PVCs,
 // status conditions, and expiry.
@@ -1022,6 +1022,54 @@ func (r *SandboxReconciler) deleteExpiredChild(ctx context.Context, sandbox *san
 	return nil
 }
 
+// checkOwnership determines whether a Kubernetes resource is owned by the given Sandbox,
+// has no controller, or is owned by a different controller.
+// It returns both the ownership classification and the controller reference (if any),
+// so callers can log owner details without redundant GetControllerOf calls.
+func checkOwnership(obj client.Object, sandbox *sandboxv1beta1.Sandbox) (resourceOwnership, *metav1.OwnerReference) {
+	controllerRef := metav1.GetControllerOf(obj)
+	if controllerRef == nil {
+		return resourceUnowned, nil
+	}
+	if controllerRef.UID == sandbox.UID {
+		return resourceOwnedBySandbox, controllerRef
+	}
+	return resourceOwnedByOther, controllerRef
+}
+
+// MergeVolumeClaimVolumes merges PVC-backed volumes into an existing volume
+// list, replacing any volumes with matching names. This follows StatefulSet
+// semantics where volumeClaimTemplate volumes take priority.
+func MergeVolumeClaimVolumes(existing []corev1.Volume, pvcVolumes []corev1.Volume) []corev1.Volume {
+	if len(pvcVolumes) == 0 {
+		return existing
+	}
+	vctNames := make(map[string]struct{}, len(pvcVolumes))
+	for _, v := range pvcVolumes {
+		vctNames[v.Name] = struct{}{}
+	}
+	filtered := make([]corev1.Volume, 0, len(existing))
+	for _, v := range existing {
+		if _, ok := vctNames[v.Name]; !ok {
+			filtered = append(filtered, v)
+		}
+	}
+	return append(filtered, pvcVolumes...)
+}
+
+// GetNumericHash generates a raw FNV-1a hash value.
+func GetNumericHash(input string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(input))
+	return h.Sum32()
+}
+
+// NameHash generates an FNV-1a hash from a string and returns
+// it as a fixed-length hexadecimal string.
+func NameHash(objectName string) string {
+	return fmt.Sprintf("%08x", GetNumericHash(objectName))
+}
+
 // checks if the sandbox has expired
 // returns true if expired, false otherwise
 // if not expired, also returns the duration to requeue after.
@@ -1090,21 +1138,6 @@ func podReadiness(pod *corev1.Pod) (message string, ready bool) {
 	return "Pod is Ready", true
 }
 
-// checkOwnership determines whether a Kubernetes resource is owned by the given Sandbox,
-// has no controller, or is owned by a different controller.
-// It returns both the ownership classification and the controller reference (if any),
-// so callers can log owner details without redundant GetControllerOf calls.
-func checkOwnership(obj client.Object, sandbox *sandboxv1beta1.Sandbox) (resourceOwnership, *metav1.OwnerReference) {
-	controllerRef := metav1.GetControllerOf(obj)
-	if controllerRef == nil {
-		return resourceUnowned, nil
-	}
-	if controllerRef.UID == sandbox.UID {
-		return resourceOwnedBySandbox, controllerRef
-	}
-	return resourceOwnedByOther, controllerRef
-}
-
 // isAdoptable reports whether obj carries the warm-pool adoptable label.
 func isAdoptable(obj client.Object) bool {
 	return obj.GetLabels()[sandboxv1beta1.SandboxAdoptableLabel] == "true"
@@ -1120,26 +1153,6 @@ func resolvePodName(sandbox *sandboxv1beta1.Sandbox) string {
 	return sandbox.Name
 }
 
-// MergeVolumeClaimVolumes merges PVC-backed volumes into an existing volume
-// list, replacing any volumes with matching names. This follows StatefulSet
-// semantics where volumeClaimTemplate volumes take priority.
-func MergeVolumeClaimVolumes(existing []corev1.Volume, pvcVolumes []corev1.Volume) []corev1.Volume {
-	if len(pvcVolumes) == 0 {
-		return existing
-	}
-	vctNames := make(map[string]struct{}, len(pvcVolumes))
-	for _, v := range pvcVolumes {
-		vctNames[v.Name] = struct{}{}
-	}
-	filtered := make([]corev1.Volume, 0, len(existing))
-	for _, v := range existing {
-		if _, ok := vctNames[v.Name]; !ok {
-			filtered = append(filtered, v)
-		}
-	}
-	return append(filtered, pvcVolumes...)
-}
-
 // podIPsFromStatus converts the K8s PodIP slice to a plain string slice.
 func podIPsFromStatus(podIPs []corev1.PodIP) []string {
 	if len(podIPs) == 0 {
@@ -1150,19 +1163,6 @@ func podIPsFromStatus(podIPs []corev1.PodIP) []string {
 		ips[i] = pip.IP
 	}
 	return ips
-}
-
-// GetNumericHash generates a raw FNV-1a hash value.
-func GetNumericHash(input string) uint32 {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(input))
-	return h.Sum32()
-}
-
-// NameHash generates an FNV-1a hash from a string and returns
-// it as a fixed-length hexadecimal string.
-func NameHash(objectName string) string {
-	return fmt.Sprintf("%08x", GetNumericHash(objectName))
 }
 
 // hasSystemReservedPrefix reports whether a key uses a label/annotation prefix

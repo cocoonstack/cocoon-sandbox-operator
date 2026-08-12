@@ -228,29 +228,6 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 	return list, nil
 }
 
-// fanOutNodes enumerates the node inventories and runs work per node with
-// List's bounded concurrency, concatenating per-node results in node order.
-// A node the work skips contributes nil.
-func fanOutNodes[T any](ctx context.Context, s *scatterGatherStore, work func(ctx context.Context, node string) []T) ([]T, error) {
-	nodes, err := s.src.ListNodes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
-	}
-	perNode := make([][]T, len(nodes))
-	g, gctx := errgroup.WithContext(ctx)
-	if s.concurrency > 0 {
-		g.SetLimit(s.concurrency)
-	}
-	for i, node := range nodes {
-		g.Go(func() error {
-			perNode[i] = work(gctx, node)
-			return nil
-		})
-	}
-	_ = g.Wait()
-	return slices.Concat(perNode...), nil
-}
-
 // Get routes to the owning node's authoritative inventory. It resolves which
 // node holds namespace/name and returns that entry synthesized as a Sandbox.
 // The per-node sweep fans out like List and cancels on the first hit — a
@@ -557,121 +534,6 @@ func pickPowerOfTwo(candidates []warmCandidate) (warmCandidate, int) {
 	return candidates[i], i
 }
 
-// poolCapacityMatches reports whether a node's advertised pool capacity serves the
-// requested pool key, normalizing the net/size defaults on both sides so an unset
-// axis matches its default-named pool.
-func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
-	return pc.Template == key.Template &&
-		cmp.Or(pc.Net, NetDefault) == cmp.Or(key.Net, NetDefault) &&
-		cmp.Or(pc.Size, SizeClassSmall) == cmp.Or(key.Size, SizeClassSmall)
-}
-
-// parseSelectors turns the string selectors on ListOptions into matchers. Empty
-// strings become everything-matchers.
-func parseSelectors(opts ListOptions) (labels.Selector, fields.Selector, error) {
-	labelSel, err := labels.Parse(opts.LabelSelector)
-	if err != nil {
-		return nil, nil, fmt.Errorf("scale: parse label selector %q: %w", opts.LabelSelector, err)
-	}
-	fieldSel, err := fields.ParseSelector(opts.FieldSelector)
-	if err != nil {
-		return nil, nil, fmt.Errorf("scale: parse field selector %q: %w", opts.FieldSelector, err)
-	}
-	return labelSel, fieldSel, nil
-}
-
-// entryToSandbox synthesizes the Sandbox object served for one inventory entry.
-// The entry name is the sandbox's "<namespace>/<name>"; an unqualified name
-// lands in the default namespace.
-func entryToSandbox(node string, e InventoryEntry) *sandboxv1beta1.Sandbox {
-	ns, name := splitNamespacedName(e.Name)
-	sb := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:       ns,
-			Name:            name,
-			Labels:          synthLabels(node, e),
-			Annotations:     synthAnnotations(e),
-			ResourceVersion: resourceVersionFor(ns, name, e),
-		},
-		Status: sandboxv1beta1.SandboxStatus{
-			NodeName: node,
-			PodIPs:   AddressIPs(e.Address),
-			Conditions: []metav1.Condition{{
-				Type:    string(sandboxv1beta1.SandboxConditionReady),
-				Status:  readyStatus(e.Phase),
-				Reason:  readyReason(e.Phase),
-				Message: fmt.Sprintf("phase %q reported by node %q inventory", e.Phase, node),
-			}},
-		},
-	}
-	return sb
-}
-
-func synthLabels(node string, e InventoryEntry) map[string]string {
-	l := map[string]string{NodeLabel: node}
-	if e.Phase != "" {
-		l[PhaseLabel] = e.Phase
-	}
-	if e.ClaimRef != "" {
-		_, claim := splitNamespacedName(e.ClaimRef)
-		if claim != "" {
-			l[ClaimLabel] = claim
-		}
-	}
-	return l
-}
-
-// synthAnnotations carries the opaque node-local handles a synthesized Sandbox
-// needs but that are not selector axes — the sandboxd claim id, which Delete
-// uses to release the right microVM. Nil when the node has not published an id
-// yet, so Delete refuses to release rather than guessing by name.
-func synthAnnotations(e InventoryEntry) map[string]string {
-	if e.ID == "" {
-		return nil
-	}
-	return map[string]string{ClaimIDAnnotation: e.ID}
-}
-
-func sandboxFields(sb *sandboxv1beta1.Sandbox) fields.Set {
-	return fields.Set{
-		"metadata.name":      sb.Name,
-		"metadata.namespace": sb.Namespace,
-		"status.nodeName":    sb.Status.NodeName,
-	}
-}
-
-func readyStatus(phase string) metav1.ConditionStatus {
-	if strings.EqualFold(phase, "Running") || strings.EqualFold(phase, "Ready") {
-		return metav1.ConditionTrue
-	}
-	return metav1.ConditionFalse
-}
-
-func readyReason(phase string) string {
-	if phase == "" {
-		return "Unknown"
-	}
-	return phase
-}
-
-// resourceVersionFor derives a deterministic, content-sensitive ResourceVersion
-// so watch can detect a Modified entry and clients see a stable version for an
-// unchanged one. It is opaque, as the API contract requires.
-func resourceVersionFor(ns, name string, e InventoryEntry) string {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address))
-	return strconv.FormatUint(h.Sum64(), 10)
-}
-
-func splitNamespacedName(s string) (namespace, name string) {
-	if before, after, ok := strings.Cut(s, "/"); ok {
-		return before, after
-	}
-	return metav1.NamespaceDefault, s
-}
-
-func objKey(sb *sandboxv1beta1.Sandbox) string { return sb.Namespace + "/" + sb.Name }
-
 // inventoryWatcher is a watch.Interface fed by the store's poll-diff goroutine.
 type inventoryWatcher struct {
 	result chan watch.Event
@@ -900,3 +762,141 @@ func (s *ClientInventorySource) NodeInventory(ctx context.Context, node string) 
 	}
 	return inv, nil
 }
+
+// fanOutNodes enumerates the node inventories and runs work per node with
+// List's bounded concurrency, concatenating per-node results in node order.
+// A node the work skips contributes nil.
+func fanOutNodes[T any](ctx context.Context, s *scatterGatherStore, work func(ctx context.Context, node string) []T) ([]T, error) {
+	nodes, err := s.src.ListNodes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
+	}
+	perNode := make([][]T, len(nodes))
+	g, gctx := errgroup.WithContext(ctx)
+	if s.concurrency > 0 {
+		g.SetLimit(s.concurrency)
+	}
+	for i, node := range nodes {
+		g.Go(func() error {
+			perNode[i] = work(gctx, node)
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return slices.Concat(perNode...), nil
+}
+
+// poolCapacityMatches reports whether a node's advertised pool capacity serves the
+// requested pool key, normalizing the net/size defaults on both sides so an unset
+// axis matches its default-named pool.
+func poolCapacityMatches(pc PoolCapacity, key PoolKey) bool {
+	return pc.Template == key.Template &&
+		cmp.Or(pc.Net, NetDefault) == cmp.Or(key.Net, NetDefault) &&
+		cmp.Or(pc.Size, SizeClassSmall) == cmp.Or(key.Size, SizeClassSmall)
+}
+
+// parseSelectors turns the string selectors on ListOptions into matchers. Empty
+// strings become everything-matchers.
+func parseSelectors(opts ListOptions) (labels.Selector, fields.Selector, error) {
+	labelSel, err := labels.Parse(opts.LabelSelector)
+	if err != nil {
+		return nil, nil, fmt.Errorf("scale: parse label selector %q: %w", opts.LabelSelector, err)
+	}
+	fieldSel, err := fields.ParseSelector(opts.FieldSelector)
+	if err != nil {
+		return nil, nil, fmt.Errorf("scale: parse field selector %q: %w", opts.FieldSelector, err)
+	}
+	return labelSel, fieldSel, nil
+}
+
+// entryToSandbox synthesizes the Sandbox object served for one inventory entry.
+// The entry name is the sandbox's "<namespace>/<name>"; an unqualified name
+// lands in the default namespace.
+func entryToSandbox(node string, e InventoryEntry) *sandboxv1beta1.Sandbox {
+	ns, name := splitNamespacedName(e.Name)
+	sb := &sandboxv1beta1.Sandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:       ns,
+			Name:            name,
+			Labels:          synthLabels(node, e),
+			Annotations:     synthAnnotations(e),
+			ResourceVersion: resourceVersionFor(ns, name, e),
+		},
+		Status: sandboxv1beta1.SandboxStatus{
+			NodeName: node,
+			PodIPs:   AddressIPs(e.Address),
+			Conditions: []metav1.Condition{{
+				Type:    string(sandboxv1beta1.SandboxConditionReady),
+				Status:  readyStatus(e.Phase),
+				Reason:  readyReason(e.Phase),
+				Message: fmt.Sprintf("phase %q reported by node %q inventory", e.Phase, node),
+			}},
+		},
+	}
+	return sb
+}
+
+func synthLabels(node string, e InventoryEntry) map[string]string {
+	l := map[string]string{NodeLabel: node}
+	if e.Phase != "" {
+		l[PhaseLabel] = e.Phase
+	}
+	if e.ClaimRef != "" {
+		_, claim := splitNamespacedName(e.ClaimRef)
+		if claim != "" {
+			l[ClaimLabel] = claim
+		}
+	}
+	return l
+}
+
+// synthAnnotations carries the opaque node-local handles a synthesized Sandbox
+// needs but that are not selector axes — the sandboxd claim id, which Delete
+// uses to release the right microVM. Nil when the node has not published an id
+// yet, so Delete refuses to release rather than guessing by name.
+func synthAnnotations(e InventoryEntry) map[string]string {
+	if e.ID == "" {
+		return nil
+	}
+	return map[string]string{ClaimIDAnnotation: e.ID}
+}
+
+func sandboxFields(sb *sandboxv1beta1.Sandbox) fields.Set {
+	return fields.Set{
+		"metadata.name":      sb.Name,
+		"metadata.namespace": sb.Namespace,
+		"status.nodeName":    sb.Status.NodeName,
+	}
+}
+
+func readyStatus(phase string) metav1.ConditionStatus {
+	if strings.EqualFold(phase, "Running") || strings.EqualFold(phase, "Ready") {
+		return metav1.ConditionTrue
+	}
+	return metav1.ConditionFalse
+}
+
+func readyReason(phase string) string {
+	if phase == "" {
+		return "Unknown"
+	}
+	return phase
+}
+
+// resourceVersionFor derives a deterministic, content-sensitive ResourceVersion
+// so watch can detect a Modified entry and clients see a stable version for an
+// unchanged one. It is opaque, as the API contract requires.
+func resourceVersionFor(ns, name string, e InventoryEntry) string {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address))
+	return strconv.FormatUint(h.Sum64(), 10)
+}
+
+func splitNamespacedName(s string) (namespace, name string) {
+	if before, after, ok := strings.Cut(s, "/"); ok {
+		return before, after
+	}
+	return metav1.NamespaceDefault, s
+}
+
+func objKey(sb *sandboxv1beta1.Sandbox) string { return sb.Namespace + "/" + sb.Name }

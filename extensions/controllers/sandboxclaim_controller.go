@@ -112,6 +112,12 @@ type triggeredAdoptionEntry struct {
 	sandbox string
 }
 
+// failure is the reason/message pair behind a not-Ready claim.
+type failure struct {
+	reason  string
+	message string
+}
+
 // SandboxClaimReconciler reconciles a SandboxClaim object.
 type SandboxClaimReconciler struct {
 	client.Client
@@ -558,12 +564,6 @@ func (r *SandboxClaimReconciler) updateStatus(ctx context.Context, oldStatus *ex
 		"namespace", claim.Namespace,
 		"observedGeneration", claim.Generation)
 	return nil
-}
-
-// failure is the reason/message pair behind a not-Ready claim.
-type failure struct {
-	reason  string
-	message string
 }
 
 func (r *SandboxClaimReconciler) computeReadyCondition(claim *extensionsv1beta1.SandboxClaim, sandbox *v1beta1.Sandbox, err error, isClaimExpired bool) metav1.Condition {
@@ -1694,6 +1694,29 @@ func (h *sandboxEventHandler) Generic(_ context.Context, _ event.GenericEvent, _
 	// Generic events are not typically used for pod lifecycle changes we care about.
 }
 
+func (h *sandboxEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	sandbox, ok := e.Object.(*v1beta1.Sandbox)
+	if !ok {
+		return
+	}
+
+	warmPoolName := getWarmPoolName(sandbox)
+
+	if warmPoolName != "" {
+		key := queue.SandboxKey{
+			Namespace: sandbox.Namespace,
+			Name:      sandbox.Name,
+		}
+
+		namespacedWarmPoolName := queue.GetNamespacedWarmPoolName(sandbox.Namespace, warmPoolName)
+
+		// Actively delete the Ghost Pod from the memory queue
+		logger := log.FromContext(ctx)
+		logger.V(1).Info("Removing deleted sandbox from warm pool queue", "namespace", sandbox.Namespace, "sandbox", key)
+		h.sandboxQueue.RemoveItem(namespacedWarmPoolName, key)
+	}
+}
+
 func verifySandboxCandidate(candidate *v1beta1.Sandbox, claim *extensionsv1beta1.SandboxClaim) error {
 	if candidate.Namespace != claim.Namespace {
 		return fmt.Errorf("%w: sandbox is in %q, claim is in %q", ErrCrossNamespaceAdoption, candidate.Namespace, claim.Namespace)
@@ -1729,29 +1752,6 @@ func isAdoptable(candidate *v1beta1.Sandbox) error {
 		return fmt.Errorf("sandbox %s/%s is not managed by warm pool. Controller: %v", candidate.Namespace, candidate.Name, controllerRef)
 	}
 	return nil
-}
-
-func (h *sandboxEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-	sandbox, ok := e.Object.(*v1beta1.Sandbox)
-	if !ok {
-		return
-	}
-
-	warmPoolName := getWarmPoolName(sandbox)
-
-	if warmPoolName != "" {
-		key := queue.SandboxKey{
-			Namespace: sandbox.Namespace,
-			Name:      sandbox.Name,
-		}
-
-		namespacedWarmPoolName := queue.GetNamespacedWarmPoolName(sandbox.Namespace, warmPoolName)
-
-		// Actively delete the Ghost Pod from the memory queue
-		logger := log.FromContext(ctx)
-		logger.V(1).Info("Removing deleted sandbox from warm pool queue", "namespace", sandbox.Namespace, "sandbox", key)
-		h.sandboxQueue.RemoveItem(namespacedWarmPoolName, key)
-	}
 }
 
 type warmPoolEventHandler struct {

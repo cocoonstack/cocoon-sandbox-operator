@@ -57,6 +57,22 @@ import (
 
 var setupLog = ctrl.Log.WithName("setup")
 
+func main() {
+	var o options
+	o.bindFlags()
+	flag.Parse()
+
+	if o.printVersion {
+		fmt.Println(version.Print("sandbox-operator"))
+		return
+	}
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&o.zap)))
+	if err := o.run(); err != nil {
+		setupLog.Error(err, "sandbox-operator exited")
+		os.Exit(1)
+	}
+}
+
 // options holds every operator flag. It is one struct so main stays a
 // sequence of named phases rather than a 400-line body.
 type options struct {
@@ -155,22 +171,6 @@ func (o *options) totalWorkers() int {
 	return o.sandboxWorkers + o.claimWorkers + o.warmPoolWorkers + o.templateWorkers
 }
 
-func main() {
-	var o options
-	o.bindFlags()
-	flag.Parse()
-
-	if o.printVersion {
-		fmt.Println(version.Print("sandbox-operator"))
-		return
-	}
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&o.zap)))
-	if err := o.run(); err != nil {
-		setupLog.Error(err, "sandbox-operator exited")
-		os.Exit(1)
-	}
-}
-
 func (o *options) run() error {
 	if err := o.validate(); err != nil {
 		return err
@@ -267,15 +267,6 @@ func (o *options) logSettings() {
 	if o.enableLeaderElection && o.leaderElectionNamespace == "" {
 		setupLog.V(1).Info("leader election is enabled (--leader-elect=true), but --leader-election-namespace is empty; attempting auto-detection")
 	}
-}
-
-func setupTracing(ctx context.Context, enabled bool) (asmetrics.Instrumenter, func(), error) {
-	if !enabled {
-		return asmetrics.NewNoOp(), func() {}, nil
-	}
-	initCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	return asmetrics.SetupOTel(initCtx, "sandbox-operator")
 }
 
 func (o *options) pprofHandlers() map[string]http.Handler {
@@ -405,6 +396,15 @@ func (o *options) setupExtensionControllers(mgr ctrl.Manager, instrumenter asmet
 		}
 	}
 	return nil
+}
+
+func setupTracing(ctx context.Context, enabled bool) (asmetrics.Instrumenter, func(), error) {
+	if !enabled {
+		return asmetrics.NewNoOp(), func() {}, nil
+	}
+	initCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return asmetrics.SetupOTel(initCtx, "sandbox-operator")
 }
 
 // readAllowedLabelDomains reads the optional label-domain allowlist mounted by
