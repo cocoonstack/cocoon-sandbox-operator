@@ -306,17 +306,6 @@ func (s *Server) nodesWithSandboxes(r *http.Request) ([]string, error) {
 	return s.opts.Inventory.ListNodes(r.Context())
 }
 
-// decodeOptional decodes a JSON body that the schema allows to be absent. An
-// empty body leaves the target at its zero value rather than failing, which is
-// what pause and fork require.
-func decodeOptional(w http.ResponseWriter, r *http.Request, out any) error {
-	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(out)
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-	return err
-}
-
 // isPaused reports whether the sandbox is hibernated, asking its owning node
 // rather than trusting the synthesized read view.
 //
@@ -337,6 +326,17 @@ func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) bool 
 		}
 	}
 	return sb.Labels[scale.PhaseLabel] == phaseHibernated
+}
+
+// decodeOptional decodes a JSON body that the schema allows to be absent. An
+// empty body leaves the target at its zero value rather than failing, which is
+// what pause and fork require.
+func decodeOptional(w http.ResponseWriter, r *http.Request, out any) error {
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(out)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
 }
 
 // claimIDOf reports the node-local claim id the store's verbs address.

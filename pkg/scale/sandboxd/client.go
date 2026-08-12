@@ -39,15 +39,6 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("sandboxd: http %d", e.StatusCode)
 }
 
-// Client talks to a single sandboxd instance. It is safe for concurrent use.
-type Client struct {
-	baseURL string
-	// token is the node api_token (root or tenant) presented on the claim verb.
-	// Release authenticates with the sandbox's own token, passed per call.
-	token string
-	hc    *http.Client
-}
-
 // Option configures a Client.
 type Option func(*Client)
 
@@ -57,20 +48,6 @@ type Option func(*Client)
 // call with the context instead.
 func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Client) { c.hc = hc }
-}
-
-// New returns a Client for the sandboxd at baseURL, authenticating resource verbs
-// with the node api_token (may be empty when sandboxd runs without auth).
-func New(baseURL, token string, opts ...Option) *Client {
-	c := &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		token:   token,
-		hc:      &http.Client{},
-	}
-	for _, o := range opts {
-		o(c)
-	}
-	return c
 }
 
 // ClaimSpec is the POST /v1/claim body. Net defaults to "none" and Size to
@@ -101,6 +78,58 @@ type ClaimResult struct {
 	// Redirect, when non-empty on a 200, names warm peers to retry at instead of a
 	// delivered sandbox. Claim treats this as a capacity miss (see ErrNodeAtCapacity).
 	Redirect []string `json:"redirect,omitempty"`
+}
+
+// PoolSpec is one entry of the PUT /v1/pools body: the desired warm watermark
+// for a single (template, net, size) pool on this node. It mirrors the claim
+// key so a SandboxWarmPool's target lands on the exact pool a Create claims from.
+type PoolSpec struct {
+	Template string `json:"template"`
+	Net      string `json:"net,omitempty"`
+	Size     string `json:"size,omitempty"`
+	Warm     int    `json:"warm"`
+}
+
+// NodePool is one pool's live state in a NodeInfo. Only the fields the
+// warm-pool driver reports on are decoded.
+type NodePool struct {
+	Key       PoolKey `json:"key"`
+	Warm      int     `json:"warm"`
+	Refilling int     `json:"refilling"`
+	Target    int     `json:"target"`
+	Golden    bool    `json:"golden"`
+}
+
+// NodeInfo is the PUT /v1/pools (and GET /v1/info) response: the node's live
+// per-pool warm state plus its lifecycle counters.
+type NodeInfo struct {
+	Pools      []NodePool `json:"pools"`
+	Claimed    int        `json:"claimed"`
+	Hibernated int        `json:"hibernated"`
+	Archived   int        `json:"archived"`
+}
+
+// Client talks to a single sandboxd instance. It is safe for concurrent use.
+type Client struct {
+	baseURL string
+	// token is the node api_token (root or tenant) presented on the claim verb.
+	// Release authenticates with the sandbox's own token, passed per call.
+	token string
+	hc    *http.Client
+}
+
+// New returns a Client for the sandboxd at baseURL, authenticating resource verbs
+// with the node api_token (may be empty when sandboxd runs without auth).
+func New(baseURL, token string, opts ...Option) *Client {
+	c := &Client{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		token:   token,
+		hc:      &http.Client{},
+	}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 // Claim performs POST /v1/claim, returning the delivered sandbox on success.
@@ -140,35 +169,6 @@ func (c *Client) Claim(ctx context.Context, spec ClaimSpec) (ClaimResult, error)
 	default:
 		return ClaimResult{}, statusError(resp)
 	}
-}
-
-// PoolSpec is one entry of the PUT /v1/pools body: the desired warm watermark
-// for a single (template, net, size) pool on this node. It mirrors the claim
-// key so a SandboxWarmPool's target lands on the exact pool a Create claims from.
-type PoolSpec struct {
-	Template string `json:"template"`
-	Net      string `json:"net,omitempty"`
-	Size     string `json:"size,omitempty"`
-	Warm     int    `json:"warm"`
-}
-
-// NodePool is one pool's live state in a NodeInfo. Only the fields the
-// warm-pool driver reports on are decoded.
-type NodePool struct {
-	Key       PoolKey `json:"key"`
-	Warm      int     `json:"warm"`
-	Refilling int     `json:"refilling"`
-	Target    int     `json:"target"`
-	Golden    bool    `json:"golden"`
-}
-
-// NodeInfo is the PUT /v1/pools (and GET /v1/info) response: the node's live
-// per-pool warm state plus its lifecycle counters.
-type NodeInfo struct {
-	Pools      []NodePool `json:"pools"`
-	Claimed    int        `json:"claimed"`
-	Hibernated int        `json:"hibernated"`
-	Archived   int        `json:"archived"`
 }
 
 // SetPools performs PUT /v1/pools, replacing this node's desired warm targets
