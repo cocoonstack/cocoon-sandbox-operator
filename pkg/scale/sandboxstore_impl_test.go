@@ -12,8 +12,11 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
 func TestScatterGatherList_FlattensAllNodes(t *testing.T) {
@@ -269,6 +272,30 @@ func TestWatchSeesAShortLivedSandbox(t *testing.T) {
 			t.Fatal("a short-lived sandbox produced no event")
 		}
 	}
+}
+
+func TestSSAApplier_UpsertsOneObjectPerNode(t *testing.T) {
+	ctx := t.Context()
+	cli := fake.NewClientBuilder().WithScheme(newScaleScheme(t)).Build()
+	pub := NewNodeInventoryPublisher("n1", sliceLive{entry("ns/a", "Running")},
+		NewSSAInventoryApplier(cli, "vk-test"), logr.Discard())
+
+	_, err := pub.Publish(ctx)
+	require.NoError(t, err)
+
+	got := &extv1beta1.NodeInventory{}
+	require.NoError(t, cli.Get(ctx, client.ObjectKey{Name: "n1"}, got))
+	require.Len(t, got.Entries, 1)
+
+	pub = NewNodeInventoryPublisher("n1", sliceLive{entry("ns/a", "Running"), entry("ns/b", "Running")},
+		NewSSAInventoryApplier(cli, "vk-test"), logr.Discard())
+	_, err = pub.Publish(ctx)
+	require.NoError(t, err)
+
+	list := &extv1beta1.NodeInventoryList{}
+	require.NoError(t, cli.List(ctx, list))
+	require.Len(t, list.Items, 1)
+	assert.Len(t, list.Items[0].Entries, 2)
 }
 
 func inv(node string, entries ...InventoryEntry) *NodeInventory {
