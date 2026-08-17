@@ -32,7 +32,7 @@ func TestDelete_ReleasesByClaimIDAnnotation(t *testing.T) {
 	store := &fakeStore{getSandbox: sb}
 	r := NewSandboxREST(store).(*sandboxREST)
 
-	obj, ok, err := r.Delete(deleteCtx(t, "ns"), "s1", nil, &metav1.DeleteOptions{})
+	obj, ok, err := r.Delete(nsCtx(t, "ns"), "s1", nil, &metav1.DeleteOptions{})
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.NotNil(t, obj)
@@ -52,15 +52,85 @@ func TestDelete_FailsLoudWithoutClaimID(t *testing.T) {
 	store := &fakeStore{getSandbox: sb}
 	r := NewSandboxREST(store).(*sandboxREST)
 
-	_, ok, err := r.Delete(deleteCtx(t, "ns"), "s1", nil, &metav1.DeleteOptions{})
+	_, ok, err := r.Delete(nsCtx(t, "ns"), "s1", nil, &metav1.DeleteOptions{})
 	require.Error(t, err)
 	assert.False(t, ok)
 	assert.True(t, apierrors.IsInternalError(err), "expected an internal error, got %v", err)
 	assert.False(t, store.released, "must not release when the sandboxd claim id is unknown")
 }
 
-// fakeStore is a scale.SandboxStore stub for the Delete path: Get returns a
-// preset sandbox, Release records its arguments. The read-path verbs are unused.
+func TestTTLSecondsForSandbox(t *testing.T) {
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	for name, tc := range map[string]struct {
+		shutdown time.Time
+		ttl      string
+		want     int
+		wantErr  bool
+	}{
+		"shutdownTime":                        {shutdown: now.Add(90 * time.Second), want: 90},
+		"sub-second rounds up":                {shutdown: now.Add(90*time.Second + 500*time.Millisecond), want: 91},
+		"annotation":                          {ttl: "120", want: 120},
+		"spec wins over annotation":           {shutdown: now.Add(time.Hour), ttl: "10", want: 3600},
+		"explicit zero asks the node default": {ttl: "0"},
+		"no lifetime asks the node default":   {},
+		"expired shutdownTime":                {shutdown: now, wantErr: true},
+		"malformed annotation":                {ttl: "banana", wantErr: true},
+		"negative annotation":                 {ttl: "-5", wantErr: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sb := submittedSandbox("s", nil)
+			if tc.ttl != "" {
+				sb.Annotations = map[string]string{TTLSecondsAnnotation: tc.ttl}
+			}
+			if !tc.shutdown.IsZero() {
+				sb.Spec.ShutdownTime = &metav1.Time{Time: tc.shutdown}
+			}
+			got, err := ttlSecondsForSandbox(sb, now)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestCreate_TTLRidesTheClaim(t *testing.T) {
+	f := &fakeStore{claimAssign: scale.Assignment{SandboxName: "sb_1", Node: "n1"}}
+	r := NewSandboxREST(f).(*sandboxREST)
+
+	_, err := r.Create(nsCtx(t, "ns"), submittedSandbox("s1", map[string]string{TTLSecondsAnnotation: "120"}), nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 120, f.claimTTL, "the derived lease must reach the store")
+}
+
+func TestCreate_RejectsUnusableLifetime(t *testing.T) {
+	f := &fakeStore{}
+	r := NewSandboxREST(f).(*sandboxREST)
+
+	_, err := r.Create(nsCtx(t, "ns"), submittedSandbox("s1", map[string]string{TTLSecondsAnnotation: "banana"}), nil, nil)
+	require.Error(t, err)
+	assert.True(t, apierrors.IsBadRequest(err), "expected BadRequest, got %v", err)
+	assert.Equal(t, 0, f.claimCalls, "no claim may be spent on a rejected request")
+}
+
+func TestCreate_EchoesGrantedDeadline(t *testing.T) {
+	deadline := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	f := &fakeStore{claimAssign: scale.Assignment{SandboxName: "sb_1", Node: "n1", Deadline: deadline}}
+	r := NewSandboxREST(f).(*sandboxREST)
+
+	obj, err := r.Create(nsCtx(t, "ns"), submittedSandbox("s1", map[string]string{TTLSecondsAnnotation: "999999"}), nil, nil)
+	require.NoError(t, err)
+	out, ok := obj.(*sandboxv1beta1.Sandbox)
+	require.True(t, ok)
+	require.NotNil(t, out.Spec.ShutdownTime)
+	assert.True(t, out.Spec.ShutdownTime.Time.Equal(deadline),
+		"spec.shutdownTime = %s, want the node-granted deadline %s", out.Spec.ShutdownTime, deadline)
+}
+
+// fakeStore is a scale.SandboxStore stub: Get returns a preset sandbox, Claim
+// and Release record their arguments. The read-path verbs are unused.
 type fakeStore struct {
 	getSandbox *sandboxv1beta1.Sandbox
 	getErr     error
@@ -128,101 +198,12 @@ func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, 
 	return scale.SandboxStats{}, nil
 }
 
-func deleteCtx(t *testing.T, ns string) context.Context {
+func nsCtx(t *testing.T, ns string) context.Context {
 	return genericapirequest.WithNamespace(t.Context(), ns)
 }
 
-// submittedSandbox builds the minimal Sandbox a client POSTs to Create: a name
-// plus one container image for the pool key, with optional annotations.
 func submittedSandbox(name string, anns map[string]string) *sandboxv1beta1.Sandbox {
 	sb := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: anns}}
 	sb.Spec.PodTemplate.Spec.Containers = []corev1.Container{{Name: "c", Image: "img"}}
 	return sb
-}
-
-// withShutdown returns sb with spec.shutdownTime set to t.
-func withShutdown(sb *sandboxv1beta1.Sandbox, t time.Time) *sandboxv1beta1.Sandbox {
-	sb.Spec.ShutdownTime = &metav1.Time{Time: t}
-	return sb
-}
-
-// TestTTLSecondsForSandbox pins the lease derivation against a fixed clock:
-// spec.shutdownTime wins and rounds up to whole seconds, the annotation covers
-// clients that cannot set the field, and unusable lifetimes are errors so
-// Create can 400 before a warm microVM is spent.
-func TestTTLSecondsForSandbox(t *testing.T) {
-	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
-	for name, tc := range map[string]struct {
-		sb      *sandboxv1beta1.Sandbox
-		want    int
-		wantErr bool
-	}{
-		"shutdownTime":         {sb: withShutdown(submittedSandbox("s", nil), now.Add(90*time.Second)), want: 90},
-		"sub-second rounds up": {sb: withShutdown(submittedSandbox("s", nil), now.Add(90*time.Second+500*time.Millisecond)), want: 91},
-		"annotation":           {sb: submittedSandbox("s", map[string]string{TTLSecondsAnnotation: "120"}), want: 120},
-		"spec wins over annotation": {
-			sb:   withShutdown(submittedSandbox("s", map[string]string{TTLSecondsAnnotation: "10"}), now.Add(time.Hour)),
-			want: 3600,
-		},
-		"explicit zero asks the node default": {sb: submittedSandbox("s", map[string]string{TTLSecondsAnnotation: "0"}), want: 0},
-		"no lifetime asks the node default":   {sb: submittedSandbox("s", nil), want: 0},
-		"expired shutdownTime":                {sb: withShutdown(submittedSandbox("s", nil), now), wantErr: true},
-		"malformed annotation":                {sb: submittedSandbox("s", map[string]string{TTLSecondsAnnotation: "banana"}), wantErr: true},
-		"negative annotation":                 {sb: submittedSandbox("s", map[string]string{TTLSecondsAnnotation: "-5"}), wantErr: true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			got, err := ttlSecondsForSandbox(tc.sb, now)
-			if tc.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-// TestCreate_TTLRidesTheClaim proves the derived lease reaches the store — the
-// wiring the fixed-clock table cannot see. Before this fix Create claimed with
-// a hardcoded 0 and every k8s-created sandbox got sandboxd's default lease.
-func TestCreate_TTLRidesTheClaim(t *testing.T) {
-	f := &fakeStore{claimAssign: scale.Assignment{SandboxName: "sb_1", Node: "n1"}}
-	r := NewSandboxREST(f).(*sandboxREST)
-
-	_, err := r.Create(deleteCtx(t, "ns"), submittedSandbox("s1", map[string]string{TTLSecondsAnnotation: "120"}), nil, nil)
-	require.NoError(t, err)
-	assert.Equal(t, 120, f.claimTTL)
-
-	_, err = r.Create(deleteCtx(t, "ns"), submittedSandbox("s2", nil), nil, nil)
-	require.NoError(t, err)
-	assert.Equal(t, 0, f.claimTTL, "no submitted lifetime asks for the node default")
-}
-
-// TestCreate_RejectsUnusableLifetime: a bad lifetime 400s before any microVM
-// is claimed; the derivation table above covers the full reject matrix.
-func TestCreate_RejectsUnusableLifetime(t *testing.T) {
-	f := &fakeStore{}
-	r := NewSandboxREST(f).(*sandboxREST)
-
-	_, err := r.Create(deleteCtx(t, "ns"), submittedSandbox("s1", map[string]string{TTLSecondsAnnotation: "banana"}), nil, nil)
-	require.Error(t, err)
-	assert.True(t, apierrors.IsBadRequest(err), "expected BadRequest, got %v", err)
-	assert.Equal(t, 0, f.claimCalls, "no claim may be spent on a rejected request")
-}
-
-// TestCreate_EchoesGrantedDeadline: the node fixes the real expiry (clamping to
-// its default and maximum), so the returned object must report the node's
-// deadline as spec.shutdownTime rather than echoing what the caller submitted.
-func TestCreate_EchoesGrantedDeadline(t *testing.T) {
-	deadline := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
-	f := &fakeStore{claimAssign: scale.Assignment{SandboxName: "sb_1", Node: "n1", Deadline: deadline}}
-	r := NewSandboxREST(f).(*sandboxREST)
-
-	obj, err := r.Create(deleteCtx(t, "ns"), submittedSandbox("s1", map[string]string{TTLSecondsAnnotation: "999999"}), nil, nil)
-	require.NoError(t, err)
-	out, ok := obj.(*sandboxv1beta1.Sandbox)
-	require.True(t, ok)
-	require.NotNil(t, out.Spec.ShutdownTime)
-	assert.True(t, out.Spec.ShutdownTime.Time.Equal(deadline),
-		"spec.shutdownTime = %s, want the node-granted deadline %s", out.Spec.ShutdownTime, deadline)
 }

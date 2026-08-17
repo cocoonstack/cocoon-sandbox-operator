@@ -70,10 +70,8 @@ type ClaimSpec struct {
 
 // ClaimResult is the POST /v1/claim success body.
 type ClaimResult struct {
-	ID    string `json:"id"`
-	Token string `json:"token"`
-	// Deadline is the granted lease expiry — the node's answer, not an echo of
-	// the requested TTL (see scale.Assignment.Deadline).
+	ID        string    `json:"id"`
+	Token     string    `json:"token"`
 	Deadline  time.Time `json:"deadline"`
 	OwnerAddr string    `json:"owner_addr"`
 	// FromCheckpoint is the lineage edge when the claim branched from a checkpoint.

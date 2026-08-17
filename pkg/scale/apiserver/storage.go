@@ -3,6 +3,7 @@ package apiserver
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -18,7 +19,6 @@ import (
 	"k8s.io/apiserver/pkg/storage/names"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	"github.com/cocoonstack/sandbox-operator/internal/lifecycle"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -39,9 +39,7 @@ const (
 	// NetAnnotation selects the pool network mode on Create (default "none").
 	NetAnnotation = "sandbox.cocoonstack.io/net"
 	// TTLSecondsAnnotation bounds the claim lease on Create for clients that
-	// cannot set spec.shutdownTime. Defined in package scale (single key for
-	// every surface that spells lifetime as an annotation); aliased here like
-	// ClaimIDAnnotation.
+	// cannot set spec.shutdownTime; aliased from scale like ClaimIDAnnotation.
 	TTLSecondsAnnotation = scale.TTLSecondsAnnotation
 )
 
@@ -130,9 +128,6 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 	}
 
 	pool := poolKeyForSandbox(sb)
-	// The submitted lifetime must ride the claim itself: nothing is stored, so
-	// this is the node's only chance to hear it. Rejecting before Claim keeps a
-	// bad request from spending a warm microVM.
 	ttlSeconds, err := ttlSecondsForSandbox(sb, time.Now())
 	if err != nil {
 		return nil, apierrors.NewBadRequest(err.Error())
@@ -217,18 +212,15 @@ func poolKeyForSandbox(sb *sandboxv1beta1.Sandbox) scale.PoolKey {
 	return scale.PoolKeyFor(sb.Spec.PodTemplate.Spec.Containers, sb.Annotations[NetAnnotation])
 }
 
-// ttlSecondsForSandbox derives the claim lease from a submitted Sandbox.
-// spec.shutdownTime — the API's own lifecycle field — wins; the ttl-seconds
-// annotation covers clients that cannot set it; 0 asks for the node default.
+// ttlSecondsForSandbox derives the claim lease: spec.shutdownTime wins, the
+// ttl-seconds annotation is the fallback, 0 asks for the node default.
 func ttlSecondsForSandbox(sb *sandboxv1beta1.Sandbox, now time.Time) (int, error) {
 	if t := sb.Spec.ShutdownTime; t != nil {
-		expired, left := lifecycle.TimeLeft(now, t, nil, nil)
-		if expired {
+		left := t.Sub(now)
+		if left <= 0 {
 			return 0, fmt.Errorf("spec.shutdownTime %s is not in the future", t.Format(time.RFC3339))
 		}
-		// Round up to whole wire seconds so a sub-second remainder cannot
-		// truncate a just-created sandbox to an instantly-expired lease.
-		return int((left + time.Second - 1) / time.Second), nil
+		return int(math.Ceil(left.Seconds())), nil
 	}
 	raw := sb.Annotations[TTLSecondsAnnotation]
 	if raw == "" {
@@ -263,16 +255,9 @@ func synthesizeClaimedSandbox(namespace, name string, in *sandboxv1beta1.Sandbox
 	if a.Token != "" {
 		out.Annotations[TokenAnnotation] = a.Token
 	}
-	// Report the node-granted expiry (see Assignment.Deadline), not the
-	// caller's ask — create-time defaulting, like any apiserver normalizing a
-	// submitted spec. Only this response carries it: the synthesized read path
-	// is built from node inventory, which does not publish deadlines.
+	// The node-granted expiry, not the caller's ask (see Assignment.Deadline).
 	if !a.Deadline.IsZero() {
-		if out.Spec.ShutdownTime != nil {
-			out.Spec.ShutdownTime.Time = a.Deadline
-		} else {
-			out.Spec.ShutdownTime = &metav1.Time{Time: a.Deadline}
-		}
+		out.Spec.ShutdownTime = &metav1.Time{Time: a.Deadline}
 	}
 	out.Status = sandboxv1beta1.SandboxStatus{
 		NodeName: a.Node,

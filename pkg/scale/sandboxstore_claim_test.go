@@ -32,9 +32,7 @@ func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 	assert.Equal(t, "uniform-token", f.builtToken)
 	assert.Equal(t, "img", f.claimSpec.Template)
 	assert.Equal(t, 600, f.claimSpec.TTLSeconds, "the caller's TTL must reach sandboxd")
-	// The node's granted deadline rides the assignment back: the node, not the
-	// caller, fixes the real expiry (default when unasked, clamped to its max).
-	assert.Equal(t, deadline, a.Deadline)
+	assert.Equal(t, deadline, a.Deadline, "the node-granted deadline must ride the assignment back")
 	// The claim carries the k8s "<namespace>/<name>" so the node echoes it into
 	// its operator index and the aggregated read path can resolve this sandbox.
 	assert.Equal(t, "ns/s1", f.claimSpec.ClaimRef)

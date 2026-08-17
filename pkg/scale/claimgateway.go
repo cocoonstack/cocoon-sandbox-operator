@@ -26,10 +26,8 @@ type Assignment struct {
 	// claim. It authenticates agent/exec against the delivered VM; the L3 Create
 	// path surfaces it as an annotation so a caller can exec into what it claimed.
 	Token string
-	// Deadline is when the granted lease expires, as reported by the owning
-	// node. It is authoritative over whatever TTL was requested: the node
-	// applies its default when none was asked and clamps to its own maximum.
-	// Zero when the node did not report one.
+	// Deadline is the node-granted lease expiry — authoritative over the requested
+	// TTL (node default when unasked, clamped to the node maximum); zero if unreported.
 	Deadline time.Time
 }
 
