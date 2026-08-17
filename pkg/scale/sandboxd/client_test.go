@@ -102,3 +102,23 @@ func TestReleaseSuccessAndAlreadyGone(t *testing.T) {
 	require.NoError(t, c.Release(t.Context(), "sb_abc", "sbtok"))
 	require.Equal(t, int64(2), releases.Load())
 }
+
+func TestInfo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/v1/info", r.URL.Path)
+		assert.Equal(t, "Bearer root-token", r.Header.Get("Authorization"), "info is a root-token operator surface")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"pools":[{"key":{"template":"base:24.04","net":"none","size":"small"},"warm":3,"refilling":1,"target":4}],"claimed":2,"hibernated":1,"archived":0,"peers":["10.0.0.6:7777"]}`))
+	}))
+	defer srv.Close()
+
+	info, err := New(srv.URL, "root-token").Info(t.Context())
+	require.NoError(t, err)
+	require.Len(t, info.Pools, 1)
+	assert.Equal(t, PoolKey{Template: "base:24.04", Net: "none", Size: "small"}, info.Pools[0].Key)
+	assert.Equal(t, 3, info.Pools[0].Warm)
+	assert.Equal(t, 4, info.Pools[0].Target)
+	assert.Equal(t, 2, info.Claimed)
+	assert.Equal(t, 1, info.Hibernated)
+}

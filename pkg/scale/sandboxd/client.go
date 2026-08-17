@@ -189,6 +189,16 @@ func (c *Client) SetPools(ctx context.Context, pools []PoolSpec) (*NodeInfo, err
 	return &info, nil
 }
 
+// Info performs GET /v1/info: the node's live per-pool warm state and lifecycle
+// counters, read without touching its pool config.
+func (c *Client) Info(ctx context.Context) (*NodeInfo, error) {
+	var info NodeInfo
+	if err := c.getJSON(ctx, "/v1/info", &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
 // Release performs POST /v1/sandboxes/{id}/release, which DESTROYS the VM. It
 // authenticates with the sandbox's own token. A 404 (unknown id or already gone)
 // is treated as success, matching the SDK. Callers must only reach this on
