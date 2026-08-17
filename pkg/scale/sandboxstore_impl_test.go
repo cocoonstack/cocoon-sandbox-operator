@@ -152,6 +152,17 @@ func TestEntryToSandbox_StampsClaimIDAnnotation(t *testing.T) {
 	assert.False(t, ok, "expected no claim-id annotation when the entry has no id")
 }
 
+func TestEntryToSandbox_StampsDeadlineAnnotation(t *testing.T) {
+	deadline := metav1.NewTime(time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC))
+	with := entryToSandbox("n1", InventoryEntry{Name: "ns/s1", ID: "sb_abc", Phase: "Running", Deadline: &deadline})
+	assert.Equal(t, "2026-08-17T12:00:00Z", with.Annotations[DeadlineAnnotation])
+	assert.NotEqual(t, entryToSandbox("n1", InventoryEntry{Name: "ns/s1", ID: "sb_abc", Phase: "Running"}).ResourceVersion,
+		with.ResourceVersion, "a refreshed deadline must surface as a Modified entry")
+
+	_, ok := entryToSandbox("n1", InventoryEntry{Name: "ns/s1", Phase: "Running"}).Annotations[DeadlineAnnotation]
+	assert.False(t, ok, "expected no deadline annotation when the node published none")
+}
+
 func TestScatterGatherWatch_EmitsAddModifyDelete(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(inv("n1", entry("ns/s1", "Pending")))

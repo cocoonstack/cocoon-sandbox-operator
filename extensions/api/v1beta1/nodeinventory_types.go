@@ -45,6 +45,9 @@ type InventoryEntry struct {
 	// addr is the sandbox "host:port" address, if published.
 	// +optional
 	Address string `json:"addr,omitempty"`
+	// deadline is the node-granted lease expiry, if published.
+	// +optional
+	Deadline *metav1.Time `json:"deadline,omitempty"`
 }
 
 // +kubebuilder:object:root=true

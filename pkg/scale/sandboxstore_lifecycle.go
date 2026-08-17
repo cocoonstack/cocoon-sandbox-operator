@@ -52,6 +52,7 @@ func (s *scatterGatherStore) Fork(ctx context.Context, node, id string, count, t
 			Node:        node,
 			Address:     c.OwnerAddr,
 			Token:       c.Token,
+			Deadline:    c.Deadline,
 		})
 	}
 	return out, nil
@@ -114,6 +115,7 @@ func (s *scatterGatherStore) ClaimSnapshot(ctx context.Context, node, snapshotID
 		Node:        node,
 		Address:     res.OwnerAddr,
 		Token:       res.Token,
+		Deadline:    res.Deadline,
 	}, nil
 }
 

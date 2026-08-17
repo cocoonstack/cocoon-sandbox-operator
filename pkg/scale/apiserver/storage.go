@@ -3,6 +3,9 @@ package apiserver
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -28,6 +31,9 @@ const (
 	// defined in package scale (whose store stamps it on synthesized reads); this
 	// alias keeps apiserver call sites writing and reading the identical key.
 	ClaimIDAnnotation = scale.ClaimIDAnnotation
+	// DeadlineAnnotation carries the node-granted lease expiry (RFC3339); the
+	// same scale-defined key the synthesized read path stamps from inventory.
+	DeadlineAnnotation = scale.DeadlineAnnotation
 	// AddressAnnotation carries the delivered sandbox connection address.
 	AddressAnnotation = "sandbox.cocoonstack.io/address"
 	// TokenAnnotation carries the per-sandbox ownership token so a caller can
@@ -35,6 +41,9 @@ const (
 	TokenAnnotation = "sandbox.cocoonstack.io/token"
 	// NetAnnotation selects the pool network mode on Create (default "none").
 	NetAnnotation = "sandbox.cocoonstack.io/net"
+	// TTLSecondsAnnotation bounds the claim lease in whole seconds on Create for
+	// clients that cannot set spec.shutdownTime (0 = the owning node's default).
+	TTLSecondsAnnotation = "sandbox.cocoonstack.io/ttl-seconds"
 )
 
 // The verb set an aggregated, scatter-gather resource implements: the read triad
@@ -122,7 +131,11 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 	}
 
 	pool := poolKeyForSandbox(sb)
-	assignment, err := r.store.Claim(ctx, namespace, name, pool, 0)
+	ttlSeconds, err := ttlSecondsForSandbox(sb, time.Now())
+	if err != nil {
+		return nil, apierrors.NewBadRequest(err.Error())
+	}
+	assignment, err := r.store.Claim(ctx, namespace, name, pool, ttlSeconds)
 	if err != nil {
 		if scale.IsNoWarmCapacity(err) {
 			// Retryable: warm capacity refills asynchronously (the node's sandboxd
@@ -202,10 +215,32 @@ func poolKeyForSandbox(sb *sandboxv1beta1.Sandbox) scale.PoolKey {
 	return scale.PoolKeyFor(sb.Spec.PodTemplate.Spec.Containers, sb.Annotations[NetAnnotation])
 }
 
+// ttlSecondsForSandbox derives the claim lease: spec.shutdownTime wins, the
+// ttl-seconds annotation is the fallback, 0 asks for the node default.
+func ttlSecondsForSandbox(sb *sandboxv1beta1.Sandbox, now time.Time) (int, error) {
+	if t := sb.Spec.ShutdownTime; t != nil {
+		left := t.Sub(now)
+		if left <= 0 {
+			return 0, fmt.Errorf("spec.shutdownTime %s is not in the future", t.Format(time.RFC3339))
+		}
+		return int(math.Ceil(left.Seconds())), nil
+	}
+	raw := sb.Annotations[TTLSecondsAnnotation]
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		return 0, fmt.Errorf("invalid %s=%q: want a non-negative integer of seconds", TTLSecondsAnnotation, raw)
+	}
+	return v, nil
+}
+
 // synthesizeClaimedSandbox builds the Sandbox object Create returns: the submitted
 // spec echoed back under the request name/namespace, a fresh UID/creationTimestamp,
-// the claim id + address annotations, and a Ready status pointing at the owning
-// node. It is never persisted — it is the response for a node-local claim.
+// the claim id + address + granted-deadline annotations, and a Ready status
+// pointing at the owning node. It is never persisted — it is the response for a
+// node-local claim.
 func synthesizeClaimedSandbox(namespace, name string, in *sandboxv1beta1.Sandbox, a scale.Assignment) *sandboxv1beta1.Sandbox {
 	out := in.DeepCopy()
 	out.Namespace = namespace
@@ -223,6 +258,9 @@ func synthesizeClaimedSandbox(namespace, name string, in *sandboxv1beta1.Sandbox
 	}
 	if a.Token != "" {
 		out.Annotations[TokenAnnotation] = a.Token
+	}
+	if !a.Deadline.IsZero() {
+		out.Annotations[DeadlineAnnotation] = a.Deadline.UTC().Format(time.RFC3339)
 	}
 	out.Status = sandboxv1beta1.SandboxStatus{
 		NodeName: a.Node,

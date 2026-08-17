@@ -141,8 +141,9 @@ A delivered sandbox also takes four action verbs, served as subresources so the
 standard `agents.x-k8s.io` schema stays untouched: `pause`, `resume`, `fork`,
 `snapshot`. They are not uniformly fast — `resume` and `fork` are node-local,
 while `pause`/`snapshot` cost time proportional to guest memory. Verb table,
-a runnable walk-through over both surfaces, and the two consistency behaviors
-callers must handle are in [docs/lifecycle.md](docs/lifecycle.md).
+a runnable walk-through over both surfaces, how a sandbox's lifetime is set
+and reported, and the two consistency behaviors callers must handle are in
+[docs/lifecycle.md](docs/lifecycle.md).
 
 ## Use it with the e2b SDK
 

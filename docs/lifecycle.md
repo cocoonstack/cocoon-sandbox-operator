@@ -61,6 +61,22 @@ prints what it did, so the output doubles as acceptance evidence:
   connect    201 — restored via the mmap fast path
 ```
 
+## Lifetime
+
+Nothing is stored for a claimed sandbox, so the lease is fixed by the node at
+claim time and the submitted object is the only place `Create` can hear it:
+
+- `spec.shutdownTime` wins, rounded up to whole seconds; the
+  `sandbox.cocoonstack.io/ttl-seconds` annotation covers clients that cannot
+  set the field; neither (or `0`) asks for the node's default lease.
+- A `shutdownTime` already in the past or a malformed/negative annotation is
+  a `400` before any warm microVM is spent.
+- The node clamps the ask to its own default and maximum, so the response
+  carries the **granted** expiry as the `sandbox.cocoonstack.io/deadline`
+  annotation (RFC3339) — the submitted spec is echoed untouched. `Get`/`List`
+  stamp the same annotation once the owning node publishes the deadline in
+  its `NodeInventory`.
+
 ## Two behaviors callers must handle
 
 - **Reads are eventually consistent.** `Create` returns as soon as the
