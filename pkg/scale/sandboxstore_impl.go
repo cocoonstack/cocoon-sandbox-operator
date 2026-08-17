@@ -52,6 +52,10 @@ const (
 	// by k8s name would target the wrong claim). This is the single definition of
 	// the key; apiserver.ClaimIDAnnotation aliases it so both write it identically.
 	ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+	// DeadlineAnnotation carries the node-granted lease expiry (RFC3339) of a
+	// Sandbox: stamped from inventory on reads and from the claim on Create.
+	// apiserver.DeadlineAnnotation aliases it.
+	DeadlineAnnotation = "sandbox.cocoonstack.io/deadline"
 
 	// Connection pooling for the node-local claim path. Idle conns per host are
 	// sized to the per-node claim fan-out so a burst reuses connections instead
@@ -880,15 +884,28 @@ func synthLabels(node string, e InventoryEntry) map[string]string {
 	return l
 }
 
-// synthAnnotations carries the opaque node-local handles a synthesized Sandbox
-// needs but that are not selector axes — the sandboxd claim id, which Delete
-// uses to release the right microVM. Nil when the node has not published an id
-// yet, so Delete refuses to release rather than guessing by name.
+// synthAnnotations carries the node-reported facts that are not selector axes:
+// the sandboxd claim id Delete releases by, and the granted deadline. Neither is
+// stamped until the node publishes it, so Delete never guesses a claim by name.
 func synthAnnotations(e InventoryEntry) map[string]string {
-	if e.ID == "" {
+	a := map[string]string{}
+	if e.ID != "" {
+		a[ClaimIDAnnotation] = e.ID
+	}
+	if d := deadlineValue(e); d != "" {
+		a[DeadlineAnnotation] = d
+	}
+	if len(a) == 0 {
 		return nil
 	}
-	return map[string]string{ClaimIDAnnotation: e.ID}
+	return a
+}
+
+func deadlineValue(e InventoryEntry) string {
+	if e.Deadline == nil || e.Deadline.IsZero() {
+		return ""
+	}
+	return e.Deadline.UTC().Format(time.RFC3339)
 }
 
 func sandboxFields(sb *sandboxv1beta1.Sandbox) fields.Set {
@@ -918,7 +935,7 @@ func readyReason(phase string) string {
 // unchanged one. It is opaque, as the API contract requires.
 func resourceVersionFor(ns, name string, e InventoryEntry) string {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address))
+	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address + "|" + deadlineValue(e)))
 	return strconv.FormatUint(h.Sum64(), 10)
 }
 

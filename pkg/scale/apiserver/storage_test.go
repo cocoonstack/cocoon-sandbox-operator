@@ -115,7 +115,7 @@ func TestCreate_RejectsUnusableLifetime(t *testing.T) {
 	assert.Equal(t, 0, f.claimCalls, "no claim may be spent on a rejected request")
 }
 
-func TestCreate_EchoesGrantedDeadline(t *testing.T) {
+func TestCreate_ReportsGrantedDeadline(t *testing.T) {
 	deadline := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
 	f := &fakeStore{claimAssign: scale.Assignment{SandboxName: "sb_1", Node: "n1", Deadline: deadline}}
 	r := NewSandboxREST(f).(*sandboxREST)
@@ -124,9 +124,8 @@ func TestCreate_EchoesGrantedDeadline(t *testing.T) {
 	require.NoError(t, err)
 	out, ok := obj.(*sandboxv1beta1.Sandbox)
 	require.True(t, ok)
-	require.NotNil(t, out.Spec.ShutdownTime)
-	assert.True(t, out.Spec.ShutdownTime.Time.Equal(deadline),
-		"spec.shutdownTime = %s, want the node-granted deadline %s", out.Spec.ShutdownTime, deadline)
+	assert.Equal(t, "2026-08-17T12:00:00Z", out.Annotations[DeadlineAnnotation], "the node-granted deadline, not the caller's ask")
+	assert.Nil(t, out.Spec.ShutdownTime, "the submitted spec is echoed, not rewritten")
 }
 
 // fakeStore is a scale.SandboxStore stub: Get returns a preset sandbox, Claim

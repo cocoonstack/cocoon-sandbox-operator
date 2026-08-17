@@ -31,6 +31,9 @@ const (
 	// defined in package scale (whose store stamps it on synthesized reads); this
 	// alias keeps apiserver call sites writing and reading the identical key.
 	ClaimIDAnnotation = scale.ClaimIDAnnotation
+	// DeadlineAnnotation carries the node-granted lease expiry (RFC3339); the
+	// same scale-defined key the synthesized read path stamps from inventory.
+	DeadlineAnnotation = scale.DeadlineAnnotation
 	// AddressAnnotation carries the delivered sandbox connection address.
 	AddressAnnotation = "sandbox.cocoonstack.io/address"
 	// TokenAnnotation carries the per-sandbox ownership token so a caller can
@@ -235,8 +238,9 @@ func ttlSecondsForSandbox(sb *sandboxv1beta1.Sandbox, now time.Time) (int, error
 
 // synthesizeClaimedSandbox builds the Sandbox object Create returns: the submitted
 // spec echoed back under the request name/namespace, a fresh UID/creationTimestamp,
-// the claim id + address annotations, and a Ready status pointing at the owning
-// node. It is never persisted — it is the response for a node-local claim.
+// the claim id + address + granted-deadline annotations, and a Ready status
+// pointing at the owning node. It is never persisted — it is the response for a
+// node-local claim.
 func synthesizeClaimedSandbox(namespace, name string, in *sandboxv1beta1.Sandbox, a scale.Assignment) *sandboxv1beta1.Sandbox {
 	out := in.DeepCopy()
 	out.Namespace = namespace
@@ -255,9 +259,8 @@ func synthesizeClaimedSandbox(namespace, name string, in *sandboxv1beta1.Sandbox
 	if a.Token != "" {
 		out.Annotations[TokenAnnotation] = a.Token
 	}
-	// The node-granted expiry, not the caller's ask (see Assignment.Deadline).
 	if !a.Deadline.IsZero() {
-		out.Spec.ShutdownTime = &metav1.Time{Time: a.Deadline}
+		out.Annotations[DeadlineAnnotation] = a.Deadline.UTC().Format(time.RFC3339)
 	}
 	out.Status = sandboxv1beta1.SandboxStatus{
 		NodeName: a.Node,

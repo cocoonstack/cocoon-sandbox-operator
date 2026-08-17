@@ -36,6 +36,9 @@ spec:
                   type: string
                 claimRef:
                   type: string
+                deadline:
+                  format: date-time
+                  type: string
                 id:
                   type: string
                 name:
