@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/require"
@@ -227,7 +228,9 @@ func newFakeSandboxd(t *testing.T) *fakeSandboxd {
 		id := fmt.Sprintf("sb_%d", f.nextID.Add(1))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(sandboxd.ClaimResult{
-			ID: id, Token: "tok_" + id, Deadline: "2026-07-06T00:05:00Z", OwnerAddr: "10.0.0.5:7777",
+			ID: id, Token: "tok_" + id,
+			Deadline:  time.Date(2026, 7, 6, 0, 5, 0, 0, time.UTC),
+			OwnerAddr: "10.0.0.5:7777",
 		})
 	})
 	mux.HandleFunc("/v1/sandboxes/", func(w http.ResponseWriter, r *http.Request) {

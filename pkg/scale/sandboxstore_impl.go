@@ -53,6 +53,14 @@ const (
 	// the key; apiserver.ClaimIDAnnotation aliases it so both write it identically.
 	ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
 
+	// TTLSecondsAnnotation bounds a claim's lease in whole seconds (0 = the
+	// owning node's default). Single definition for every surface that spells
+	// sandbox lifetime as an annotation: the aggregated apiserver reads it on
+	// Create (aliased there like ClaimIDAnnotation), and the key and semantics
+	// are the AnnTTLSeconds contract the vk-cocoon-sandbox provider
+	// (github.com/cocoonstack/vk-cocoon-sandbox) reads on pods.
+	TTLSecondsAnnotation = "sandbox.cocoonstack.io/ttl-seconds"
+
 	// Connection pooling for the node-local claim path. Idle conns per host are
 	// sized to the per-node claim fan-out so a burst reuses connections instead
 	// of handshaking; the timeout bounds a wedged sandboxd.
@@ -301,7 +309,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 			ClaimRef: namespace + "/" + name,
 		})
 		if claimErr == nil {
-			return Assignment{SandboxName: res.ID, Node: best.node, Address: res.OwnerAddr, Token: res.Token}, nil
+			return Assignment{SandboxName: res.ID, Node: best.node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline}, nil
 		}
 		if !errors.Is(claimErr, sandboxd.ErrNodeAtCapacity) {
 			return Assignment{}, fmt.Errorf("scale: claim %s/%s on node %q: %w", namespace, name, best.node, claimErr)

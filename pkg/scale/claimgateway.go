@@ -1,6 +1,9 @@
 package scale
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ClaimRequest identifies a node-local warm-pool claim.
 type ClaimRequest struct {
@@ -23,6 +26,11 @@ type Assignment struct {
 	// claim. It authenticates agent/exec against the delivered VM; the L3 Create
 	// path surfaces it as an annotation so a caller can exec into what it claimed.
 	Token string
+	// Deadline is when the granted lease expires, as reported by the owning
+	// node. It is authoritative over whatever TTL was requested: the node
+	// applies its default when none was asked and clamps to its own maximum.
+	// Zero when the node did not report one.
+	Deadline time.Time
 }
 
 // ClaimGateway is the L2 node-local fast path for warm-pool claims. A claim is

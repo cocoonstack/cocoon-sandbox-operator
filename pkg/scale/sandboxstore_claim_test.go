@@ -3,6 +3,7 @@ package scale
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -17,7 +18,8 @@ var _ SandboxdClient = (*recordingClient)(nil)
 func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n2", "10.0.0.2:7777", PoolCapacity{Template: "img", Warm: 4, Target: 5}))
-	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb-abc", Token: "sbtok", OwnerAddr: "10.0.0.2:9000"}}
+	deadline := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb-abc", Token: "sbtok", OwnerAddr: "10.0.0.2:9000", Deadline: deadline}}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("uniform-token", f.factory()))
 
 	a, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 600)
@@ -30,6 +32,9 @@ func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 	assert.Equal(t, "uniform-token", f.builtToken)
 	assert.Equal(t, "img", f.claimSpec.Template)
 	assert.Equal(t, 600, f.claimSpec.TTLSeconds, "the caller's TTL must reach sandboxd")
+	// The node's granted deadline rides the assignment back: the node, not the
+	// caller, fixes the real expiry (default when unasked, clamped to its max).
+	assert.Equal(t, deadline, a.Deadline)
 	// The claim carries the k8s "<namespace>/<name>" so the node echoes it into
 	// its operator index and the aggregated read path can resolve this sandbox.
 	assert.Equal(t, "ns/s1", f.claimSpec.ClaimRef)

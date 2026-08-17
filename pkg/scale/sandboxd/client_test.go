@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,9 @@ func TestClaimSuccess(t *testing.T) {
 		assert.Equal(t, "base:24.04", spec.Template)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(ClaimResult{
-			ID: "sb_abc", Token: "sbtok", Deadline: "2026-07-06T00:05:00Z", OwnerAddr: "10.0.0.5:7777",
+			ID: "sb_abc", Token: "sbtok",
+			Deadline:  time.Date(2026, 7, 6, 0, 5, 0, 0, time.UTC),
+			OwnerAddr: "10.0.0.5:7777",
 		})
 	}))
 	defer srv.Close()

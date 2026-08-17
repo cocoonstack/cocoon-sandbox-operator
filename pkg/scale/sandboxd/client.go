@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // ErrNodeAtCapacity is returned by Claim when sandboxd answers 429 (the node is
@@ -69,10 +70,12 @@ type ClaimSpec struct {
 
 // ClaimResult is the POST /v1/claim success body.
 type ClaimResult struct {
-	ID        string `json:"id"`
-	Token     string `json:"token"`
-	Deadline  string `json:"deadline"`
-	OwnerAddr string `json:"owner_addr"`
+	ID    string `json:"id"`
+	Token string `json:"token"`
+	// Deadline is the granted lease expiry — the node's answer, not an echo of
+	// the requested TTL (see scale.Assignment.Deadline).
+	Deadline  time.Time `json:"deadline"`
+	OwnerAddr string    `json:"owner_addr"`
 	// FromCheckpoint is the lineage edge when the claim branched from a checkpoint.
 	FromCheckpoint string `json:"from_checkpoint,omitempty"`
 	// Redirect, when non-empty on a 200, names warm peers to retry at instead of a

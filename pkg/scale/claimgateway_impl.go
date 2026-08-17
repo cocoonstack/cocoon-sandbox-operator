@@ -187,7 +187,7 @@ func (g *nodeClaimGateway) Claim(ctx context.Context, req ClaimRequest) (Assignm
 		return Assignment{}, fmt.Errorf("scale: sandboxd claim for %s/%s: %w", req.Namespace, req.ClaimName, err)
 	}
 
-	a := Assignment{SandboxName: res.ID, Node: g.node, Address: res.OwnerAddr, Token: res.Token}
+	a := Assignment{SandboxName: res.ID, Node: g.node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline}
 	g.mu.Lock()
 	g.holdings[a.SandboxName] = delivered{id: res.ID, token: res.Token}
 	g.mu.Unlock()
