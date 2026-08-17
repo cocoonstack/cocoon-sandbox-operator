@@ -38,9 +38,9 @@ const (
 	TokenAnnotation = "sandbox.cocoonstack.io/token"
 	// NetAnnotation selects the pool network mode on Create (default "none").
 	NetAnnotation = "sandbox.cocoonstack.io/net"
-	// TTLSecondsAnnotation bounds the claim lease on Create for clients that
-	// cannot set spec.shutdownTime; aliased from scale like ClaimIDAnnotation.
-	TTLSecondsAnnotation = scale.TTLSecondsAnnotation
+	// TTLSecondsAnnotation bounds the claim lease in whole seconds on Create for
+	// clients that cannot set spec.shutdownTime (0 = the owning node's default).
+	TTLSecondsAnnotation = "sandbox.cocoonstack.io/ttl-seconds"
 )
 
 // The verb set an aggregated, scatter-gather resource implements: the read triad

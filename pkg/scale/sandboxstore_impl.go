@@ -53,11 +53,6 @@ const (
 	// the key; apiserver.ClaimIDAnnotation aliases it so both write it identically.
 	ClaimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
 
-	// TTLSecondsAnnotation bounds a claim's lease in whole seconds (0 = the owning
-	// node's default) — the same key the vk-sandbox provider reads on pods; the
-	// aggregated apiserver aliases it and reads it on Create.
-	TTLSecondsAnnotation = "sandbox.cocoonstack.io/ttl-seconds"
-
 	// Connection pooling for the node-local claim path. Idle conns per host are
 	// sized to the per-node claim fan-out so a burst reuses connections instead
 	// of handshaking; the timeout bounds a wedged sandboxd.
