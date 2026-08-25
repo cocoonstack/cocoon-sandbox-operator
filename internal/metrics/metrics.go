@@ -120,21 +120,20 @@ var (
 		},
 		func() float64 { return 1 },
 	)
-)
 
-// Init registers custom metrics with the global controller-runtime registry.
-// Registration is tied to package variable initialization so no caller can observe an unregistered collector.
-var _ = func() bool {
-	metrics.Registry.MustRegister(
-		ClaimStartupLatency,
-		ClaimControllerStartupLatency,
-		SandboxCreationLatency,
-		SandboxClaimCreationTotal,
-		WarmPoolSandboxCreatedTotal,
-		BuildInfo,
-	)
-	return true
-}()
+	// Registration rides on package variable initialization so no caller can observe an unregistered collector.
+	_ = func() bool {
+		metrics.Registry.MustRegister(
+			ClaimStartupLatency,
+			ClaimControllerStartupLatency,
+			SandboxCreationLatency,
+			SandboxClaimCreationTotal,
+			WarmPoolSandboxCreatedTotal,
+			BuildInfo,
+		)
+		return true
+	}()
+)
 
 // IncWarmPoolSandboxCreated counts one Sandbox created by the warm-pool controller.
 func IncWarmPoolSandboxCreated(namespace, warmPoolName string) {

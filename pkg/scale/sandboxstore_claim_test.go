@@ -13,8 +13,6 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 )
 
-var _ SandboxdClient = (*recordingClient)(nil)
-
 func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n2", "10.0.0.2:7777", PoolCapacity{Template: "img", Warm: 4, Target: 5}))
@@ -244,6 +242,8 @@ func (f *recordingFactory) factory() SandboxdClientFactory {
 		return &recordingClient{f: f}
 	}
 }
+
+var _ SandboxdClient = (*recordingClient)(nil)
 
 type recordingClient struct{ f *recordingFactory }
 

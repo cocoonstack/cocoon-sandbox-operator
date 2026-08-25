@@ -132,6 +132,8 @@ type SandboxStats struct {
 // InventoryEntry is one live sandbox as summarized by its owning node.
 type InventoryEntry = extv1beta1.InventoryEntry
 
+var _ runtime.Object = (*NodeInventory)(nil)
+
 // NodeInventory is the single O(nodes) etcd object per node: the durable summary
 // of that node's live sandboxes, server-side-applied on a slow cadence. The
 // per-sandbox truth lives in the node (the L0 node-scoped cache), not etcd; a
@@ -139,5 +141,3 @@ type InventoryEntry = extv1beta1.InventoryEntry
 // The canonical type (and its CRD) lives in the extensions.agents.x-k8s.io
 // group; these aliases keep the scale contracts self-contained for callers.
 type NodeInventory = extv1beta1.NodeInventory
-
-var _ runtime.Object = (*NodeInventory)(nil)
