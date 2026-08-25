@@ -25,6 +25,9 @@ type SandboxKey struct {
 	NodeName  string
 }
 
+// Strategy picks one key from a warm pool's queued sandboxes; false leaves the queue untouched.
+type Strategy func([]SandboxKey) (SandboxKey, bool)
+
 // SimpleSandboxQueue is a thread-safe queue of adoptable warm pool sandboxes.
 type SimpleSandboxQueue struct {
 	// queues is a thread-safe dictionary from warm pool name to a synchronizedQueue
@@ -52,7 +55,7 @@ func (s *SimpleSandboxQueue) Get(namespacedWarmPoolName string) (SandboxKey, boo
 }
 
 // GetWithStrategy pops an item from the specific warm pool's queue using a custom strategy.
-func (s *SimpleSandboxQueue) GetWithStrategy(namespacedWarmPoolName string, pick func([]SandboxKey) (SandboxKey, bool)) (SandboxKey, bool) {
+func (s *SimpleSandboxQueue) GetWithStrategy(namespacedWarmPoolName string, pick Strategy) (SandboxKey, bool) {
 	q, ok := s.queues.Load(namespacedWarmPoolName)
 	if !ok {
 		return SandboxKey{}, false
@@ -131,7 +134,7 @@ func (q *synchronizedQueue) Pop() (SandboxKey, bool) {
 
 // PopWithStrategy applies the strategy function to pick an item from the queue,
 // removes it thread-safely, and returns it.
-func (q *synchronizedQueue) PopWithStrategy(pick func([]SandboxKey) (SandboxKey, bool)) (SandboxKey, bool) {
+func (q *synchronizedQueue) PopWithStrategy(pick Strategy) (SandboxKey, bool) {
 	for {
 		q.mu.Lock()
 		if len(q.items) == 0 {
