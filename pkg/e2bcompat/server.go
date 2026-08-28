@@ -6,17 +6,17 @@
 // the same scale.SandboxStore the aggregated apiserver uses, so an e2b Create is
 // the identical node-local claim a `kubectl create sandbox` performs, and the
 // sandbox it returns is visible to `kubectl get sandboxes`. Nothing is stored
-// here; sandbox identity is the sandboxd claim id the node already assigns.
+// here; public identity is a DNS-safe rendering of the node's sandboxd claim id.
 //
 // Mapping to the e2b contract (e2b-dev/E2B spec/openapi.yml):
 //
-//	POST   /sandboxes                     -> store.Claim   (templateID -> pool template)
-//	GET    /sandboxes, /v2/sandboxes      -> store.List
-//	GET    /sandboxes/{sandboxID}         -> store.List + id match
-//	DELETE /sandboxes/{sandboxID}         -> store.Release
-//	POST   /sandboxes/{sandboxID}/timeout -> accepted (TTL is set at claim time)
-//	POST   /sandboxes/{sandboxID}/refreshes -> accepted (keepalive)
-//	GET    /health                        -> liveness
+//	POST/GET/DELETE /sandboxes                 -> claim, list, get, release
+//	POST /sandboxes/{id}/pause|connect|fork    -> pause, resume, fork
+//	POST /sandboxes/{id}/snapshots             -> create checkpoint
+//	GET /snapshots, DELETE /templates/{id}     -> list or delete checkpoints
+//	GET /templates, /v2/templates              -> advertised warm-pool keys
+//	GET /sandboxes/{id}/metrics                -> node resource statistics
+//	POST timeout|refreshes, GET /health         -> existence or liveness checks
 package e2bcompat
 
 import (
@@ -62,9 +62,8 @@ type Options struct {
 	// makes the SDK fall back to its configured E2B_DOMAIN/E2B_SANDBOX_URL.
 	//
 	// The sandbox ids published here are DNS-label safe (see sandboxid.go), so
-	// that host form resolves; the proxy in front of the sandboxes still has to
-	// route it, either on the host or on the E2b-Sandbox-Id / E2b-Sandbox-Port
-	// headers the SDK also sends.
+	// that host form is valid; wildcard DNS and a proxy must still route the host
+	// or the E2b-Sandbox-Id / E2b-Sandbox-Port headers the SDK sends.
 	Domain string
 	// EnvdVersion overrides DefaultEnvdVersion.
 	EnvdVersion string

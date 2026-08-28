@@ -75,8 +75,8 @@ node, behind CRDs, RBAC and watch. Four layers:
 |---|---|---|
 | **L0** — API hygiene | cache-fed reads, diff-before-write, no control-loop `LIST` against etcd; the qualifier that stops APF seat exhaustion at scale | shipped |
 | **L1** — ownership transfer | claim = one select + one `PATCH`; `O(nodes)` pool status; per-pool sharded operator with a `coordination.k8s.io` Lease | implemented here |
-| **L2** — node-local claim gateway | a DaemonSet fronts `sandboxd`, delivers a running microVM in 0.2–0.7 ms, records `Bound` asynchronously; authorization stays central | designed, `ClaimGateway` skeleton |
-| **L3** — aggregated apiserver | `sandboxes` served by scatter-gathering per-node `NodeInventory`; etcd stores intent only, so object count drops from `O(sandboxes)` to `O(pools + nodes)` | designed, `SandboxStore` skeleton |
+| **L2** — node-local claim gateway | the concrete gateway fronts `sandboxd`, delivers a running microVM in 0.2–0.7 ms, records `Bound` asynchronously; authorization stays central | core implemented and benchmarked; supported DaemonSet packaging/hardening remains roadmap work |
+| **L3** — aggregated apiserver | `sandboxes` served by scatter-gathering per-node `NodeInventory`; etcd stores intent only, so object count drops from `O(sandboxes)` to `O(pools + nodes)` | implemented by `sandbox-apiserver`, its deployment/APIService manifests, and the cache-fed store |
 
 The measured consequence: one `kubectl patch` taking a `SandboxWarmPool` from 0
 to **50 000** microVMs on 20 bare-metal nodes reaches full supply in **10–15 s**

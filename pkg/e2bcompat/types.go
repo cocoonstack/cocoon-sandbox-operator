@@ -18,12 +18,10 @@ type NewSandbox struct {
 	TemplateID string `json:"templateID"`
 	// Timeout is the sandbox time-to-live in seconds (SDK default 15).
 	Timeout *int32 `json:"timeout,omitempty"`
-	// Metadata and EnvVars are echoed back on reads. They are recorded on the
-	// compat side only: the node-local claim path takes neither today.
+	// Metadata and EnvVars are accepted for SDK compatibility but discarded.
 	Metadata map[string]string `json:"metadata,omitempty"`
 	EnvVars  map[string]string `json:"envVars,omitempty"`
-	// AutoPause and Secure are accepted and reported back so an SDK that sets
-	// them does not fail; neither changes the claim.
+	// AutoPause and Secure are accepted for SDK compatibility but discarded.
 	AutoPause *bool `json:"autoPause,omitempty"`
 	Secure    *bool `json:"secure,omitempty"`
 	// AllowInternetAccess selects the warm pool's network lane: true picks the
@@ -84,7 +82,7 @@ type SandboxPauseRequest struct {
 }
 
 // ConnectSandbox is the POST /sandboxes/{id}/connect body — the SDK's resume.
-// timeout is required by the schema; TTL is only ever extended.
+// Timeout is required by the schema but does not change the node-owned lease.
 type ConnectSandbox struct {
 	Timeout int32 `json:"timeout"`
 }

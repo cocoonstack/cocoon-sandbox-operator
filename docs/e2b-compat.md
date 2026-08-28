@@ -9,7 +9,8 @@ It is a translation layer, not a second control plane. Every request lands on
 the same `SandboxStore` the Kubernetes API uses, so an e2b create *is* the
 node-local claim a `kubectl create sandbox` performs — and the sandbox it
 returns shows up in `kubectl get sandboxes`. Nothing extra is stored: sandbox
-identity is the sandboxd claim id the owning node already assigns.
+identity is a DNS-safe rendering of the sandboxd claim id the owning node
+already assigns; requests accept either spelling.
 
 ## Enable it
 
@@ -53,27 +54,44 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 
 | e2b endpoint | Maps to | Notes |
 |---|---|---|
-| `POST /sandboxes` | `store.Claim` | `templateID` → pool template; `timeout` → the claim's TTL; `allow_internet_access` → `egress` lane, else the hardened `none` lane. `201` on success, `503` when the pool is drained (retryable). |
+| `POST /sandboxes` | `store.Claim` | `templateID` → pool template; `timeout` → the claim's TTL (15s when omitted); `allow_internet_access` → `egress` lane, else the hardened `none` lane. `201` on success, `503` when the pool is drained (retryable). |
 | `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the compat namespace. |
 | `GET /sandboxes/{id}` | `store.List` + id match | `404` when no live sandbox carries the id. |
 | `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`. |
 | `POST /sandboxes/{id}/timeout` | existence check | TTL is fixed by the node at claim time; the call is verified and acknowledged, not silently faked. |
-| `POST /sandboxes/{id}/refreshes` | existence check | Keepalive; liveness is node-owned. |
+| `POST /sandboxes/{id}/refreshes` | existence check | Verifies that the sandbox is still live; it does not extend or refresh the node-owned deadline. |
+| `POST /sandboxes/{id}/pause` | `store.Pause` | Hibernates the owning node's claim. Omitted or `memory: true` snapshots memory; `memory: false` asks for an unsupported filesystem-only pause and returns `400`. Returns `409` when already paused. |
+| `POST /sandboxes/{id}/connect` | `store.Resume` when paused | The SDK's resume operation. Returns `200` when already running or `201` after restoring a paused sandbox. Its `timeout` field does not change the node-owned lease. |
+| `POST /sandboxes/{id}/fork` | `store.Fork` | Creates `count` children (`1` by default), each with its own id and requested claim-time TTL. A paused source returns `409`; resume it first. |
+| `POST /sandboxes/{id}/snapshots` | `store.Snapshot` | Captures a checkpoint while the source keeps running; returns its `snapshotID`. |
+| `GET /snapshots` | `store.Snapshots` across nodes | Lists fleet checkpoints. One unreachable node is skipped rather than blanking the whole result. |
+| `DELETE /templates/{snapshotID}` | `store.DeleteSnapshot` across nodes | e2b addresses snapshot deletion through the templates path; deletion is idempotent and best-effort across nodes. |
+| `GET /templates`, `GET /v2/templates` | advertised warm-pool keys | Lists the distinct templates the fleet can currently claim; these are pool-derived entries, not e2b-hosted template builds. |
+| `GET /sandboxes/{id}/metrics` | `store.Stats` | Returns the complete e2b metric schema; see the zero-valued fields below. |
 | `GET /health` | — | Unauthenticated, for probes. |
 
 ## Limits worth knowing
 
 - **Reaching `envd` (the in-sandbox data plane).** The SDK derives the sandbox
-  host as `{port}-{sandboxID}.{domain}`. A cocoon `sandboxID` is the sandboxd
-  claim id, which is not a valid DNS label, so that subdomain form only works
-  behind a proxy routing on the `E2b-Sandbox-Id` / `E2b-Sandbox-Port` headers
-  the SDK also sends. Otherwise set `E2B_SANDBOX_URL` explicitly.
+  host as `{port}-{sandboxID}.{domain}`. The compatibility API renders the
+  sandboxd claim id as a DNS-safe public id, but the deployment still needs
+  wildcard DNS/TLS and a proxy that routes the derived host or the
+  `E2b-Sandbox-Id` / `E2b-Sandbox-Port` headers the SDK sends. Otherwise set
+  `E2B_SANDBOX_URL` explicitly.
 - **`envdVersion`** is reported as `0.4.0` by default. The SDK version-compares
   it and *kills the sandbox* if it cannot parse it, so it is always sent.
-- **Not implemented:** pause/resume, fork, snapshots, templates, metrics, and
-  team/node admin endpoints. `pause`/`fork` map onto cocoon capabilities and are
-  the natural next step; the rest are e2b-hosted concerns.
+- **Metrics are schema-complete, not measurement-complete.** `cpuCount`,
+  `memUsed`, and `memTotal` come from the owning node when available;
+  `cpuUsedPct`, `memCache`, `diskUsed`, and `diskTotal` are reported as zero.
+- **List/detail schema fields are compatibility values.** `startedAt` uses the
+  synthesized Sandbox creation time; `endAt` is `startedAt + 15s`, not the
+  owning node's authoritative deadline. `cpuCount`, `memoryMB`, and
+  `diskSizeMB` are reported as zero on these responses.
 - **Size class** is pinned (`small`) — e2b's `NewSandbox` carries no size
   selector.
-- `metadata` and `envVars` are accepted so SDK calls do not fail, but the
-  node-local claim path takes neither today.
+- `metadata`, `envVars`, `autoPause`, and `secure` are accepted so SDK calls do
+  not fail, but are discarded: the node-local claim path takes none of them and
+  the compatibility layer stores no per-sandbox copy.
+- **Not implemented:** team/node administration and e2b-hosted template
+  build/management endpoints. Template listing is the pool-derived surface
+  above; snapshots use the implemented checkpoint lifecycle.
