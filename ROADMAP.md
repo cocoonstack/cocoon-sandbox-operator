@@ -9,17 +9,20 @@ move any of these forward are welcome.
   warm pools by engine; surface the axis through
   `SandboxTemplate`/`SandboxWarmPool` and the warm-pool driver so a single
   node can run mixed-engine pools under operator control.
-- **Prompt release for L3 claims.** Deleting a synthesized `Sandbox` should
-  release the node-local claim immediately via its `claim_ref` instead of
-  waiting for the claim TTL to reap it.
+- **Read-after-write routing for L3 claims.** Single-sandbox lookups already
+  avoid materializing the cluster-wide list, but a new claim is invisible until
+  its node republishes `NodeInventory`, and a miss still scans every inventory
+  entry. Keep a bounded claim-time owner index and fall back to authoritative
+  node lookup so lifecycle calls work immediately and lookup is `O(1)`.
 - **Engine-labeled pool metrics.** `sandboxd_pool_*` series currently collapse
   pools that share template/net/size but differ in engine.
 
 ## Medium term
 
-- **L2 ClaimGateway hardening.** Inline `SubjectAccessReview` +
-  `ResourceQuota` on the node-local claim path, promoting the benchmarked
-  skeleton to a supported deployment mode.
+- **L2 ClaimGateway deployment and quota hardening.** Package the concrete
+  gateway and orphan reconciler as a supported node-local deployment, wire its
+  existing `SubjectAccessReview` authorizer, and add `ResourceQuota` enforcement
+  on the claim path.
 - **Aggregated-apiserver HA.** Multi-replica scatter-gather with consistent
   claim routing (today: multiple replicas serve reads; claims prefer a single
   writer).

@@ -20,9 +20,11 @@ scatter-gathering live node state, with *zero* etcd storage). Our thesis:
 > transaction plane down to the node — behind CRDs, RBAC, and watch, so
 > `kubectl get sandboxes` never stops working.**
 
-We stage this as four layers. **L0 is shipped.** L1 is implemented in this repo.
-L2/L3 have full designs, Go interface skeletons, and migration paths here;
-their complete implementations are follow-up work.
+We stage this as four layers. L0 and L1 are shipped. L2 has a concrete,
+benchmarked gateway and orphan reconciler, but still needs deployment hardening
+before it is a supported mode. L3 is implemented by the aggregated-apiserver
+binary, manifests, scatter-gather store, and `NodeInventory` publisher. Its
+remaining routing follow-up is called out below.
 
 ```mermaid
 flowchart LR
@@ -32,10 +34,10 @@ flowchart LR
     subgraph L1["L1 — ownership transfer (this repo)"]
         L1a["claim = single PATCH<br/>O(nodes) pool status<br/>per-pool sharded operator"]
     end
-    subgraph L2["L2 — node-local claim gateway"]
-        L2a["DaemonSet → sandboxd<br/>sub-ms delivery<br/>async Bound record"]
+    subgraph L2["L2 — node-local claim gateway core"]
+        L2a["gateway → sandboxd<br/>sub-ms delivery<br/>async Bound record"]
     end
-    subgraph L3["L3 — aggregated apiserver"]
+    subgraph L3["L3 — aggregated apiserver (implemented)"]
         L3a["scatter-gather node inventory<br/>etcd stores intent only<br/>O(sandboxes)→O(pools+nodes)"]
     end
     L0 --> L1 --> L2 --> L3
@@ -99,21 +101,23 @@ the claim path needs the scheduler, kubelet bind, or image pull.
 | Stale informer picks an already-claimed Sandbox | PATCH precondition fails → next candidate | No |
 
 **Acceptance:** claim p50 stays near-constant from a 100-pool to a 2000+-pool
-(today it degrades 33 ms → 516 ms); the pod-exclusivity invariant (one Sandbox,
-at most one claim) holds under concurrent claims.
+(measured 0.644 ms → 0.646 ms); the pod-exclusivity invariant (one Sandbox, at
+most one claim) holds under concurrent claims.
 
-### L2 — node-local claim gateway (designed; `ClaimGateway` skeleton)
+### L2 — node-local claim gateway (implemented core; deployment hardening pending)
 
 L1 still round-trips the apiserver. L2 takes the claim off the central path
 entirely for the runtimes that have a node-local warm pool (`sandboxd`), while
 keeping the `SandboxClaim` object as the durable record.
 
-**Mechanism.** A `ClaimGateway` DaemonSet on each virtual-kubelet node fronts
-`sandboxd`. A claim request reaches the node gateway directly; `sandboxd` hands
-over an already-running microVM in **0.2–0.7 ms** and returns connection info
-immediately. The `SandboxClaim` is marked `Bound` **asynchronously** — the record
-follows the action, exactly as kubelet static Pods record to the apiserver after
-the container is already running.
+**Mechanism.** The implemented `ClaimGateway` is intended to run on each
+virtual-kubelet node in front of `sandboxd`. A claim request reaches the node
+gateway directly; `sandboxd` hands over an already-running microVM in
+**0.2–0.7 ms** and returns connection info immediately. The `SandboxClaim` is
+marked `Bound` **asynchronously** — the record follows the action, exactly as
+kubelet static Pods record to the apiserver after the container is already
+running. The repository contains the concrete gateway and orphan reconciler;
+packaging it as a supported DaemonSet remains roadmap work.
 
 **Authorization stays central.** The gateway runs a `SubjectAccessReview`
 before delivery; only ownership transfer moves to the node.
@@ -137,12 +141,12 @@ type ClaimGateway interface {
 | Scenario | Behavior | Breaks k8s semantics? |
 |---|---|---|
 | Gateway crashes after delivery, before recording `Bound` | Orphan binding → audit-only orphan GC + adopt reconciles the record (the VM is never destroyed on pod-level state — see the delete-authorization contract) | No — eventual consistency |
-| Node has no warm VM | Falls back to the L1 Kubernetes path (create a new Sandbox) | No |
+| Node has no warm VM | Returns the explicit fallback signal; a deployment must route that request through the L1 Kubernetes path | No |
 
 **Acceptance:** claim p50 sub-millisecond on the sandboxd tier; orphan-binding
 rate converges to 0 via GC; `kubectl get sandboxclaims` still shows every claim.
 
-### L3 — aggregated apiserver: etcd stores intent, not sandboxes (designed; `SandboxStore` skeleton)
+### L3 — aggregated apiserver: etcd stores intent, not sandboxes (implemented)
 
 A million `Sandbox` objects in etcd is a dead end (churn alone blows the ~8 GB
 keyspace). The Kubernetes-native fix is the aggregation layer: serve
@@ -156,18 +160,18 @@ Each virtual-kubelet node already knows its own VMs (L0 made that cache the
 source of truth), so the aggregated server assembles a `SandboxList` by fanning
 out to node inventories — the exact pattern `metrics.k8s.io` uses to serve
 `PodMetrics` with zero etcd storage. `kubectl get sandboxes`, RBAC, field
-selectors, and `watch` (implemented as a merge of per-node inventory streams)
-all keep working; users never see that storage decentralized.
+selectors, and `watch` (currently implemented by polling and diffing the
+cache-fed `NodeInventory` view) all keep working; users never see that storage
+decentralized.
 
 ```go
 // SandboxStore backs the aggregated apiserver for sandboxes.agents.x-k8s.io.
-// It holds NO per-sandbox etcd objects: List/Get/Watch scatter-gather live
-// node inventories, and Create/Delete translate to intent (warm-pool desired
-// replicas) plus a node-local RPC.
+// It holds NO per-sandbox etcd objects: List/Get/Watch use the cache-fed node
+// inventories, and Create/Delete claim or release through a node-local RPC.
 type SandboxStore interface {
     List(ctx context.Context, opts ListOptions) (*SandboxList, error)   // fan-out to node inventories
-    Get(ctx context.Context, ns, name string) (*Sandbox, error)         // route to owning node
-    Watch(ctx context.Context, opts ListOptions) (watch.Interface, error) // merge per-node streams
+    Get(ctx context.Context, ns, name string) (*Sandbox, error)         // fan-out; materialize only the match
+    Watch(ctx context.Context, opts ListOptions) (watch.Interface, error) // poll and diff inventory
 }
 
 // NodeInventory is the one O(nodes) etcd object per node: the durable
@@ -188,10 +192,11 @@ type NodeInventory struct {
 | Node partitioned from aggregated server | Its sandboxes briefly absent from `List` (eventual consistency, same as an informer lag) | No |
 | A node `inventory` object lost | Rebuilt from the node's own live state on next publish | No |
 | Aggregated server restart | Stateless; rebuilds from node fan-out | No |
-| Client needs strong read-after-write | Route `Get` to the owning node (authoritative), not the summary | No |
+| Client reads before the owning node republishes inventory | The sandbox is briefly absent; retry until the next publish. Direct authoritative routing is the remaining follow-up below. | No — the read surface is explicitly eventually consistent |
 
 **Acceptance:** 1M sandbox *intent* costs `O(nodes)` etcd objects; `kubectl get
-sandboxes` returns the fanned-out list; per-sandbox `Get` is authoritative.
+sandboxes` returns the fanned-out list; per-sandbox `Get` only materializes the
+matching entry. Strong read-after-write and `O(1)` lookup remain follow-up work.
 
 ### L3 routing: why node choice is sampled, not maximized
 
@@ -213,15 +218,14 @@ fleet view is `O(nodes × sandboxes)` — 40 ms at 200 nodes and 50k sandboxes �
 so a watch with nothing to report stretches its poll up to 8× the base interval
 and snaps back to it on the first observed change.
 
-### L3 follow-up: resolve a sandbox without the summary (TODO)
+### L3 remaining follow-up: read after write without published inventory
 
-The risk table above already names the fix — *route `Get` to the owning node
-(authoritative), not the summary* — but today nothing does. Every single-sandbox
-path resolves through the synthesized read view instead: `lifecycleREST.Create`
-(the `pause` / `resume` / `snapshot` / `fork` subresources) calls
-`SandboxStore.Get`, and the e2b surface's `lookup` calls `SandboxStore.List` and
-linear-scans it for one claim id. Both inherit the summary's two properties, and
-neither is acceptable at the scale L3 targets.
+Single-sandbox lookup no longer builds the cluster-wide `SandboxList`.
+`SandboxStore.Get` and the e2b claim-id resolver fan out across the cache-fed
+per-node inventories, cancel on the first match, and materialize only that
+entry. This removes the previous `O(total sandboxes)` `Sandbox` allocation, but
+two limitations remain: the lookup cannot see a claim until the owning node
+publishes it, and a miss still scans up to every inventory entry.
 
 **It is stale for one publish interval.** A sandbox is live on its node the
 moment `Claim` returns, but it does not appear in the read view until that node
@@ -231,12 +235,10 @@ lifecycle verb issued inside that window answers `404`. Callers work around it
 by polling until visible — which is what `examples/lifecycle` does — so
 "create, then immediately pause" costs half a minute of polling.
 
-**It is `O(total sandboxes)` per call.** `List` scatter-gathers every
-`NodeInventory` and materializes *every* sandbox into a `Sandbox` object before
-the caller filters for one. A materialized `Sandbox` measures 1392 B of Go heap
-(`ObjectMeta` + synthesized labels/annotations + a `Condition`), so one `pause`
-allocates ~139 MB at 100 k sandboxes and ~1.4 GB at 1 M — transient garbage, to
-find a single record. This is the binding constraint, not the staleness.
+**It is still `O(total inventory entries)` CPU on a miss.** The fast path avoids
+materializing unrelated `Sandbox` objects, but finding the owner without an
+index still compares entries across the fleet. That scan, rather than heap
+growth from full-list synthesis, is the remaining scale constraint.
 
 Both fall out of the same omission: `Claim` already returns the node and the
 claim id — the e2b create response even hands the node back to the client as
@@ -258,8 +260,8 @@ rejected:** `NodeInventory` carries one 105 B entry per live sandbox
 (measured), so a node holding 2500 of them is a 263 KB object. Re-applying that
 on a 2 s debounce costs 52.6 MB/s of large-object server-side-apply traffic
 across 400 nodes at 1 M sandboxes, against 3.5 MB/s for the current 30 s
-cadence — and it would still leave the `O(total sandboxes)` allocation in place,
-because `lookup` would go on listing everything.
+cadence — and it would still leave the `O(total inventory entries)` lookup in
+place.
 
 **Acceptance:** a lifecycle verb succeeds on a sandbox claimed milliseconds ago;
 resolving one sandbox allocates `O(1)`, not `O(total sandboxes)`; index memory
