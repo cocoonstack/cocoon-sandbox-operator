@@ -21,12 +21,12 @@ jobs:
             goarch: arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: 'go.mod'
 
@@ -40,7 +40,7 @@ jobs:
         run: make build apiserver-build
 
       - name: Upload binary artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: sandbox-operator-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |

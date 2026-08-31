@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM --platform=$BUILDPLATFORM golang:1.26.5 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.0@sha256:4013ae0f9e7994f8535c58c811f8f863fbed38b72e0d51e6592156f758d66146 AS builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH
@@ -21,6 +21,6 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w -X github.com/cocoonstack/sandbox-operator/internal/version.gitVersion=${GIT_VERSION} -X github.com/cocoonstack/sandbox-operator/internal/version.gitSHA=${GIT_SHA} -X github.com/cocoonstack/sandbox-operator/internal/version.buildDate=${BUILD_DATE}" \
     -o /sandbox-operator ./cmd/sandbox-operator
 
-FROM gcr.io/distroless/static-debian13:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7
 COPY --from=builder /sandbox-operator /sandbox-operator
 ENTRYPOINT ["/sandbox-operator"]
