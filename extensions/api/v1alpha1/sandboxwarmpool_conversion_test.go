@@ -18,8 +18,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	v1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
@@ -44,16 +42,14 @@ func TestSandboxWarmPoolConversion(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			src := &SandboxWarmPool{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "my-warmpool",
-					Namespace: "default",
-					Labels: map[string]string{
-						"foo": "bar",
-					},
-					Annotations: map[string]string{
-						"baz":                                  "qux",
-						v1alpha1SandboxWarmPoolStateAnnotation: "some-old-state",
-					},
+				Name:      "my-warmpool",
+				Namespace: "default",
+				Labels: map[string]string{
+					"foo": "bar",
+				},
+				Annotations: map[string]string{
+					"baz":                                  "qux",
+					v1alpha1SandboxWarmPoolStateAnnotation: "some-old-state",
 				},
 				Spec: SandboxWarmPoolSpec{
 					Replicas: 3,

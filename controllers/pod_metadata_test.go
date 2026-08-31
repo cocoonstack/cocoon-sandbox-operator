@@ -95,15 +95,15 @@ func TestUpdatePodMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			pod := &corev1.Pod{
 				Name:        "p",
 				Labels:      maps.Clone(tt.podLabels),
 				Annotations: maps.Clone(tt.podAnnotations),
-			}}
-			sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{
+			}
+			sandbox := &sandboxv1beta1.Sandbox{
 				Name:   "s",
 				Labels: tt.sandboxLabels,
-			}}
+			}
 			sandbox.Spec.PodTemplate.ObjectMeta.Labels = tt.tmplLabels
 			sandbox.Spec.PodTemplate.ObjectMeta.Annotations = tt.tmplAnnotations
 			if tt.warmPoolOwned {

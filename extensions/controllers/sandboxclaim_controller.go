@@ -1062,10 +1062,8 @@ func (r *SandboxClaimReconciler) createSandbox(ctx context.Context, claim *exten
 
 	logger.Info("creating sandbox from template", "template", template.Name)
 	sandbox := &v1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: claim.Namespace,
-			Name:      claim.Name,
-		},
+		Namespace: claim.Namespace,
+		Name:      claim.Name,
 	}
 
 	// Propagate the trace context annotation to the Sandbox resource
@@ -1355,7 +1353,7 @@ func (r *SandboxClaimReconciler) sandboxByClaimName(ctx context.Context, claim *
 	logger.V(1).Info("Trying name-based lookup for sandbox", "claim", claim.Name)
 
 	sandbox := &v1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{Namespace: claim.Namespace, Name: claim.Name},
+		Namespace: claim.Namespace, Name: claim.Name,
 	}
 	if err := r.Get(ctx, client.ObjectKeyFromObject(sandbox), sandbox); err != nil {
 		if k8errors.IsNotFound(err) {
@@ -1409,10 +1407,8 @@ func (r *SandboxClaimReconciler) getTemplate(ctx context.Context, claim *extensi
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: claim.Namespace,
-			Name:      warmPool.Spec.TemplateRef.Name,
-		},
+		Namespace: claim.Namespace,
+		Name:      warmPool.Spec.TemplateRef.Name,
 	}
 	if err := r.Get(ctx, client.ObjectKeyFromObject(template), template); err != nil {
 		if k8errors.IsNotFound(err) {
@@ -1502,7 +1498,7 @@ func (r *SandboxClaimReconciler) mapWarmPoolToClaims(ctx context.Context, obj cl
 		if claim.Status.SandboxStatus.Name != "" {
 			continue
 		}
-		requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: claim.Namespace, Name: claim.Name}})
+		requests = append(requests, ctrl.Request{Namespace: claim.Namespace, Name: claim.Name})
 	}
 	return requests
 }

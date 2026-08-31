@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
@@ -36,9 +35,9 @@ func TestMutatePod(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewMutator: %v", err)
 			}
-			sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "worker", Namespace: "agents"}}
+			sandbox := &sandboxv1beta1.Sandbox{Name: "worker", Namespace: "agents"}
 			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Annotations: tt.annotations},
+				Annotations: tt.annotations,
 				Spec: corev1.PodSpec{
 					RuntimeClassName: tt.runtime,
 					NodeSelector:     tt.selector,
@@ -92,7 +91,7 @@ func TestMutatePodIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMutator: %v", err)
 	}
-	sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "worker", Namespace: "agents"}}
+	sandbox := &sandboxv1beta1.Sandbox{Name: "worker", Namespace: "agents"}
 	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "agent", Image: "agent:v1"}}}}
 	if err := mutator.MutatePod(t.Context(), sandbox, pod); err != nil {
 		t.Fatalf("first MutatePod: %v", err)

@@ -311,9 +311,9 @@ func TestSSAApplier_UpsertsOneObjectPerNode(t *testing.T) {
 
 func inv(node string, entries ...InventoryEntry) *NodeInventory {
 	return &NodeInventory{
-		ObjectMeta: metav1.ObjectMeta{Name: node},
-		Node:       node,
-		Entries:    entries,
+		Name:    node,
+		Node:    node,
+		Entries: entries,
 	}
 }
 

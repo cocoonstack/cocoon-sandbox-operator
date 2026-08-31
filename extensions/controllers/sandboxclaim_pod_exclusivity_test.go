@@ -49,7 +49,7 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 	warmPoolUID := types.UID("pool-uid")
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "tpl", Namespace: "default"},
+		Name: "tpl", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -61,22 +61,20 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 
 	createPoolSandbox := func(name string) *sandboxv1beta1.Sandbox {
 		return &sandboxv1beta1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:              name,
-				Namespace:         "default",
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute)),
-				Labels: map[string]string{
-					warmPoolSandboxLabel:   poolNameHash,
-					sandboxTemplateRefHash: templateHash,
-				},
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-					Kind:       "SandboxWarmPool",
-					Name:       "pool",
-					UID:        warmPoolUID,
-					Controller: new(true),
-				}},
+			Name:              name,
+			Namespace:         "default",
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute)),
+			Labels: map[string]string{
+				warmPoolSandboxLabel:   poolNameHash,
+				sandboxTemplateRefHash: templateHash,
 			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+				Kind:       "SandboxWarmPool",
+				Name:       "pool",
+				UID:        warmPoolUID,
+				Controller: new(true),
+			}},
 			Spec: sandboxv1beta1.SandboxSpec{
 				SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 					Spec: corev1.PodSpec{
@@ -102,11 +100,9 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 	claims := make([]*extensionsv1beta1.SandboxClaim, 3)
 	for i := range claims {
 		claims[i] = &extensionsv1beta1.SandboxClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("claim-%d", i),
-				Namespace: "default",
-				UID:       types.UID(fmt.Sprintf("claim-%d-uid", i)),
-			},
+			Name:      fmt.Sprintf("claim-%d", i),
+			Namespace: "default",
+			UID:       types.UID(fmt.Sprintf("claim-%d-uid", i)),
 			Spec: extensionsv1beta1.SandboxClaimSpec{
 				WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "pool"},
 			},
@@ -114,8 +110,8 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "pool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "tpl"}},
+		Name: "pool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "tpl"}},
 	}
 
 	builder := fake.NewClientBuilder().
@@ -141,7 +137,7 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 	// Reconcile all 3 claims sequentially
 	for _, cl := range claims {
 		_, err := reconciler.Reconcile(ctx, reconcile.Request{
-			NamespacedName: types.NamespacedName{Name: cl.Name, Namespace: "default"},
+			Name: cl.Name, Namespace: "default",
 		})
 		require.NoError(t, err, "reconcile %s", cl.Name)
 	}

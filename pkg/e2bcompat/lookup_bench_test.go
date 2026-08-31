@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
@@ -29,10 +27,10 @@ func BenchmarkLookupByID(b *testing.B) {
 			}
 		}
 		src.Put(&scale.NodeInventory{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Node:       name,
-			Address:    "10.0.0.1:7777",
-			Entries:    entries,
+			Name:    name,
+			Node:    name,
+			Address: "10.0.0.1:7777",
+			Entries: entries,
 		})
 	}
 	s, err := NewServer(scale.NewScatterGatherStore(src), Options{Namespace: "sandboxes", AllowAnonymous: true})

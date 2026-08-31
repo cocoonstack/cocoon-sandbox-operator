@@ -142,7 +142,7 @@ func (d *Driver) SetupWithManager(mgr ctrl.Manager) error {
 	// Any NodeInventory change (a node joined, restarted, changed address) must
 	// re-spread every pool, so map it to a single global reconcile trigger.
 	enqueueAll := handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
-		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: "sync"}}}
+		return []reconcile.Request{{Name: "sync"}}
 	})
 	// Generation-filtered so the loop's own writeStatus cannot re-trigger it
 	// into a continuous back-to-back loop under claim churn; create/delete,

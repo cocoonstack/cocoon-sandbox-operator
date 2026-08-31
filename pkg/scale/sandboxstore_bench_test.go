@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
@@ -78,11 +76,11 @@ func benchStore(b *testing.B, nodes, perNode int) (*scatterGatherStore, PoolKey)
 			}
 		}
 		src.Put(&NodeInventory{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Node:       name,
-			Address:    "10.0.0.1:7777",
-			Entries:    entries,
-			Pools:      []extv1beta1.PoolCapacity{{Template: pool.Template, Net: pool.Net, Size: pool.Size, Warm: 5, Target: 5}},
+			Name:    name,
+			Node:    name,
+			Address: "10.0.0.1:7777",
+			Entries: entries,
+			Pools:   []extv1beta1.PoolCapacity{{Template: pool.Template, Net: pool.Net, Size: pool.Size, Warm: 5, Target: 5}},
 		})
 	}
 	return NewScatterGatherStore(src), pool

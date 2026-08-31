@@ -125,7 +125,7 @@ func main() {
 		"count":      len(results),
 	}
 	b, _ := json.MarshalIndent(summary, "", "  ")
-	_ = os.WriteFile(*out, b, 0644)
+	_ = os.WriteFile(*out, b, 0o644)
 	fmt.Printf("\nwrote %s (all_passed=%v)\n", *out, allPassed)
 	if !allPassed {
 		os.Exit(1)

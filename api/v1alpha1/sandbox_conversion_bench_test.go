@@ -35,13 +35,11 @@ func BenchmarkConvertRoundTrip(b *testing.B) {
 func benchSandbox() *Sandbox {
 	replicas := int32(1)
 	return &Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "bench-sandbox",
-			Namespace: "default",
-			Labels:    map[string]string{"app": "agent", "team": "bench"},
-			Annotations: map[string]string{
-				"prometheus.io/scrape": "true",
-			},
+		Name:      "bench-sandbox",
+		Namespace: "default",
+		Labels:    map[string]string{"app": "agent", "team": "bench"},
+		Annotations: map[string]string{
+			"prometheus.io/scrape": "true",
 		},
 		Spec: SandboxSpec{
 			Replicas: &replicas,

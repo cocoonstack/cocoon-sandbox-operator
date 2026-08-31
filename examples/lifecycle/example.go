@@ -42,7 +42,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/rest"
@@ -173,7 +172,7 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 
 	name := fmt.Sprintf("example-%d", time.Now().UnixNano()%1e9)
 	sb := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: o.namespace},
+		Name: name, Namespace: o.namespace,
 	}
 	sb.Spec.PodTemplate.Spec.Containers = []corev1.Container{{Name: "agent", Image: o.template}}
 

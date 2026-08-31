@@ -30,7 +30,7 @@ func gvkExtension(kind string) spec.Extensions {
 }
 
 func stringSchema() spec.Schema {
-	return spec.Schema{SchemaProps: spec.SchemaProps{Type: spec.StringOrArray{"string"}}}
+	return spec.Schema{Type: spec.StringOrArray{"string"}}
 }
 
 // preserveUnknownObject is an object whose interior is left untyped. The
@@ -41,8 +41,8 @@ func stringSchema() spec.Schema {
 // over the embedded core/v1.PodSpec graph and buy us nothing.
 func preserveUnknownObject() spec.Schema {
 	return spec.Schema{
-		SchemaProps:      spec.SchemaProps{Type: spec.StringOrArray{"object"}},
-		VendorExtensible: spec.VendorExtensible{Extensions: spec.Extensions{"x-kubernetes-preserve-unknown-fields": true}},
+		Type:       spec.StringOrArray{"object"},
+		Extensions: spec.Extensions{"x-kubernetes-preserve-unknown-fields": true},
 	}
 }
 
@@ -80,7 +80,7 @@ func sandboxOpenAPIDefinitions(ref openapicommon.ReferenceCallback) map[string]o
 							Type: spec.StringOrArray{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{Ref: ref(sandboxDefPrefix + "Sandbox")},
+									Ref: ref(sandboxDefPrefix + "Sandbox"),
 								},
 							},
 						},

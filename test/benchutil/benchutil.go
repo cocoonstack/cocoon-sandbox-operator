@@ -54,8 +54,8 @@ func EnsurePool(ctx context.Context, cl client.Client, ns, pool, template string
 	err := cl.Get(ctx, types.NamespacedName{Namespace: ns, Name: pool}, p)
 	if apierrors.IsNotFound(err) {
 		Must(cl.Create(ctx, &extv1beta1.SandboxWarmPool{
-			ObjectMeta: metav1.ObjectMeta{Name: pool, Namespace: ns, Labels: labels},
-			Spec:       extv1beta1.SandboxWarmPoolSpec{Replicas: &replicas, TemplateRef: extv1beta1.SandboxTemplateRef{Name: template}},
+			Name: pool, Namespace: ns, Labels: labels,
+			Spec: extv1beta1.SandboxWarmPoolSpec{Replicas: &replicas, TemplateRef: extv1beta1.SandboxTemplateRef{Name: template}},
 		}))
 		return
 	}

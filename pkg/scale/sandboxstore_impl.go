@@ -613,11 +613,9 @@ func (p *NodeInventoryPublisher) Publish(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("scale: read node %q live sandboxes: %w", p.node, err)
 	}
 	inv := &NodeInventory{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       NodeInventoryGVK.Kind,
-			APIVersion: NodeInventoryGVK.GroupVersion().String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{Name: p.node},
+		Kind:       NodeInventoryGVK.Kind,
+		APIVersion: NodeInventoryGVK.GroupVersion().String(),
+		Name:       p.node,
 		Node:       p.node,
 		Entries:    entries,
 	}
@@ -849,13 +847,11 @@ func parseSelectors(opts ListOptions) (labels.Selector, fields.Selector, error) 
 func entryToSandbox(node string, e InventoryEntry) *sandboxv1beta1.Sandbox {
 	ns, name := splitNamespacedName(e.Name)
 	sb := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:       ns,
-			Name:            name,
-			Labels:          synthLabels(node, e),
-			Annotations:     synthAnnotations(e),
-			ResourceVersion: resourceVersionFor(ns, name, e),
-		},
+		Namespace:       ns,
+		Name:            name,
+		Labels:          synthLabels(node, e),
+		Annotations:     synthAnnotations(e),
+		ResourceVersion: resourceVersionFor(ns, name, e),
 		Status: sandboxv1beta1.SandboxStatus{
 			NodeName: node,
 			PodIPs:   AddressIPs(e.Address),

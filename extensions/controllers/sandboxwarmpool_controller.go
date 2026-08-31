@@ -30,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -459,12 +458,10 @@ func (r *SandboxWarmPoolReconciler) buildSandboxCR(
 	}
 
 	sandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("%s-", warmPool.Name),
-			Namespace:    warmPool.Namespace,
-			Labels:       sandboxLabels,
-			Annotations:  sandboxAnnotations,
-		},
+		GenerateName: fmt.Sprintf("%s-", warmPool.Name),
+		Namespace:    warmPool.Namespace,
+		Labels:       sandboxLabels,
+		Annotations:  sandboxAnnotations,
 		// Deep-copy the entire shared blueprint
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: *template.Spec.SandboxBlueprint.DeepCopy(),
@@ -547,10 +544,8 @@ func (r *SandboxWarmPoolReconciler) updateStatus(ctx context.Context, oldStatus 
 
 func (r *SandboxWarmPoolReconciler) getTemplate(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) (*extensionsv1beta1.SandboxTemplate, error) {
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: warmPool.Namespace,
-			Name:      warmPool.Spec.TemplateRef.Name,
-		},
+		Namespace: warmPool.Namespace,
+		Name:      warmPool.Spec.TemplateRef.Name,
 	}
 	if err := r.Get(ctx, client.ObjectKeyFromObject(template), template); err != nil {
 		if !k8serrors.IsNotFound(err) {
@@ -679,10 +674,8 @@ func (r *SandboxWarmPoolReconciler) findWarmPoolsForTemplate(ctx context.Context
 	requests := make([]reconcile.Request, 0, len(warmPools.Items))
 	for _, wp := range warmPools.Items {
 		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      wp.Name,
-				Namespace: wp.Namespace,
-			},
+			Name:      wp.Name,
+			Namespace: wp.Namespace,
 		})
 	}
 	return requests

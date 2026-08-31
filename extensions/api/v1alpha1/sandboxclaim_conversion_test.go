@@ -19,7 +19,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	v1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
@@ -97,16 +96,14 @@ func TestSandboxClaimConversion(t *testing.T) {
 			// Create src v1alpha1 SandboxClaim
 			wpPolicy := WarmPoolPolicy(tc.warmPool)
 			src := &SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      tc.claimName,
-					Namespace: "default",
-					Labels: map[string]string{
-						"foo": "bar",
-					},
-					Annotations: map[string]string{
-						"baz":                               "qux",
-						v1alpha1SandboxClaimStateAnnotation: "some-old-state",
-					},
+				Name:      tc.claimName,
+				Namespace: "default",
+				Labels: map[string]string{
+					"foo": "bar",
+				},
+				Annotations: map[string]string{
+					"baz":                               "qux",
+					v1alpha1SandboxClaimStateAnnotation: "some-old-state",
 				},
 				Spec: SandboxClaimSpec{
 					TemplateRef: SandboxTemplateRef{
@@ -214,10 +211,8 @@ func TestSandboxClaimConversionFromHub(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			src := &v1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "my-claim",
-					Namespace: "default",
-				},
+				Name:      "my-claim",
+				Namespace: "default",
 				Spec: v1beta1.SandboxClaimSpec{
 					WarmPoolRef: v1beta1.SandboxWarmPoolRef{
 						Name: tc.warmPoolRefName,
@@ -255,7 +250,7 @@ func TestSandboxClaimVolumeClaimTemplatesRoundTrip(t *testing.T) {
 		},
 	}
 	src := &v1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "claim", Namespace: "ns"},
+		Name: "claim", Namespace: "ns",
 		Spec: v1beta1.SandboxClaimSpec{
 			WarmPoolRef:          v1beta1.SandboxWarmPoolRef{Name: "pool"},
 			VolumeClaimTemplates: vcts,
@@ -290,8 +285,8 @@ func TestSandboxClaimVolumeClaimTemplatesRoundTrip(t *testing.T) {
 // volumeClaimTemplates does not gain the preservation annotation.
 func TestSandboxClaimNoVolumeClaimTemplatesNoAnnotation(t *testing.T) {
 	src := &v1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "claim", Namespace: "ns"},
-		Spec:       v1beta1.SandboxClaimSpec{WarmPoolRef: v1beta1.SandboxWarmPoolRef{Name: "pool"}},
+		Name: "claim", Namespace: "ns",
+		Spec: v1beta1.SandboxClaimSpec{WarmPoolRef: v1beta1.SandboxWarmPoolRef{Name: "pool"}},
 	}
 	alpha := &SandboxClaim{}
 	if err := alpha.ConvertFrom(src); err != nil {

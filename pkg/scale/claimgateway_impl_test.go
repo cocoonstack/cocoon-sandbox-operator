@@ -300,8 +300,8 @@ func newClaimClient(t *testing.T, names ...string) client.Client {
 	b := fake.NewClientBuilder().WithScheme(newScaleScheme(t)).WithStatusSubresource(&extv1beta1.SandboxClaim{})
 	for _, n := range names {
 		b = b.WithObjects(&extv1beta1.SandboxClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: n, Namespace: "default"},
-			Spec:       extv1beta1.SandboxClaimSpec{WarmPoolRef: extv1beta1.SandboxWarmPoolRef{Name: "base:24.04"}},
+			Name: n, Namespace: "default",
+			Spec: extv1beta1.SandboxClaimSpec{WarmPoolRef: extv1beta1.SandboxWarmPoolRef{Name: "base:24.04"}},
 		})
 	}
 	return b.Build()

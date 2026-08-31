@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -94,10 +93,8 @@ func TestGenerateWebhookCerts(t *testing.T) {
 		existingKey := []byte("-----BEGIN EC PRIVATE KEY-----\nMIIB\n-----END EC PRIVATE KEY-----")
 
 		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      secretName,
-				Namespace: namespace,
-			},
+			Name:      secretName,
+			Namespace: namespace,
 			Data: map[string][]byte{
 				"ca.crt":  existingCA,
 				"tls.crt": existingCert,
@@ -131,10 +128,8 @@ func TestGenerateWebhookCerts(t *testing.T) {
 
 		// Pre-populate Secret with invalid PEM data
 		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      secretName,
-				Namespace: namespace,
-			},
+			Name:      secretName,
+			Namespace: namespace,
 			Data: map[string][]byte{
 				"ca.crt":  []byte("invalid-ca-pem"),
 				"tls.crt": []byte("invalid-cert-pem"),
@@ -159,9 +154,7 @@ func TestPatchCRDs(t *testing.T) {
 	// Create a helper function to build a fake CRD
 	makeCRD := func(name string, hasWebhook bool) *apiextensionsv1.CustomResourceDefinition {
 		crd := &apiextensionsv1.CustomResourceDefinition{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: name,
-			},
+			Name: name,
 			Spec: apiextensionsv1.CustomResourceDefinitionSpec{
 				Group: "agents.x-k8s.io",
 				Names: apiextensionsv1.CustomResourceDefinitionNames{

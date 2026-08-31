@@ -20,7 +20,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	sandboxv1alpha1 "github.com/cocoonstack/sandbox-operator/api/v1alpha1"
 	v1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
@@ -29,16 +28,14 @@ import (
 func TestSandboxTemplateConversion(t *testing.T) {
 	bTrue := true
 	src := &SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-template",
-			Namespace: "default",
-			Labels: map[string]string{
-				"foo": "bar",
-			},
-			Annotations: map[string]string{
-				"baz":                                  "qux",
-				v1alpha1SandboxTemplateStateAnnotation: "some-old-state",
-			},
+		Name:      "my-template",
+		Namespace: "default",
+		Labels: map[string]string{
+			"foo": "bar",
+		},
+		Annotations: map[string]string{
+			"baz":                                  "qux",
+			v1alpha1SandboxTemplateStateAnnotation: "some-old-state",
 		},
 		Spec: SandboxTemplateSpec{
 			PodTemplate: sandboxv1alpha1.PodTemplate{
@@ -53,9 +50,7 @@ func TestSandboxTemplateConversion(t *testing.T) {
 			},
 			VolumeClaimTemplates: []sandboxv1alpha1.PersistentVolumeClaimTemplate{
 				{
-					EmbeddedObjectMetadata: sandboxv1alpha1.EmbeddedObjectMetadata{
-						Name: "data",
-					},
+					Name: "data",
 					Spec: corev1.PersistentVolumeClaimSpec{
 						AccessModes: []corev1.PersistentVolumeAccessMode{
 							corev1.ReadWriteOnce,
@@ -138,10 +133,8 @@ func TestSandboxTemplateConversion(t *testing.T) {
 func TestSandboxTemplateVolumeClaimTemplatesPolicyConversion(t *testing.T) {
 	// 1. Create v1beta1 SandboxTemplate with VolumeClaimTemplatesPolicy: Allowed
 	src := &v1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-template",
-			Namespace: "default",
-		},
+		Name:      "my-template",
+		Namespace: "default",
 		Spec: v1beta1.SandboxTemplateSpec{
 			VolumeClaimTemplatesPolicy: v1beta1.VolumeClaimTemplatesPolicyAllowed,
 		},
@@ -173,12 +166,10 @@ func TestSandboxTemplateVolumeClaimTemplatesPolicyConversion(t *testing.T) {
 func TestSandboxTemplateVolumeClaimTemplatesPolicyStaleAnnotationClearing(t *testing.T) {
 	// 1. Create v1alpha1 SandboxTemplate with a stale policy annotation
 	spoke := &SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "stale-template",
-			Namespace: "default",
-			Annotations: map[string]string{
-				"api.agents.x-k8s.io/v1beta1-volume-claim-templates-policy": "Allowed",
-			},
+		Name:      "stale-template",
+		Namespace: "default",
+		Annotations: map[string]string{
+			"api.agents.x-k8s.io/v1beta1-volume-claim-templates-policy": "Allowed",
 		},
 	}
 

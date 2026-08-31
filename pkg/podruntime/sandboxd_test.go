@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
@@ -18,7 +17,7 @@ func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMutator(sandboxd): %v", err)
 	}
-	sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"}}
+	sandbox := &sandboxv1beta1.Sandbox{Name: "sb", Namespace: "ns"}
 	pod := sandboxdPod("base:24.04")
 
 	if err := m.MutatePod(t.Context(), sandbox, pod); err != nil {
@@ -49,7 +48,7 @@ func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
 // TestMutateSandboxdRespectsExplicitTemplate: a user-set template is preserved.
 func TestMutateSandboxdRespectsExplicitTemplate(t *testing.T) {
 	m, _ := NewMutator(ModeStandard)
-	sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"}}
+	sandbox := &sandboxv1beta1.Sandbox{Name: "sb", Namespace: "ns"}
 	pod := sandboxdPod("ignored:latest")
 	pod.Annotations = map[string]string{
 		RuntimeAnnotation:          ModeSandboxd,
@@ -66,7 +65,7 @@ func TestMutateSandboxdRespectsExplicitTemplate(t *testing.T) {
 // TestMutateSandboxdRejectsPinnedNode: a pinned NodeName would misroute.
 func TestMutateSandboxdRejectsPinnedNode(t *testing.T) {
 	m, _ := NewMutator(ModeSandboxd)
-	sandbox := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"}}
+	sandbox := &sandboxv1beta1.Sandbox{Name: "sb", Namespace: "ns"}
 	pod := sandboxdPod("base:24.04")
 	pod.Spec.NodeName = "cocoon-bd1"
 	if err := m.MutatePod(t.Context(), sandbox, pod); err == nil {
@@ -86,7 +85,7 @@ func TestNewMutatorAcceptsSandboxd(t *testing.T) {
 
 func sandboxdPod(image string) *corev1.Pod {
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "sb", Namespace: "ns"},
+		Name: "sb", Namespace: "ns",
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{Name: "agent", Image: image}},
 		},

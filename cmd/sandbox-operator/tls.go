@@ -31,7 +31,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -141,8 +140,8 @@ func issueSelfSignedPair(serviceName, namespace, clusterDomain string) (caPEM, s
 func publishSharedSecret(ctx context.Context, c client.Client, namespace, certDir string, caPEM, serverPEM, serverKeyPEM []byte) ([]byte, error) {
 	setupLog.Info("Creating shared webhook certificates Secret", "secret", webhookSecretName)
 	err := c.Create(ctx, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: webhookSecretName, Namespace: namespace},
-		Type:       corev1.SecretTypeOpaque,
+		Name: webhookSecretName, Namespace: namespace,
+		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
 			caCertKey:     caPEM,
 			tlsCertKey:    serverPEM,

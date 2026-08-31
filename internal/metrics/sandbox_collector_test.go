@@ -42,10 +42,8 @@ func TestSandboxCollector(t *testing.T) {
 			name: "single ready cold unknown sandbox",
 			sandboxes: []runtime.Object{
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-1",
-						Namespace: "default",
-					},
+					Name:      "sandbox-1",
+					Namespace: "default",
 					Status: sandboxv1beta1.SandboxStatus{
 						Conditions: []metav1.Condition{
 							{
@@ -65,10 +63,8 @@ func TestSandboxCollector(t *testing.T) {
 			name: "missing ready condition",
 			sandboxes: []runtime.Object{
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-missing",
-						Namespace: "default",
-					},
+					Name:      "sandbox-missing",
+					Namespace: "default",
 					Status: sandboxv1beta1.SandboxStatus{
 						Conditions: nil,
 					},
@@ -83,15 +79,13 @@ func TestSandboxCollector(t *testing.T) {
 			name: "cold launch label with pod name annotation remains cold",
 			sandboxes: []runtime.Object{
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-cold",
-						Namespace: "default",
-						Labels: map[string]string{
-							sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeCold,
-						},
-						Annotations: map[string]string{
-							sandboxv1beta1.SandboxPodNameAnnotation: "sandbox-cold",
-						},
+					Name:      "sandbox-cold",
+					Namespace: "default",
+					Labels: map[string]string{
+						sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeCold,
+					},
+					Annotations: map[string]string{
+						sandboxv1beta1.SandboxPodNameAnnotation: "sandbox-cold",
 					},
 				},
 			},
@@ -104,12 +98,10 @@ func TestSandboxCollector(t *testing.T) {
 			name: "warm launch label reports warm",
 			sandboxes: []runtime.Object{
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-warm",
-						Namespace: "default",
-						Labels: map[string]string{
-							sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeWarm,
-						},
+					Name:      "sandbox-warm",
+					Namespace: "default",
+					Labels: map[string]string{
+						sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeWarm,
 					},
 				},
 			},
@@ -122,10 +114,8 @@ func TestSandboxCollector(t *testing.T) {
 			name: "mixed sandboxes",
 			sandboxes: []runtime.Object{
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-1",
-						Namespace: "default",
-					},
+					Name:      "sandbox-1",
+					Namespace: "default",
 					Status: sandboxv1beta1.SandboxStatus{
 						Conditions: []metav1.Condition{
 							{
@@ -136,16 +126,14 @@ func TestSandboxCollector(t *testing.T) {
 					},
 				},
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-2",
-						Namespace: "test-ns",
-						Labels: map[string]string{
-							sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeWarm,
-						},
-						Annotations: map[string]string{
-							sandboxv1beta1.SandboxPodNameAnnotation:     "adopted-pod",
-							sandboxv1beta1.SandboxTemplateRefAnnotation: "my-template",
-						},
+					Name:      "sandbox-2",
+					Namespace: "test-ns",
+					Labels: map[string]string{
+						sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeWarm,
+					},
+					Annotations: map[string]string{
+						sandboxv1beta1.SandboxPodNameAnnotation:     "adopted-pod",
+						sandboxv1beta1.SandboxTemplateRefAnnotation: "my-template",
 					},
 					Status: sandboxv1beta1.SandboxStatus{
 						Conditions: []metav1.Condition{
@@ -158,10 +146,8 @@ func TestSandboxCollector(t *testing.T) {
 					},
 				},
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-3",
-						Namespace: "default",
-					},
+					Name:      "sandbox-3",
+					Namespace: "default",
 					Status: sandboxv1beta1.SandboxStatus{
 						Conditions: []metav1.Condition{
 							{
@@ -172,10 +158,8 @@ func TestSandboxCollector(t *testing.T) {
 					},
 				},
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-4",
-						Namespace: "default",
-					},
+					Name:      "sandbox-4",
+					Namespace: "default",
 					Status: sandboxv1beta1.SandboxStatus{
 						Conditions: []metav1.Condition{
 							{
@@ -197,17 +181,15 @@ func TestSandboxCollector(t *testing.T) {
 			name: "claimed sandbox",
 			sandboxes: []runtime.Object{
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-claimed",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion: extensionsv1beta1.GroupVersion.String(),
-								Kind:       "SandboxClaim",
-								Name:       "my-claim",
-								UID:        "1234",
-								Controller: &trueVal,
-							},
+					Name:      "sandbox-claimed",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: extensionsv1beta1.GroupVersion.String(),
+							Kind:       "SandboxClaim",
+							Name:       "my-claim",
+							UID:        "1234",
+							Controller: &trueVal,
 						},
 					},
 					Status: sandboxv1beta1.SandboxStatus{
@@ -229,17 +211,15 @@ func TestSandboxCollector(t *testing.T) {
 			name: "warmpool sandbox",
 			sandboxes: []runtime.Object{
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-warmpool",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{
-							{
-								APIVersion: extensionsv1beta1.GroupVersion.String(),
-								Kind:       "SandboxWarmPool",
-								Name:       "my-warmpool",
-								UID:        "5678",
-								Controller: &trueVal,
-							},
+					Name:      "sandbox-warmpool",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: extensionsv1beta1.GroupVersion.String(),
+							Kind:       "SandboxWarmPool",
+							Name:       "my-warmpool",
+							UID:        "5678",
+							Controller: &trueVal,
 						},
 					},
 					Status: sandboxv1beta1.SandboxStatus{
@@ -261,12 +241,10 @@ func TestSandboxCollector(t *testing.T) {
 			name: "client-created sandbox",
 			sandboxes: []runtime.Object{
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-client",
-						Namespace: "default",
-						Labels: map[string]string{
-							sandboxv1beta1.CreatedByLabel: "go-client",
-						},
+					Name:      "sandbox-client",
+					Namespace: "default",
+					Labels: map[string]string{
+						sandboxv1beta1.CreatedByLabel: "go-client",
 					},
 					Status: sandboxv1beta1.SandboxStatus{
 						Conditions: []metav1.Condition{
@@ -287,12 +265,10 @@ func TestSandboxCollector(t *testing.T) {
 			name: "python client created sandbox",
 			sandboxes: []runtime.Object{
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-python-client",
-						Namespace: "default",
-						Labels: map[string]string{
-							sandboxv1beta1.CreatedByLabel: "python-client",
-						},
+					Name:      "sandbox-python-client",
+					Namespace: "default",
+					Labels: map[string]string{
+						sandboxv1beta1.CreatedByLabel: "python-client",
 					},
 					Status: sandboxv1beta1.SandboxStatus{
 						Conditions: []metav1.Condition{
@@ -313,12 +289,10 @@ func TestSandboxCollector(t *testing.T) {
 			name: "untrusted created_by label normalized to unknown",
 			sandboxes: []runtime.Object{
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "sandbox-untrusted",
-						Namespace: "default",
-						Labels: map[string]string{
-							sandboxv1beta1.CreatedByLabel: "hacker-client",
-						},
+					Name:      "sandbox-untrusted",
+					Namespace: "default",
+					Labels: map[string]string{
+						sandboxv1beta1.CreatedByLabel: "hacker-client",
 					},
 					Status: sandboxv1beta1.SandboxStatus{
 						Conditions: []metav1.Condition{

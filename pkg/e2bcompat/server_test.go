@@ -293,9 +293,9 @@ func TestErrorBodyCarriesMessage(t *testing.T) {
 func TestLookupUsesClaimIDResolver(t *testing.T) {
 	src := scale.NewStaticInventorySource()
 	src.Put(&scale.NodeInventory{
-		ObjectMeta: metav1.ObjectMeta{Name: "node-a"},
-		Node:       "node-a",
-		Address:    "10.0.0.1:7777",
+		Name:    "node-a",
+		Node:    "node-a",
+		Address: "10.0.0.1:7777",
 		Entries: []scale.InventoryEntry{
 			{Name: "sandboxes/sb-1", ID: "sb_0123abcd", Phase: "Running", Address: "10.0.0.1:7777"},
 			{Name: "elsewhere/sb-2", ID: "sb_ffff0000", Phase: "Running", Address: "10.0.0.1:7777"},
@@ -449,14 +449,12 @@ func do(t *testing.T, h http.Handler, method, path, body, key string) *httptest.
 // liveSandbox builds a sandbox as the store's scatter-gather read reports it.
 func liveSandbox(name, claimID, node, image, token string) sandboxv1beta1.Sandbox {
 	sb := sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              name,
-			Namespace:         "sandboxes",
-			CreationTimestamp: metav1.Now(),
-			Annotations: map[string]string{
-				scale.ClaimIDAnnotation: claimID,
-				tokenAnnotation:         token,
-			},
+		Name:              name,
+		Namespace:         "sandboxes",
+		CreationTimestamp: metav1.Now(),
+		Annotations: map[string]string{
+			scale.ClaimIDAnnotation: claimID,
+			tokenAnnotation:         token,
 		},
 	}
 	sb.Spec.PodTemplate.Spec.Containers = []corev1.Container{{Name: "c", Image: image}}

@@ -227,7 +227,7 @@ honest counter-examples are in **[PERFORMANCE.md](PERFORMANCE.md)**.
 
 ## Development
 
-Go 1.26+.
+Go 1.27+.
 
 ```bash
 make all         # fmt-check vet test build

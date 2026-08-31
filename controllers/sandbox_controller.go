@@ -537,11 +537,9 @@ func (r *SandboxReconciler) createHeadlessService(ctx context.Context, sandbox *
 	logger := log.FromContext(ctx)
 	logger.Info("Creating a new Headless Service", "Service.Namespace", sandbox.Namespace, "Service.Name", sandbox.Name)
 	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      sandbox.Name,
-			Namespace: sandbox.Namespace,
-			Labels:    map[string]string{sandboxLabel: nameHash},
-		},
+		Name:      sandbox.Name,
+		Namespace: sandbox.Namespace,
+		Labels:    map[string]string{sandboxLabel: nameHash},
 		Spec: corev1.ServiceSpec{
 			ClusterIP: "None",
 			Selector:  map[string]string{sandboxLabel: nameHash},
@@ -753,23 +751,19 @@ func (r *SandboxReconciler) createPod(ctx context.Context, sandbox *sandboxv1bet
 	for _, pvcTemplate := range sandbox.Spec.VolumeClaimTemplates {
 		pvcVolumes = append(pvcVolumes, corev1.Volume{
 			Name: pvcTemplate.Name,
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: pvcTemplate.Name + "-" + sandbox.Name,
-				},
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: pvcTemplate.Name + "-" + sandbox.Name,
 			},
 		})
 	}
 	mutatedSpec.Volumes = MergeVolumeClaimVolumes(mutatedSpec.Volumes, pvcVolumes)
 
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        sandbox.Name,
-			Namespace:   sandbox.Namespace,
-			Labels:      podLabels,
-			Annotations: annotations,
-		},
-		Spec: *mutatedSpec,
+		Name:        sandbox.Name,
+		Namespace:   sandbox.Namespace,
+		Labels:      podLabels,
+		Annotations: annotations,
+		Spec:        *mutatedSpec,
 	}
 	if r.PodMutator != nil {
 		if err := r.PodMutator.MutatePod(ctx, sandbox, pod); err != nil {
@@ -938,13 +932,11 @@ func (r *SandboxReconciler) reconcilePVCs(ctx context.Context, sandbox *sandboxv
 
 		logger.Info("Creating a new PVC", "PVC.Namespace", sandbox.Namespace, "PVC.Name", pvcName)
 		pvc = &corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        pvcName,
-				Namespace:   sandbox.Namespace,
-				Annotations: maps.Clone(pvcTemplate.Annotations),
-				Labels:      pvcLabels,
-			},
-			Spec: pvcTemplate.Spec,
+			Name:        pvcName,
+			Namespace:   sandbox.Namespace,
+			Annotations: maps.Clone(pvcTemplate.Annotations),
+			Labels:      pvcLabels,
+			Spec:        pvcTemplate.Spec,
 		}
 		if err := ctrl.SetControllerReference(sandbox, pvc, r.Scheme); err != nil {
 			return fmt.Errorf("SetControllerReference for PVC failed: %w", err)

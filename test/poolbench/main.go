@@ -88,7 +88,7 @@ func main() {
 		fmt.Printf("[claim] n=%d conc=%d warmHits=%d succ=%.1f%% latency p50=%.0fms p95=%.0fms p99=%.0fms max=%.0fms\n",
 			*claims, *claimConc, claimRes["warmHits"], claimRes["successRate"].(float64)*100, claimRes["p50Ms"], claimRes["p95Ms"], claimRes["p99Ms"], claimRes["maxMs"])
 		b, _ := json.MarshalIndent(result, "", "  ")
-		_ = os.WriteFile(*out, b, 0644)
+		_ = os.WriteFile(*out, b, 0o644)
 		fmt.Printf("wrote %s\n", *out)
 		return
 	}
@@ -104,7 +104,7 @@ func main() {
 
 	if *mode == "fill" {
 		b, _ := json.MarshalIndent(result, "", "  ")
-		_ = os.WriteFile(*out, b, 0644)
+		_ = os.WriteFile(*out, b, 0o644)
 		fmt.Printf("wrote %s\n", *out)
 		return
 	}
@@ -119,7 +119,7 @@ func main() {
 		*claims, *claimConc, claimRes["warmHits"], claimRes["successRate"].(float64)*100, claimRes["p50Ms"], claimRes["p95Ms"], claimRes["p99Ms"], claimRes["maxMs"])
 
 	b, _ := json.MarshalIndent(result, "", "  ")
-	_ = os.WriteFile(*out, b, 0644)
+	_ = os.WriteFile(*out, b, 0o644)
 	fmt.Printf("wrote %s\n", *out)
 }
 

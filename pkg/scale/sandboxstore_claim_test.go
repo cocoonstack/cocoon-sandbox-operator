@@ -8,7 +8,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 )
@@ -212,10 +211,10 @@ func (c *raceClient) Claim(context.Context, sandboxd.ClaimSpec) (sandboxd.ClaimR
 // poolInv builds a NodeInventory advertising a sandboxd address and pool capacities.
 func poolInv(node, addr string, pools ...PoolCapacity) *NodeInventory {
 	return &NodeInventory{
-		ObjectMeta: metav1.ObjectMeta{Name: node},
-		Node:       node,
-		Address:    addr,
-		Pools:      pools,
+		Name:    node,
+		Node:    node,
+		Address: addr,
+		Pools:   pools,
 	}
 }
 

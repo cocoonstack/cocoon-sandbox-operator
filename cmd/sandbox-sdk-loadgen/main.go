@@ -45,7 +45,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -512,11 +511,9 @@ func releaseWithRetry(ctx context.Context, cl client.Client, o *options, sb *san
 // — matching the warm pool sandboxd maintains — so a create is a warm hit.
 func newSandbox(ns, name, image string) *sandboxv1beta1.Sandbox {
 	return &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: ns,
-			Name:      name,
-			Labels:    map[string]string{"agents.x-k8s.io/created-by": "sdk-loadgen"},
-		},
+		Namespace: ns,
+		Name:      name,
+		Labels:    map[string]string{"agents.x-k8s.io/created-by": "sdk-loadgen"},
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
 				PodTemplate: sandboxv1beta1.PodTemplate{

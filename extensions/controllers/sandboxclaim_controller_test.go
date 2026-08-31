@@ -53,7 +53,7 @@ import (
 
 func TestSandboxClaimReconcile(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
+		Name: "test-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -64,10 +64,8 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	templateWithNP := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-template-with-np",
-			Namespace: "default",
-		},
+		Name:      "test-template-with-np",
+		Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -105,25 +103,23 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 
 	warmPoolWithNP := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool-with-np", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-with-np"}},
+		Name: "test-warmpool-with-np", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-with-np"}},
 	}
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim", Namespace: "default", UID: "claim-uid"},
-		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
+		Name: "test-claim", Namespace: "default", UID: "claim-uid",
+		Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 	}
 
 	uncontrolledSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-claim", Namespace: "default",
-			Annotations: map[string]string{sandboxv1beta1.SandboxTemplateRefAnnotation: "test-template"},
-		},
+		Name: "test-claim", Namespace: "default",
+		Annotations: map[string]string{sandboxv1beta1.SandboxTemplateRefAnnotation: "test-template"},
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: sandboxv1beta1.PodMetadata{
@@ -137,13 +133,11 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	controlledSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-claim", Namespace: "default",
-			Annotations: map[string]string{sandboxv1beta1.SandboxTemplateRefAnnotation: "test-template"},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: "test-claim", UID: "claim-uid", Controller: new(true),
-			}},
-		},
+		Name: "test-claim", Namespace: "default",
+		Annotations: map[string]string{sandboxv1beta1.SandboxTemplateRefAnnotation: "test-template"},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: "test-claim", UID: "claim-uid", Controller: new(true),
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: sandboxv1beta1.PodMetadata{
@@ -165,7 +159,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	controlledSandboxWithDefault.Spec.PodTemplate.Spec.AutomountServiceAccountToken = new(false)
 
 	templateWithAutomount := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "automount-template", Namespace: "default"},
+		Name: "automount-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{AutomountServiceAccountToken: new(true), Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}}},
@@ -174,17 +168,17 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	warmPoolForAutomount := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "automount-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "automount-template"}},
+		Name: "automount-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "automount-template"}},
 	}
 
 	claimForAutomount := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "automount-claim", Namespace: "default", UID: "claim-uid-automount"},
-		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "automount-warmpool"}},
+		Name: "automount-claim", Namespace: "default", UID: "claim-uid-automount",
+		Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "automount-warmpool"}},
 	}
 
 	templateWithEnv := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template-env", Namespace: "default"},
+		Name: "test-template-env", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -203,22 +197,22 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	templateWithEnvAllowed.Spec.EnvVarsInjectionPolicy = extensionsv1beta1.EnvVarsInjectionPolicyAllowed
 
 	warmPoolWithEnv := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool-env", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-env"}},
+		Name: "test-warmpool-env", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-env"}},
 	}
 
 	warmPoolWithEnvOverride := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool-env-override", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-env-override"}},
+		Name: "test-warmpool-env-override", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-env-override"}},
 	}
 
 	warmPoolWithEnvAllowed := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool-env-allowed", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-env-allowed"}},
+		Name: "test-warmpool-env-allowed", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-env-allowed"}},
 	}
 
 	claimWithEnv := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-env", Namespace: "default", UID: "claim-env-uid"},
+		Name: "test-claim-env", Namespace: "default", UID: "claim-env-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-env-override"},
 			Env:         []extensionsv1beta1.EnvVar{{Name: "NEW_VAR", Value: "claim-value"}},
@@ -226,7 +220,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	claimWithNewEnvDisallowed := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-new-env-disallowed", Namespace: "default", UID: "claim-new-env-disallowed-uid"},
+		Name: "test-claim-new-env-disallowed", Namespace: "default", UID: "claim-new-env-disallowed-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
 			Env:         []extensionsv1beta1.EnvVar{{Name: "NEW_VAR", Value: "claim-value"}},
@@ -234,7 +228,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	claimWithEnvConflict := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-env-conflict", Namespace: "default", UID: "claim-env-conflict-uid"},
+		Name: "test-claim-env-conflict", Namespace: "default", UID: "claim-env-conflict-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-env"},
 			Env:         []extensionsv1beta1.EnvVar{{Name: "EXISTING_VAR", Value: "claim-override-value"}},
@@ -247,7 +241,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	claimWithEnvOverride.Spec.WarmPoolRef.Name = "test-warmpool-env-override"
 
 	claimWithEnvAllowedSuccess := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-env-allowed-success", Namespace: "default", UID: "claim-env-allowed-uid"},
+		Name: "test-claim-env-allowed-success", Namespace: "default", UID: "claim-env-allowed-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-env-allowed"},
 			Env:         []extensionsv1beta1.EnvVar{{Name: "NEW_VAR_ALLOWED", Value: "claim-value"}},
@@ -259,18 +253,18 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	templateWithEnvAllowedAndEnvFrom.Spec.PodTemplate.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{
 		{
 			ConfigMapRef: &corev1.ConfigMapEnvSource{
-				LocalObjectReference: corev1.LocalObjectReference{Name: "some-configmap"},
+				Name: "some-configmap",
 			},
 		},
 	}
 
 	warmPoolWithEnvAllowedAndEnvFrom := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool-env-allowed-envfrom", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-env-allowed-envfrom"}},
+		Name: "test-warmpool-env-allowed-envfrom", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-env-allowed-envfrom"}},
 	}
 
 	claimWithEnvAllowedAndEnvFrom := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-env-allowed-envfrom", Namespace: "default", UID: "claim-env-allowed-envfrom-uid"},
+		Name: "test-claim-env-allowed-envfrom", Namespace: "default", UID: "claim-env-allowed-envfrom-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-env-allowed-envfrom"},
 			Env:         []extensionsv1beta1.EnvVar{{Name: "NEW_VAR_ALLOWED", Value: "claim-value"}},
@@ -278,7 +272,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	templateWithInitEnvFromAllowed := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template-init-envfrom-allowed", Namespace: "default"},
+		Name: "test-template-init-envfrom-allowed", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			EnvVarsInjectionPolicy: extensionsv1beta1.EnvVarsInjectionPolicyAllowed,
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
@@ -291,7 +285,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 								EnvFrom: []corev1.EnvFromSource{
 									{
 										ConfigMapRef: &corev1.ConfigMapEnvSource{
-											LocalObjectReference: corev1.LocalObjectReference{Name: "some-configmap"},
+											Name: "some-configmap",
 										},
 									},
 								},
@@ -305,12 +299,12 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	warmPoolWithInitEnvFromAllowed := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool-init-envfrom-allowed", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-init-envfrom-allowed"}},
+		Name: "test-warmpool-init-envfrom-allowed", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-init-envfrom-allowed"}},
 	}
 
 	claimWithInitEnvFromAllowed := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-init-envfrom-allowed", Namespace: "default", UID: "claim-init-envfrom-allowed-uid"},
+		Name: "test-claim-init-envfrom-allowed", Namespace: "default", UID: "claim-init-envfrom-allowed-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-init-envfrom-allowed"},
 			Env:         []extensionsv1beta1.EnvVar{{Name: "NEW_VAR_ALLOWED", Value: "claim-value", ContainerName: "init-setup"}},
@@ -318,7 +312,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	claimWithInitEnvFromAllowedButInjectsToApp := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-init-envfrom-allowed-app", Namespace: "default", UID: "claim-init-envfrom-allowed-app-uid"},
+		Name: "test-claim-init-envfrom-allowed-app", Namespace: "default", UID: "claim-init-envfrom-allowed-app-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-init-envfrom-allowed"},
 			Env:         []extensionsv1beta1.EnvVar{{Name: "NEW_VAR_ALLOWED", Value: "claim-value", ContainerName: "app-container"}},
@@ -326,14 +320,14 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	claimWithNoEnvAndEnvFrom := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-no-env-envfrom", Namespace: "default", UID: "claim-no-env-envfrom-uid"},
+		Name: "test-claim-no-env-envfrom", Namespace: "default", UID: "claim-no-env-envfrom-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-env-allowed-envfrom"},
 		},
 	}
 
 	claimWithEnvOverrideNotAllowed := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-env-override-not-allowed", Namespace: "default", UID: "claim-override-not-allowed-uid"},
+		Name: "test-claim-env-override-not-allowed", Namespace: "default", UID: "claim-override-not-allowed-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-env-allowed"},
 			Env:         []extensionsv1beta1.EnvVar{{Name: "EXISTING_VAR", Value: "claim-override-value"}},
@@ -341,7 +335,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	templateMultiContainer := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template-multi-container", Namespace: "default"},
+		Name: "test-template-multi-container", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -355,12 +349,12 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	warmPoolMultiContainer := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool-multi-container", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-multi-container"}},
+		Name: "test-warmpool-multi-container", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-multi-container"}},
 	}
 
 	claimTargetAppContainer := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-target-app", Namespace: "default", UID: "uid-target-app"},
+		Name: "test-claim-target-app", Namespace: "default", UID: "uid-target-app",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-multi-container"},
 			Env: []extensionsv1beta1.EnvVar{
@@ -370,7 +364,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	claimTargetInvalid := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-target-invalid", Namespace: "default", UID: "uid-target-invalid"},
+		Name: "test-claim-target-invalid", Namespace: "default", UID: "uid-target-invalid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-multi-container"},
 			Env: []extensionsv1beta1.EnvVar{
@@ -380,7 +374,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	templateWithInitContainer := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template-init-container", Namespace: "default"},
+		Name: "test-template-init-container", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -392,12 +386,12 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 
 	warmPoolWithInitContainer := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool-init-container", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-init-container"}},
+		Name: "test-warmpool-init-container", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-init-container"}},
 	}
 
 	claimTargetInitContainer := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim-target-init", Namespace: "default", UID: "uid-target-init"},
+		Name: "test-claim-target-init", Namespace: "default", UID: "uid-target-init",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-init-container"},
 			Env: []extensionsv1beta1.EnvVar{
@@ -550,8 +544,8 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "sandbox is created with network policy enabled",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-claim-np", Namespace: "default", UID: "claim-np-uid"},
-				Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-with-np"}},
+				Name: "test-claim-np", Namespace: "default", UID: "claim-np-uid",
+				Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool-with-np"}},
 			},
 			existingObjects: []client.Object{templateWithNP, warmPoolWithNP},
 			expectSandbox:   true,
@@ -563,8 +557,8 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "Scenario A: Creates Default Secure Policy (Strict Isolation) when template has none",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "claim-default-np", Namespace: "default", UID: "uid-default-np"},
-				Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
+				Name: "claim-default-np", Namespace: "default", UID: "uid-default-np",
+				Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 			},
 			existingObjects: []client.Object{template, warmPool},
 			expectSandbox:   true,
@@ -598,13 +592,11 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			existingObjects: []client.Object{
 				warmPool,
 				&networkingv1.NetworkPolicy{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-claim-network-policy", // Matches the claim name
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{{
-							APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: "test-claim", UID: "claim-uid", Controller: new(true),
-						}},
-					},
+					Name:      "test-claim-network-policy", // Matches the claim name
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: "test-claim", UID: "claim-uid", Controller: new(true),
+					}},
 				},
 			},
 			expectSandbox: false, // Controller will fail to build sandbox, which is correct
@@ -624,13 +616,11 @@ func TestSandboxClaimReconcile(t *testing.T) {
 				template,
 				warmPool,
 				&networkingv1.NetworkPolicy{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-claim-network-policy",
-						Namespace: "default",
-						OwnerReferences: []metav1.OwnerReference{{
-							APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: "test-claim", UID: "claim-uid", Controller: new(true),
-						}},
-					},
+					Name:      "test-claim-network-policy",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: "test-claim", UID: "claim-uid", Controller: new(true),
+					}},
 				},
 			},
 			expectSandbox: true,
@@ -649,10 +639,8 @@ func TestSandboxClaimReconcile(t *testing.T) {
 				template,
 				warmPool,
 				&networkingv1.NetworkPolicy{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-claim-network-policy",
-						Namespace: "default",
-					},
+					Name:      "test-claim-network-policy",
+					Namespace: "default",
 				},
 			},
 			expectSandbox: true,
@@ -667,11 +655,9 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "trace context is propagated from claim to sandbox",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "trace-claim", Namespace: "default", UID: "trace-uid",
-					Annotations: map[string]string{asmetrics.TraceContextAnnotation: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
-				},
-				Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
+				Name: "trace-claim", Namespace: "default", UID: "trace-uid",
+				Annotations: map[string]string{asmetrics.TraceContextAnnotation: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
+				Spec:        extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 			},
 			existingObjects: []client.Object{template, warmPool},
 			expectSandbox:   true,
@@ -687,7 +673,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "sandbox is created with additional metadata from claim",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "claim-with-meta", Namespace: "default", UID: "uid-meta"},
+				Name: "claim-with-meta", Namespace: "default", UID: "uid-meta",
 				Spec: extensionsv1beta1.SandboxClaimSpec{
 					WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
 					AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
@@ -713,7 +699,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "claim with label without domain is rejected",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "claim-no-domain-label", Namespace: "default", UID: "uid-no-domain-label"},
+				Name: "claim-no-domain-label", Namespace: "default", UID: "uid-no-domain-label",
 				Spec: extensionsv1beta1.SandboxClaimSpec{
 					WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
 					AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
@@ -731,7 +717,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "claim with too long label value is rejected",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "claim-long-label", Namespace: "default", UID: "uid-long-label"},
+				Name: "claim-long-label", Namespace: "default", UID: "uid-long-label",
 				Spec: extensionsv1beta1.SandboxClaimSpec{
 					WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
 					AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
@@ -749,7 +735,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "claim with invalid label pattern is rejected",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "claim-invalid-label", Namespace: "default", UID: "uid-invalid-label"},
+				Name: "claim-invalid-label", Namespace: "default", UID: "uid-invalid-label",
 				Spec: extensionsv1beta1.SandboxClaimSpec{
 					WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
 					AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
@@ -767,7 +753,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "claim with invalid label key is rejected",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "claim-invalid-key", Namespace: "default", UID: "uid-invalid-key"},
+				Name: "claim-invalid-key", Namespace: "default", UID: "uid-invalid-key",
 				Spec: extensionsv1beta1.SandboxClaimSpec{
 					WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
 					AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
@@ -785,7 +771,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "claim with restricted domain label is rejected",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "claim-restricted-label", Namespace: "default", UID: "uid-restricted-label"},
+				Name: "claim-restricted-label", Namespace: "default", UID: "uid-restricted-label",
 				Spec: extensionsv1beta1.SandboxClaimSpec{
 					WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
 					AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
@@ -803,7 +789,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "claim with spoofed router app label is rejected",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "claim-spoofed-app-label", Namespace: "default", UID: "uid-spoofed-app-label"},
+				Name: "claim-spoofed-app-label", Namespace: "default", UID: "uid-spoofed-app-label",
 				Spec: extensionsv1beta1.SandboxClaimSpec{
 					WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
 					AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
@@ -824,7 +810,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		{
 			name: "claim with custom allowed domain is accepted",
 			claimToReconcile: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "claim-custom-domain", Namespace: "default", UID: "uid-custom-domain"},
+				Name: "claim-custom-domain", Namespace: "default", UID: "uid-custom-domain",
 				Spec: extensionsv1beta1.SandboxClaimSpec{
 					WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
 					AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
@@ -892,25 +878,23 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			existingObjects: []client.Object{
 				templateWithEnvOverride,
 				&extensionsv1beta1.SandboxWarmPool{
-					ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool-env-override", Namespace: "default", UID: "wp-env-override-uid"},
-					Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-env-override"}},
+					Name: "test-warmpool-env-override", Namespace: "default", UID: "wp-env-override-uid",
+					Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template-env-override"}},
 				},
 				&sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "adoptable-warm-sandbox",
-						Namespace: "default",
-						Labels: map[string]string{
-							warmPoolSandboxLabel:   sandboxcontrollers.NameHash("test-warmpool-env-override"),
-							sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template-env-override"),
-						},
-						OwnerReferences: []metav1.OwnerReference{{
-							APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-							Kind:       "SandboxWarmPool",
-							Name:       "test-warmpool-env-override",
-							UID:        "wp-env-override-uid",
-							Controller: new(true),
-						}},
+					Name:      "adoptable-warm-sandbox",
+					Namespace: "default",
+					Labels: map[string]string{
+						warmPoolSandboxLabel:   sandboxcontrollers.NameHash("test-warmpool-env-override"),
+						sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template-env-override"),
 					},
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+						Kind:       "SandboxWarmPool",
+						Name:       "test-warmpool-env-override",
+						UID:        "wp-env-override-uid",
+						Controller: new(true),
+					}},
 				},
 			},
 			expectSandbox: true,
@@ -1110,7 +1094,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 				}
 			}
 			req := reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: claimToUse.Name, Namespace: "default"},
+				Name: claimToUse.Name, Namespace: "default",
 			}
 			_, err := reconciler.Reconcile(t.Context(), req)
 			if tc.expectError && err == nil {
@@ -1195,19 +1179,19 @@ func TestSandboxClaimReconcile(t *testing.T) {
 // based on its own timestamp, and deletes the Sandbox if Policy=Retain.
 func TestSandboxClaimCleanupPolicy(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "cleanup-template", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
+		Name: "cleanup-template", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "cleanup-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "cleanup-template"}},
+		Name: "cleanup-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "cleanup-template"}},
 	}
 
 	createClaim := func(name string, policy extensionsv1beta1.ShutdownPolicy) *extensionsv1beta1.SandboxClaim {
 		pastTime := metav1.Time{Time: time.Now().Add(-2 * time.Hour).Truncate(time.Second)}
 		return &extensionsv1beta1.SandboxClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(name)},
+			Name: name, Namespace: "default", UID: types.UID(name),
 			Spec: extensionsv1beta1.SandboxClaimSpec{
 				WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "cleanup-warmpool"},
 				Lifecycle: &extensionsv1beta1.Lifecycle{
@@ -1228,12 +1212,10 @@ func TestSandboxClaimCleanupPolicy(t *testing.T) {
 		}
 
 		return &sandboxv1beta1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      claimName,
-				Namespace: "default",
-				OwnerReferences: []metav1.OwnerReference{
-					{APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: claimName, UID: types.UID(claimName), Controller: new(true)},
-				},
+			Name:      claimName,
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: claimName, UID: types.UID(claimName), Controller: new(true)},
 			},
 			Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
 			Status: sandboxv1beta1.SandboxStatus{
@@ -1356,7 +1338,7 @@ func TestSandboxClaimCleanupPolicy(t *testing.T) {
 				WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 			}
 
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: tc.claim.Name, Namespace: "default"}}
+			req := reconcile.Request{Name: tc.claim.Name, Namespace: "default"}
 			var err error
 			for range 2 {
 				_, err = reconciler.Reconcile(t.Context(), req)
@@ -1425,7 +1407,7 @@ func TestSandboxClaimMirrorsFinishedConditionAndSchedulesTTL(t *testing.T) {
 	finishedAt := metav1.NewTime(time.Now().Add(-30 * time.Second))
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "ttl-mirror-claim", Namespace: "default", UID: "ttl-mirror-claim"},
+		Name: "ttl-mirror-claim", Namespace: "default", UID: "ttl-mirror-claim",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "ttl-mirror-warmpool"},
 			Lifecycle:   &extensionsv1beta1.Lifecycle{TTLSecondsAfterFinished: &ttl},
@@ -1433,28 +1415,26 @@ func TestSandboxClaimMirrorsFinishedConditionAndSchedulesTTL(t *testing.T) {
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "ttl-mirror-template", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
+		Name: "ttl-mirror-template", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "ttl-mirror-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "ttl-mirror-template"}},
+		Name: "ttl-mirror-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "ttl-mirror-template"}},
 	}
 
 	controller := true
 	sandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      claim.Name,
-			Namespace: claim.Namespace,
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-				Kind:       "SandboxClaim",
-				Name:       claim.Name,
-				UID:        claim.UID,
-				Controller: &controller,
-			}},
-		},
+		Name:      claim.Name,
+		Namespace: claim.Namespace,
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+			Kind:       "SandboxClaim",
+			Name:       claim.Name,
+			UID:        claim.UID,
+			Controller: &controller,
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
 		Status: sandboxv1beta1.SandboxStatus{Conditions: []metav1.Condition{{
 			Type:               string(sandboxv1beta1.SandboxConditionFinished),
@@ -1477,7 +1457,7 @@ func TestSandboxClaimMirrorsFinishedConditionAndSchedulesTTL(t *testing.T) {
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace}}
+	req := reconcile.Request{Name: claim.Name, Namespace: claim.Namespace}
 	result, err := reconciler.Reconcile(t.Context(), req)
 	require.NoError(t, err)
 	require.Greater(t, result.RequeueAfter, time.Duration(0))
@@ -1498,18 +1478,18 @@ func TestSandboxClaimTTLAfterFinishedCleanupPolicy(t *testing.T) {
 	finishedAt := metav1.NewTime(time.Now().Add(-1 * time.Minute))
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "cleanup-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "cleanup-template"}},
+		Name: "cleanup-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "cleanup-template"}},
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "cleanup-template", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
+		Name: "cleanup-template", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
 	}
 
 	createClaim := func(name string, policy extensionsv1beta1.ShutdownPolicy) *extensionsv1beta1.SandboxClaim {
 		return &extensionsv1beta1.SandboxClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(name)},
+			Name: name, Namespace: "default", UID: types.UID(name),
 			Spec: extensionsv1beta1.SandboxClaimSpec{
 				WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "cleanup-warmpool"},
 				Lifecycle: &extensionsv1beta1.Lifecycle{
@@ -1529,17 +1509,15 @@ func TestSandboxClaimTTLAfterFinishedCleanupPolicy(t *testing.T) {
 	controller := true
 	createSandbox := func(claim *extensionsv1beta1.SandboxClaim) *sandboxv1beta1.Sandbox {
 		return &sandboxv1beta1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      claim.Name,
-				Namespace: claim.Namespace,
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-					Kind:       "SandboxClaim",
-					Name:       claim.Name,
-					UID:        claim.UID,
-					Controller: &controller,
-				}},
-			},
+			Name:      claim.Name,
+			Namespace: claim.Namespace,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+				Kind:       "SandboxClaim",
+				Name:       claim.Name,
+				UID:        claim.UID,
+				Controller: &controller,
+			}},
 			Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
 			Status: sandboxv1beta1.SandboxStatus{Conditions: []metav1.Condition{{
 				Type:               string(sandboxv1beta1.SandboxConditionFinished),
@@ -1587,7 +1565,7 @@ func TestSandboxClaimTTLAfterFinishedCleanupPolicy(t *testing.T) {
 				WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 			}
 
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace}}
+			req := reconcile.Request{Name: claim.Name, Namespace: claim.Namespace}
 			result, err := reconciler.Reconcile(t.Context(), req)
 			require.NoError(t, err)
 			require.Greater(t, result.RequeueAfter, time.Duration(0))
@@ -1637,13 +1615,11 @@ func TestSandboxClaimTTLCleanupRequiresPersistedExpiredStatus(t *testing.T) {
 	finishedAt := metav1.NewTime(time.Now().Add(-1 * time.Minute))
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "stale-ttl-claim",
-			Namespace: "default",
-			UID:       "stale-ttl-claim",
-			Annotations: map[string]string{
-				asmetrics.ObservabilityAnnotation: time.Now().Format(time.RFC3339Nano),
-			},
+		Name:      "stale-ttl-claim",
+		Namespace: "default",
+		UID:       "stale-ttl-claim",
+		Annotations: map[string]string{
+			asmetrics.ObservabilityAnnotation: time.Now().Format(time.RFC3339Nano),
 		},
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "stale-warmpool"},
@@ -1655,12 +1631,12 @@ func TestSandboxClaimTTLCleanupRequiresPersistedExpiredStatus(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "stale-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "stale-template"}},
+		Name: "stale-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "stale-template"}},
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "stale-template", Namespace: "default"},
+		Name: "stale-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "test-container", Image: "test-image"}}},
 		}}},
@@ -1668,17 +1644,15 @@ func TestSandboxClaimTTLCleanupRequiresPersistedExpiredStatus(t *testing.T) {
 
 	controller := true
 	sandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      claim.Name,
-			Namespace: claim.Namespace,
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-				Kind:       "SandboxClaim",
-				Name:       claim.Name,
-				UID:        claim.UID,
-				Controller: &controller,
-			}},
-		},
+		Name:      claim.Name,
+		Namespace: claim.Namespace,
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+			Kind:       "SandboxClaim",
+			Name:       claim.Name,
+			UID:        claim.UID,
+			Controller: &controller,
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
 		Status: sandboxv1beta1.SandboxStatus{Conditions: []metav1.Condition{{
 			Type:               string(sandboxv1beta1.SandboxConditionFinished),
@@ -1701,7 +1675,7 @@ func TestSandboxClaimTTLCleanupRequiresPersistedExpiredStatus(t *testing.T) {
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace}}
+	req := reconcile.Request{Name: claim.Name, Namespace: claim.Namespace}
 	result, err := reconciler.Reconcile(t.Context(), req)
 	require.NoError(t, err)
 	require.Greater(t, result.RequeueAfter, time.Duration(0))
@@ -1731,20 +1705,20 @@ func TestSandboxProvisionEvent(t *testing.T) {
 	claimName := "provision-event-claim"
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: claimName, Namespace: "default", UID: types.UID(claimName)},
+		Name: claimName, Namespace: "default", UID: types.UID(claimName),
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
 		},
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
+		Name: "test-template", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{}}},
 	}
 
 	fakeRecorder := events.NewFakeRecorder(10)
@@ -1760,7 +1734,7 @@ func TestSandboxProvisionEvent(t *testing.T) {
 		Tracer:           asmetrics.NewNoOp(),
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
+	req := reconcile.Request{Name: claimName, Namespace: "default"}
 
 	if _, err := reconciler.Reconcile(t.Context(), req); err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
@@ -1792,19 +1766,19 @@ func TestCreateSandboxPropagatesVolumeClaimTemplates(t *testing.T) {
 	claimName := "vct-claim"
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: claimName, Namespace: "default", UID: types.UID(claimName)},
+		Name: claimName, Namespace: "default", UID: types.UID(claimName),
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "vct-warmpool"},
 		},
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "vct-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "vct-template"}},
+		Name: "vct-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "vct-template"}},
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "vct-template", Namespace: "default"},
+		Name: "vct-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
 				PodTemplate: sandboxv1beta1.PodTemplate{
@@ -1814,7 +1788,7 @@ func TestCreateSandboxPropagatesVolumeClaimTemplates(t *testing.T) {
 				},
 				VolumeClaimTemplates: []sandboxv1beta1.PersistentVolumeClaimTemplate{
 					{
-						EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"},
+						Name: "data",
 						Spec: corev1.PersistentVolumeClaimSpec{
 							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 							Resources: corev1.VolumeResourceRequirements{
@@ -1841,7 +1815,7 @@ func TestCreateSandboxPropagatesVolumeClaimTemplates(t *testing.T) {
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
+	req := reconcile.Request{Name: claimName, Namespace: "default"}
 	_, err := reconciler.Reconcile(t.Context(), req)
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
@@ -1869,10 +1843,8 @@ func TestCreateSandboxPropagatesVolumeClaimTemplates(t *testing.T) {
 
 func TestSandboxClaimSandboxAdoption(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-template",
-			Namespace: "default",
-		},
+		Name:      "test-template",
+		Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -1888,11 +1860,9 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 	}
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-claim",
-			Namespace: "default",
-			UID:       "claim-uid",
-		},
+		Name:      "test-claim",
+		Namespace: "default",
+		UID:       "claim-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{
 				Name: "test-pool",
@@ -1904,8 +1874,8 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 	poolNameHash := sandboxcontrollers.NameHash("test-pool")
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default", UID: warmPoolUID},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-pool", Namespace: "default", UID: warmPoolUID,
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 
 	createWarmPoolSandbox := func(name string, creationTime metav1.Time, ready bool) *sandboxv1beta1.Sandbox {
@@ -1914,23 +1884,21 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 			conditionStatus = metav1.ConditionTrue
 		}
 		return &sandboxv1beta1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:              name,
-				Namespace:         "default",
-				CreationTimestamp: creationTime,
-				Labels: map[string]string{
-					warmPoolSandboxLabel:                  poolNameHash,
-					sandboxTemplateRefHash:                SandboxTemplateRefHash("test-template"),
-					sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeWarm,
-				},
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-						Kind:       "SandboxWarmPool",
-						Name:       "test-pool",
-						UID:        warmPoolUID,
-						Controller: new(true),
-					},
+			Name:              name,
+			Namespace:         "default",
+			CreationTimestamp: creationTime,
+			Labels: map[string]string{
+				warmPoolSandboxLabel:                  poolNameHash,
+				sandboxTemplateRefHash:                SandboxTemplateRefHash("test-template"),
+				sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeWarm,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+					Kind:       "SandboxWarmPool",
+					Name:       "test-pool",
+					UID:        warmPoolUID,
+					Controller: new(true),
 				},
 			},
 			Spec: sandboxv1beta1.SandboxSpec{
@@ -1964,21 +1932,19 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 
 	createSandboxWithDifferentController := func(name string) *sandboxv1beta1.Sandbox {
 		return &sandboxv1beta1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: "default",
-				Labels: map[string]string{
-					warmPoolSandboxLabel:   poolNameHash,
-					sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
-				},
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: "apps/v1",
-						Kind:       "ReplicaSet",
-						Name:       "other-controller",
-						UID:        "other-uid-456",
-						Controller: new(true),
-					},
+			Name:      name,
+			Namespace: "default",
+			Labels: map[string]string{
+				warmPoolSandboxLabel:   poolNameHash,
+				sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "apps/v1",
+					Kind:       "ReplicaSet",
+					Name:       "other-controller",
+					UID:        "other-uid-456",
+					Controller: new(true),
 				},
 			},
 			Spec: sandboxv1beta1.SandboxSpec{
@@ -2308,10 +2274,8 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 			}
 
 			req := reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      "test-claim",
-					Namespace: "default",
-				},
+				Name:      "test-claim",
+				Namespace: "default",
 			}
 
 			ctx := t.Context()
@@ -2421,14 +2385,12 @@ func TestSandboxEventHandler_Delete_RemovesGhostPods(t *testing.T) {
 
 	// 2. Create the mock Sandbox object that is being deleted
 	sb := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "ghost-pod",
-			Namespace: "default",
-			OwnerReferences: []metav1.OwnerReference{{
-				Kind: "SandboxWarmPool",
-				Name: warmPoolName,
-			}},
-		},
+		Name:      "ghost-pod",
+		Namespace: "default",
+		OwnerReferences: []metav1.OwnerReference{{
+			Kind: "SandboxWarmPool",
+			Name: warmPoolName,
+		}},
 	}
 
 	// 3. Fire the Delete event
@@ -2454,10 +2416,8 @@ func TestWarmPoolEventHandler_Delete_RemovesEntireQueue(t *testing.T) {
 
 	// 2. Create the mock SandboxWarmPool object that is being deleted
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      warmPoolName,
-			Namespace: "default",
-		},
+		Name:      warmPoolName,
+		Namespace: "default",
 	}
 
 	// 3. Fire the Delete event
@@ -2476,7 +2436,7 @@ func TestSandboxClaimNoReAdoption(t *testing.T) {
 	scheme := newScheme(t)
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
+		Name: "test-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -2487,16 +2447,16 @@ func TestSandboxClaimNoReAdoption(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-pool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 
 	poolNameHash := sandboxcontrollers.NameHash("test-pool")
 
 	// Claim that already adopted a sandbox (name recorded in status)
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim", Namespace: "default", UID: "claim-uid"},
-		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-pool"}},
+		Name: "test-claim", Namespace: "default", UID: "claim-uid",
+		Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-pool"}},
 		Status: extensionsv1beta1.SandboxClaimStatus{
 			SandboxStatus: extensionsv1beta1.SandboxStatus{Name: "adopted-sb"},
 		},
@@ -2504,24 +2464,20 @@ func TestSandboxClaimNoReAdoption(t *testing.T) {
 
 	// The previously adopted sandbox (owned by claim, different name)
 	adoptedSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "adopted-sb", Namespace: "default",
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim",
-				Name: "test-claim", UID: "claim-uid", Controller: new(true),
-			}},
-		},
+		Name: "adopted-sb", Namespace: "default",
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim",
+			Name: "test-claim", UID: "claim-uid", Controller: new(true),
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning},
 	}
 
 	// Another warm pool sandbox that should NOT be adopted
 	poolSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "pool-sb-extra", Namespace: "default",
-			Labels: map[string]string{
-				warmPoolSandboxLabel:   poolNameHash,
-				sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
-			},
+		Name: "pool-sb-extra", Namespace: "default",
+		Labels: map[string]string{
+			warmPoolSandboxLabel:   poolNameHash,
+			sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
 		},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning},
 		Status: sandboxv1beta1.SandboxStatus{
@@ -2545,7 +2501,7 @@ func TestSandboxClaimNoReAdoption(t *testing.T) {
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
+	req := reconcile.Request{Name: "test-claim", Namespace: "default"}
 	ctx := t.Context()
 
 	_, err := reconciler.Reconcile(ctx, req)
@@ -2587,12 +2543,10 @@ func TestRecordCreationLatencyMetric(t *testing.T) {
 		{
 			name: "records success on first ready transition (with webhook annotation)",
 			claim: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "new-ready",
-					CreationTimestamp: pastTime,
-					Annotations: map[string]string{
-						asmetrics.WebhookAnnotation: time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
-					},
+				Name:              "new-ready",
+				CreationTimestamp: pastTime,
+				Annotations: map[string]string{
+					asmetrics.WebhookAnnotation: time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
 				},
 				Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 				Status: extensionsv1beta1.SandboxClaimStatus{
@@ -2605,8 +2559,8 @@ func TestRecordCreationLatencyMetric(t *testing.T) {
 		{
 			name: "skips recording when webhook annotation is missing",
 			claim: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "webhook-missing", CreationTimestamp: pastTime},
-				Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
+				Name: "webhook-missing", CreationTimestamp: pastTime,
+				Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 				Status: extensionsv1beta1.SandboxClaimStatus{
 					Conditions: []metav1.Condition{{Type: string(sandboxv1beta1.SandboxConditionReady), Status: metav1.ConditionTrue}},
 				},
@@ -2617,8 +2571,8 @@ func TestRecordCreationLatencyMetric(t *testing.T) {
 		{
 			name: "ignores ready condition = false",
 			claim: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "not-ready", CreationTimestamp: pastTime},
-				Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
+				Name: "not-ready", CreationTimestamp: pastTime,
+				Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 				Status: extensionsv1beta1.SandboxClaimStatus{
 					Conditions: []metav1.Condition{{Type: string(sandboxv1beta1.SandboxConditionReady), Status: metav1.ConditionFalse}},
 				},
@@ -2629,7 +2583,7 @@ func TestRecordCreationLatencyMetric(t *testing.T) {
 		{
 			name: "ignores success if status was already ready in previous loop",
 			claim: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "already-ready", CreationTimestamp: pastTime},
+				Name: "already-ready", CreationTimestamp: pastTime,
 				Status: extensionsv1beta1.SandboxClaimStatus{
 					Conditions: []metav1.Condition{{Type: string(sandboxv1beta1.SandboxConditionReady), Status: metav1.ConditionTrue}},
 				},
@@ -2642,12 +2596,10 @@ func TestRecordCreationLatencyMetric(t *testing.T) {
 		{
 			name: "uses unknown launch type when sandbox is nil",
 			claim: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "unknown",
-					CreationTimestamp: pastTime,
-					Annotations: map[string]string{
-						asmetrics.WebhookAnnotation: time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
-					},
+				Name:              "unknown",
+				CreationTimestamp: pastTime,
+				Annotations: map[string]string{
+					asmetrics.WebhookAnnotation: time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
 				},
 				Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 				Status: extensionsv1beta1.SandboxClaimStatus{
@@ -2661,15 +2613,13 @@ func TestRecordCreationLatencyMetric(t *testing.T) {
 		{
 			name: "records controller latency using stored time",
 			claim: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "stored-time",
-					Namespace:         "default",
-					UID:               "uid-stored-time",
-					CreationTimestamp: pastTime,
-					Annotations: map[string]string{
-						asmetrics.ObservabilityAnnotation: time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
-						asmetrics.WebhookAnnotation:       time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
-					},
+				Name:              "stored-time",
+				Namespace:         "default",
+				UID:               "uid-stored-time",
+				CreationTimestamp: pastTime,
+				Annotations: map[string]string{
+					asmetrics.ObservabilityAnnotation: time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
+					asmetrics.WebhookAnnotation:       time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
 				},
 				Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 				Status: extensionsv1beta1.SandboxClaimStatus{
@@ -2687,13 +2637,11 @@ func TestRecordCreationLatencyMetric(t *testing.T) {
 		{
 			name: "skips claim startup latency if webhook duration is negative but records controller latency",
 			claim: &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "future-webhook",
-					CreationTimestamp: pastTime,
-					Annotations: map[string]string{
-						asmetrics.WebhookAnnotation:       time.Now().Add(5 * time.Second).Format(time.RFC3339Nano),
-						asmetrics.ObservabilityAnnotation: time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
-					},
+				Name:              "future-webhook",
+				CreationTimestamp: pastTime,
+				Annotations: map[string]string{
+					asmetrics.WebhookAnnotation:       time.Now().Add(5 * time.Second).Format(time.RFC3339Nano),
+					asmetrics.ObservabilityAnnotation: time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
 				},
 				Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 				Status: extensionsv1beta1.SandboxClaimStatus{
@@ -2713,7 +2661,7 @@ func TestRecordCreationLatencyMetric(t *testing.T) {
 			asmetrics.ClaimControllerStartupLatency.Reset()
 
 			scheme := newScheme(t)
-			warmPool := &extensionsv1beta1.SandboxWarmPool{ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool", Namespace: "default"}, Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "tpl"}}}
+			warmPool := &extensionsv1beta1.SandboxWarmPool{Name: "test-warmpool", Namespace: "default", Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "tpl"}}}
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(warmPool).Build()
 			r := &SandboxClaimReconciler{Client: fakeClient}
 
@@ -2739,7 +2687,7 @@ func TestRecordCreationLatencyMetric(t *testing.T) {
 
 func TestSandboxClaimCreationMetric(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
+		Name: "test-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -2750,13 +2698,13 @@ func TestSandboxClaimCreationMetric(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim", Namespace: "default", UID: "claim-uid"},
-		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
+		Name: "test-claim", Namespace: "default", UID: "claim-uid",
+		Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 	}
 
 	t.Run("Cold Start", func(t *testing.T) {
@@ -2771,7 +2719,7 @@ func TestSandboxClaimCreationMetric(t *testing.T) {
 			Tracer:           asmetrics.NewNoOp(),
 		}
 
-		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: "default"}}
+		req := reconcile.Request{Name: claim.Name, Namespace: "default"}
 		_, err := reconciler.Reconcile(t.Context(), req)
 		if err != nil {
 			t.Fatalf("reconcile failed: %v", err)
@@ -2802,25 +2750,23 @@ func TestSandboxClaimCreationMetric(t *testing.T) {
 		// Create a warm pool sandbox
 		poolNameHash := sandboxcontrollers.NameHash("test-warmpool")
 		warmSandbox := &sandboxv1beta1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "warm-sb",
-				Namespace: "default",
-				Labels: map[string]string{
-					warmPoolSandboxLabel:          poolNameHash,
-					sandboxTemplateRefHash:        sandboxcontrollers.NameHash("test-template"),
-					sandboxv1beta1.CreatedByLabel: "controller",
-				},
-				Annotations: map[string]string{
-					sandboxv1beta1.SandboxTemplateRefAnnotation: "test-template",
-				},
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-						Kind:       "SandboxWarmPool",
-						Name:       "test-warmpool",
-						UID:        "pool-uid",
-						Controller: new(true),
-					},
+			Name:      "warm-sb",
+			Namespace: "default",
+			Labels: map[string]string{
+				warmPoolSandboxLabel:          poolNameHash,
+				sandboxTemplateRefHash:        sandboxcontrollers.NameHash("test-template"),
+				sandboxv1beta1.CreatedByLabel: "controller",
+			},
+			Annotations: map[string]string{
+				sandboxv1beta1.SandboxTemplateRefAnnotation: "test-template",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+					Kind:       "SandboxWarmPool",
+					Name:       "test-warmpool",
+					UID:        "pool-uid",
+					Controller: new(true),
 				},
 			},
 			Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "i"}}}}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning},
@@ -2848,7 +2794,7 @@ func TestSandboxClaimCreationMetric(t *testing.T) {
 			WarmSandboxQueue: warmSandboxQueue,
 			Tracer:           asmetrics.NewNoOp(),
 		}
-		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: "default"}}
+		req := reconcile.Request{Name: claim.Name, Namespace: "default"}
 		_, err := reconciler.Reconcile(t.Context(), req)
 		if err != nil {
 			t.Fatalf("reconcile failed: %v", err)
@@ -2887,10 +2833,8 @@ func TestGetLaunchType(t *testing.T) {
 		{
 			name: "warm launch label is warm",
 			sandbox: &sandboxv1beta1.Sandbox{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeWarm,
-					},
+				Labels: map[string]string{
+					sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeWarm,
 				},
 			},
 			want: asmetrics.LaunchTypeWarm,
@@ -2898,13 +2842,11 @@ func TestGetLaunchType(t *testing.T) {
 		{
 			name: "cold launch label with pod name annotation remains cold",
 			sandbox: &sandboxv1beta1.Sandbox{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeCold,
-					},
-					Annotations: map[string]string{
-						sandboxv1beta1.SandboxPodNameAnnotation: "sandbox-cold",
-					},
+				Labels: map[string]string{
+					sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeCold,
+				},
+				Annotations: map[string]string{
+					sandboxv1beta1.SandboxPodNameAnnotation: "sandbox-cold",
 				},
 			},
 			want: asmetrics.LaunchTypeCold,
@@ -2953,10 +2895,8 @@ func TestInitializeSandboxLaunchTypeLabel(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			scheme := newScheme(t)
 			sandbox := &sandboxv1beta1.Sandbox{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-sandbox",
-					Namespace: "default",
-				},
+				Name:      "test-sandbox",
+				Namespace: "default",
 			}
 			if tc.existingLabel != "" {
 				sandbox.Labels = map[string]string{
@@ -2989,10 +2929,10 @@ func TestSandboxClaimTimingPredicates(t *testing.T) {
 	pred := r.getTimingPredicate()
 
 	claim1 := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim", Namespace: "default", UID: "uid-1"},
+		Name: "test-claim", Namespace: "default", UID: "uid-1",
 	}
 	claim2 := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim", Namespace: "default", UID: "uid-2"},
+		Name: "test-claim", Namespace: "default", UID: "uid-2",
 	}
 	key := types.NamespacedName{Name: "test-claim", Namespace: "default"}
 	pastTime := time.Now().Add(-10 * time.Second)
@@ -3106,10 +3046,10 @@ func TestSandboxClaimTimingPredicates(t *testing.T) {
 
 func TestGetOrRecordObservedTime(t *testing.T) {
 	claim1 := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim", Namespace: "default", UID: "uid-1"},
+		Name: "test-claim", Namespace: "default", UID: "uid-1",
 	}
 	claim2 := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim", Namespace: "default", UID: "uid-2"},
+		Name: "test-claim", Namespace: "default", UID: "uid-2",
 	}
 	pastTime := time.Now().Add(-10 * time.Second)
 
@@ -3195,7 +3135,7 @@ func TestSandboxClaimReconcileCleanup(t *testing.T) {
 	newReconcilerFor := func(t *testing.T, objs ...client.Object) *SandboxClaimReconciler {
 		t.Helper()
 		scheme := newScheme(t)
-		objs = append(objs, &extensionsv1beta1.SandboxWarmPool{ObjectMeta: metav1.ObjectMeta{Name: "test-warmpool", Namespace: "default"}, Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}}})
+		objs = append(objs, &extensionsv1beta1.SandboxWarmPool{Name: "test-warmpool", Namespace: "default", Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}}})
 		fc := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithObjects(objs...).
@@ -3212,13 +3152,11 @@ func TestSandboxClaimReconcileCleanup(t *testing.T) {
 
 	makeReadyClaim := func(name string) *extensionsv1beta1.SandboxClaim {
 		return &extensionsv1beta1.SandboxClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: "default",
-				UID:       types.UID(name),
-				Annotations: map[string]string{
-					asmetrics.ObservabilityAnnotation: time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
-				},
+			Name:      name,
+			Namespace: "default",
+			UID:       types.UID(name),
+			Annotations: map[string]string{
+				asmetrics.ObservabilityAnnotation: time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
 			},
 			Spec: extensionsv1beta1.SandboxClaimSpec{
 				WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
@@ -3236,17 +3174,15 @@ func TestSandboxClaimReconcileCleanup(t *testing.T) {
 	ctrlBool := true
 	makeOwnedReadySandbox := func(cl *extensionsv1beta1.SandboxClaim) *sandboxv1beta1.Sandbox {
 		return &sandboxv1beta1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      cl.Name,
-				Namespace: cl.Namespace,
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-					Kind:       "SandboxClaim",
-					Name:       cl.Name,
-					UID:        cl.UID,
-					Controller: &ctrlBool,
-				}},
-			},
+			Name:      cl.Name,
+			Namespace: cl.Namespace,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+				Kind:       "SandboxClaim",
+				Name:       cl.Name,
+				UID:        cl.UID,
+				Controller: &ctrlBool,
+			}},
 			Status: sandboxv1beta1.SandboxStatus{
 				Conditions: []metav1.Condition{{
 					Type:   string(sandboxv1beta1.SandboxConditionReady),
@@ -3260,7 +3196,7 @@ func TestSandboxClaimReconcileCleanup(t *testing.T) {
 	reconcileAll := func(t *testing.T, r *SandboxClaimReconciler, claims []*extensionsv1beta1.SandboxClaim) {
 		t.Helper()
 		for _, cl := range claims {
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: cl.Name, Namespace: cl.Namespace}}
+			req := reconcile.Request{Name: cl.Name, Namespace: cl.Namespace}
 			if _, err := r.Reconcile(t.Context(), req); err != nil {
 				t.Fatalf("Reconcile(%s): %v", cl.Name, err)
 			}
@@ -3294,8 +3230,8 @@ func TestSandboxClaimReconcileCleanup(t *testing.T) {
 			name: "new claim transitioning to Ready cleans its entry",
 			build: func(t *testing.T) (*SandboxClaimReconciler, []*extensionsv1beta1.SandboxClaim) {
 				cl := &extensionsv1beta1.SandboxClaim{
-					ObjectMeta: metav1.ObjectMeta{Name: "new-claim", Namespace: "default", UID: "new-claim"},
-					Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
+					Name: "new-claim", Namespace: "default", UID: "new-claim",
+					Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 				}
 				r := newReconcilerFor(t, cl, makeOwnedReadySandbox(cl))
 				return r, []*extensionsv1beta1.SandboxClaim{cl}
@@ -3339,8 +3275,8 @@ func TestSandboxClaimReconcileCleanup(t *testing.T) {
 			name: "post-Ready UpdateFunc re-creates entry that is then cleaned on next reconcile",
 			build: func(t *testing.T) (*SandboxClaimReconciler, []*extensionsv1beta1.SandboxClaim) {
 				cl := &extensionsv1beta1.SandboxClaim{
-					ObjectMeta: metav1.ObjectMeta{Name: "post-ready-claim", Namespace: "default", UID: "post-ready"},
-					Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
+					Name: "post-ready-claim", Namespace: "default", UID: "post-ready",
+					Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"}},
 				}
 				r := newReconcilerFor(t, cl, makeOwnedReadySandbox(cl))
 				return r, []*extensionsv1beta1.SandboxClaim{cl}
@@ -3410,10 +3346,8 @@ func TestVerifySandboxCandidate_NamespaceIsolation(t *testing.T) {
 	templateHash := sandboxcontrollers.NameHash(templateName)
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-claim",
-			Namespace: "namespace-a",
-		},
+		Name:      "test-claim",
+		Namespace: "namespace-a",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{
 				Name: "test-warmpool",
@@ -3423,38 +3357,34 @@ func TestVerifySandboxCandidate_NamespaceIsolation(t *testing.T) {
 
 	// 1. Valid Sandbox (Same Namespace)
 	validSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "valid-sandbox",
-			Namespace: "namespace-a",
-			Labels: map[string]string{
-				sandboxTemplateRefHash: templateHash,
-				warmPoolSandboxLabel:   "pool-hash-123",
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: extensionsv1beta1.GroupVersion.String(),
-				Kind:       "SandboxWarmPool",
-				Name:       "test-warmpool",
-				Controller: ptr.To(true), // nolint:modernize
-			}},
+		Name:      "valid-sandbox",
+		Namespace: "namespace-a",
+		Labels: map[string]string{
+			sandboxTemplateRefHash: templateHash,
+			warmPoolSandboxLabel:   "pool-hash-123",
 		},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: extensionsv1beta1.GroupVersion.String(),
+			Kind:       "SandboxWarmPool",
+			Name:       "test-warmpool",
+			Controller: ptr.To(true), // nolint:modernize
+		}},
 	}
 
 	// 2. Invalid Sandbox (Different Namespace, but identical hash)
 	invalidSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "invalid-sandbox",
-			Namespace: "namespace-b",
-			Labels: map[string]string{
-				sandboxTemplateRefHash: templateHash,
-				warmPoolSandboxLabel:   "pool-hash-123",
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: extensionsv1beta1.GroupVersion.String(),
-				Kind:       "SandboxWarmPool",
-				Name:       "test-warmpool",
-				Controller: ptr.To(true), // nolint:modernize
-			}},
+		Name:      "invalid-sandbox",
+		Namespace: "namespace-b",
+		Labels: map[string]string{
+			sandboxTemplateRefHash: templateHash,
+			warmPoolSandboxLabel:   "pool-hash-123",
 		},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: extensionsv1beta1.GroupVersion.String(),
+			Kind:       "SandboxWarmPool",
+			Name:       "test-warmpool",
+			Controller: ptr.To(true), // nolint:modernize
+		}},
 	}
 
 	// Test Valid: Should return nil (no error)
@@ -3478,13 +3408,11 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 	scheme := newScheme(t)
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-claim",
-			Namespace: "default",
-			UID:       "claim-uid-123",
-			Annotations: map[string]string{
-				extensionsv1beta1.AssignedSandboxNameAnnotation: "adopted-sb",
-			},
+		Name:      "test-claim",
+		Namespace: "default",
+		UID:       "claim-uid-123",
+		Annotations: map[string]string{
+			extensionsv1beta1.AssignedSandboxNameAnnotation: "adopted-sb",
 		},
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-pool"},
@@ -3492,7 +3420,7 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
+		Name: "test-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -3503,28 +3431,26 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default", UID: "warmpool-uid-123"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-pool", Namespace: "default", UID: "warmpool-uid-123",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 
 	adoptedSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "adopted-sb",
-			Namespace: "default",
-			UID:       "adopted-sb-uid",
-			Labels: map[string]string{
-				extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
-				sandboxTemplateRefHash:           sandboxcontrollers.NameHash("test-template"),
-				warmPoolSandboxLabel:             sandboxcontrollers.NameHash("test-pool"),
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-				Kind:       "SandboxWarmPool",
-				Name:       "test-pool",
-				UID:        "warmpool-uid-123",
-				Controller: ptr.To(true), // nolint:modernize
-			}},
+		Name:      "adopted-sb",
+		Namespace: "default",
+		UID:       "adopted-sb-uid",
+		Labels: map[string]string{
+			extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
+			sandboxTemplateRefHash:           sandboxcontrollers.NameHash("test-template"),
+			warmPoolSandboxLabel:             sandboxcontrollers.NameHash("test-pool"),
 		},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+			Kind:       "SandboxWarmPool",
+			Name:       "test-pool",
+			UID:        "warmpool-uid-123",
+			Controller: ptr.To(true), // nolint:modernize
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: sandboxv1beta1.PodMetadata{
@@ -3539,21 +3465,19 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 	// Another sandbox in the warm pool that we want to make sure doesn't get adopted
 	poolNameHash := sandboxcontrollers.NameHash("test-pool")
 	extraSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pool-sb-extra",
-			Namespace: "default",
-			Labels: map[string]string{
-				warmPoolSandboxLabel:   poolNameHash,
-				sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-				Kind:       "SandboxWarmPool",
-				Name:       "test-pool",
-				UID:        "warmpool-uid-123",
-				Controller: ptr.To(true), // nolint:modernize
-			}},
+		Name:      "pool-sb-extra",
+		Namespace: "default",
+		Labels: map[string]string{
+			warmPoolSandboxLabel:   poolNameHash,
+			sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
 		},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+			Kind:       "SandboxWarmPool",
+			Name:       "test-pool",
+			UID:        "warmpool-uid-123",
+			Controller: ptr.To(true), // nolint:modernize
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}}},
 		Status: sandboxv1beta1.SandboxStatus{
 			Conditions: []metav1.Condition{{
@@ -3584,7 +3508,7 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 		WarmSandboxQueue: warmSandboxQueue,
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
+	req := reconcile.Request{Name: "test-claim", Namespace: "default"}
 
 	// Run reconcile. Adoption is triggered on this pass, but the sandbox is not yet
 	// observed as controlled by the claim (cache lag), so the reconcile must NOT finalize
@@ -3683,13 +3607,11 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 	scheme := newScheme(t)
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-claim",
-			Namespace: "default",
-			UID:       "claim-uid-123",
-			Annotations: map[string]string{
-				extensionsv1beta1.AssignedSandboxNameAnnotation: "adopted-sb",
-			},
+		Name:      "test-claim",
+		Namespace: "default",
+		UID:       "claim-uid-123",
+		Annotations: map[string]string{
+			extensionsv1beta1.AssignedSandboxNameAnnotation: "adopted-sb",
 		},
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-pool"},
@@ -3697,7 +3619,7 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
+		Name: "test-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -3708,28 +3630,26 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default", UID: "warmpool-uid-123"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-pool", Namespace: "default", UID: "warmpool-uid-123",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 
 	adoptedSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "adopted-sb",
-			Namespace: "default",
-			UID:       "adopted-sb-uid",
-			Labels: map[string]string{
-				extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
-				sandboxTemplateRefHash:           sandboxcontrollers.NameHash("test-template"),
-				warmPoolSandboxLabel:             sandboxcontrollers.NameHash("test-pool"),
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-				Kind:       "SandboxWarmPool",
-				Name:       "test-pool",
-				UID:        "warmpool-uid-123",
-				Controller: ptr.To(true), // nolint:modernize
-			}},
+		Name:      "adopted-sb",
+		Namespace: "default",
+		UID:       "adopted-sb-uid",
+		Labels: map[string]string{
+			extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
+			sandboxTemplateRefHash:           sandboxcontrollers.NameHash("test-template"),
+			warmPoolSandboxLabel:             sandboxcontrollers.NameHash("test-pool"),
 		},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+			Kind:       "SandboxWarmPool",
+			Name:       "test-pool",
+			UID:        "warmpool-uid-123",
+			Controller: ptr.To(true), // nolint:modernize
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: sandboxv1beta1.PodMetadata{
@@ -3774,7 +3694,7 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 		Tracer:           asmetrics.NewNoOp(),
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
+	req := reconcile.Request{Name: "test-claim", Namespace: "default"}
 
 	// Pass 1: adoption is triggered (patches the sandbox) and defers via bounded requeue.
 	res, err := reconciler.Reconcile(t.Context(), req)
@@ -3812,13 +3732,11 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 	scheme := newScheme(t)
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-claim",
-			Namespace: "default",
-			UID:       "claim-uid-123",
-			Annotations: map[string]string{
-				extensionsv1beta1.AssignedSandboxNameAnnotation: "adopted-sb",
-			},
+		Name:      "test-claim",
+		Namespace: "default",
+		UID:       "claim-uid-123",
+		Annotations: map[string]string{
+			extensionsv1beta1.AssignedSandboxNameAnnotation: "adopted-sb",
 		},
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-pool"},
@@ -3840,7 +3758,7 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
+		Name: "test-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -3851,28 +3769,26 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default", UID: "warmpool-uid-123"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-pool", Namespace: "default", UID: "warmpool-uid-123",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 
 	adoptedSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "adopted-sb",
-			Namespace: "default",
-			UID:       "adopted-sb-uid",
-			Labels: map[string]string{
-				extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
-				sandboxTemplateRefHash:           sandboxcontrollers.NameHash("test-template"),
-				warmPoolSandboxLabel:             sandboxcontrollers.NameHash("test-pool"),
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-				Kind:       "SandboxWarmPool",
-				Name:       "test-pool",
-				UID:        "warmpool-uid-123",
-				Controller: ptr.To(true), // nolint:modernize
-			}},
+		Name:      "adopted-sb",
+		Namespace: "default",
+		UID:       "adopted-sb-uid",
+		Labels: map[string]string{
+			extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
+			sandboxTemplateRefHash:           sandboxcontrollers.NameHash("test-template"),
+			warmPoolSandboxLabel:             sandboxcontrollers.NameHash("test-pool"),
 		},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+			Kind:       "SandboxWarmPool",
+			Name:       "test-pool",
+			UID:        "warmpool-uid-123",
+			Controller: ptr.To(true), // nolint:modernize
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: sandboxv1beta1.PodMetadata{
@@ -3911,7 +3827,7 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 		Tracer:           asmetrics.NewNoOp(),
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
+	req := reconcile.Request{Name: "test-claim", Namespace: "default"}
 
 	res, err := reconciler.Reconcile(t.Context(), req)
 	if err != nil {
@@ -3950,18 +3866,16 @@ func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 
 	// No assigned-sandbox annotation: adoption goes through the candidate queue.
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-claim",
-			Namespace: "default",
-			UID:       "claim-uid-123",
-		},
+		Name:      "test-claim",
+		Namespace: "default",
+		UID:       "claim-uid-123",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-pool"},
 		},
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
+		Name: "test-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -3972,27 +3886,25 @@ func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default", UID: "warmpool-uid-123"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-pool", Namespace: "default", UID: "warmpool-uid-123",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 
 	warmSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "warm-sb",
-			Namespace: "default",
-			UID:       "warm-sb-uid",
-			Labels: map[string]string{
-				warmPoolSandboxLabel:   sandboxcontrollers.NameHash("test-pool"),
-				sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-				Kind:       "SandboxWarmPool",
-				Name:       "test-pool",
-				UID:        "warmpool-uid-123",
-				Controller: ptr.To(true), // nolint:modernize
-			}},
+		Name:      "warm-sb",
+		Namespace: "default",
+		UID:       "warm-sb-uid",
+		Labels: map[string]string{
+			warmPoolSandboxLabel:   sandboxcontrollers.NameHash("test-pool"),
+			sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
 		},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+			Kind:       "SandboxWarmPool",
+			Name:       "test-pool",
+			UID:        "warmpool-uid-123",
+			Controller: ptr.To(true), // nolint:modernize
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}}},
 		Status: sandboxv1beta1.SandboxStatus{
 			Conditions: []metav1.Condition{{
@@ -4040,7 +3952,7 @@ func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 		Tracer:           asmetrics.NewNoOp(),
 		WarmSandboxQueue: warmSandboxQueue,
 	}
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
+	req := reconcile.Request{Name: "test-claim", Namespace: "default"}
 
 	// Pass 1: fresh adoption through adoptSandboxFromCandidates; status is finalized.
 	if _, err := reconciler.Reconcile(t.Context(), req); err != nil {
@@ -4086,13 +3998,11 @@ func TestSandboxClaimPreventsAdoptionFromWrongWarmPool(t *testing.T) {
 	scheme := newScheme(t)
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-claim",
-			Namespace: "default",
-			UID:       "claim-uid-123",
-			Labels: map[string]string{
-				"agents.x-k8s.io/sandbox-name": "wrong-pool-sb",
-			},
+		Name:      "test-claim",
+		Namespace: "default",
+		UID:       "claim-uid-123",
+		Labels: map[string]string{
+			"agents.x-k8s.io/sandbox-name": "wrong-pool-sb",
 		},
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "correct-pool"},
@@ -4100,7 +4010,7 @@ func TestSandboxClaimPreventsAdoptionFromWrongWarmPool(t *testing.T) {
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "correct-template", Namespace: "default"},
+		Name: "correct-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -4111,27 +4021,25 @@ func TestSandboxClaimPreventsAdoptionFromWrongWarmPool(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "correct-pool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "correct-template"}},
+		Name: "correct-pool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "correct-template"}},
 	}
 
 	wrongPoolSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "wrong-pool-sb",
-			Namespace: "default",
-			UID:       "wrong-sb-uid",
-			Labels: map[string]string{
-				warmPoolSandboxLabel:   sandboxcontrollers.NameHash("wrong-pool"),
-				sandboxTemplateRefHash: sandboxcontrollers.NameHash("correct-template"),
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-				Kind:       "SandboxWarmPool",
-				Name:       "wrong-pool",
-				UID:        "wrong-pool-uid-123",
-				Controller: ptr.To(true), // nolint:modernize
-			}},
+		Name:      "wrong-pool-sb",
+		Namespace: "default",
+		UID:       "wrong-sb-uid",
+		Labels: map[string]string{
+			warmPoolSandboxLabel:   sandboxcontrollers.NameHash("wrong-pool"),
+			sandboxTemplateRefHash: sandboxcontrollers.NameHash("correct-template"),
 		},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+			Kind:       "SandboxWarmPool",
+			Name:       "wrong-pool",
+			UID:        "wrong-pool-uid-123",
+			Controller: ptr.To(true), // nolint:modernize
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}}},
 		Status: sandboxv1beta1.SandboxStatus{
 			Conditions: []metav1.Condition{{
@@ -4156,7 +4064,7 @@ func TestSandboxClaimPreventsAdoptionFromWrongWarmPool(t *testing.T) {
 		WarmSandboxQueue: warmSandboxQueue,
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
+	req := reconcile.Request{Name: "test-claim", Namespace: "default"}
 
 	_, err := reconciler.Reconcile(t.Context(), req)
 	if err != nil {
@@ -4188,21 +4096,17 @@ func TestSandboxClaimRecoveryWhenTemplateCreated(t *testing.T) {
 	warmPoolName := "recovery-warmpool"
 
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      claimName,
-			Namespace: "default",
-			UID:       "claim-uid",
-		},
+		Name:      claimName,
+		Namespace: "default",
+		UID:       "claim-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPoolName},
 		},
 	}
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      templateName,
-			Namespace: "default",
-		},
+		Name:      templateName,
+		Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -4213,8 +4117,8 @@ func TestSandboxClaimRecoveryWhenTemplateCreated(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: warmPoolName, Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: templateName}},
+		Name: warmPoolName, Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: templateName}},
 	}
 
 	// Step 1: Reconcile without template
@@ -4232,7 +4136,7 @@ func TestSandboxClaimRecoveryWhenTemplateCreated(t *testing.T) {
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
+	req := reconcile.Request{Name: claimName, Namespace: "default"}
 
 	// Should return no error but RequeueAfter because template is missing
 	result, err := reconciler.Reconcile(t.Context(), req)
@@ -4275,27 +4179,27 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 	warmPoolName := "test-warmpool"
 
 	claim1 := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "claim-1", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPoolName}},
+		Name: "claim-1", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPoolName}},
 	}
 	claim2 := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "claim-2", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPoolName}},
+		Name: "claim-2", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPoolName}},
 	}
 	claimOther := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "claim-other", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "other-warmpool"}},
+		Name: "claim-other", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "other-warmpool"}},
 	}
 	claimBound := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "claim-bound", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPoolName}},
+		Name: "claim-bound", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPoolName}},
 		Status: extensionsv1beta1.SandboxClaimStatus{
 			SandboxStatus: extensionsv1beta1.SandboxStatus{Name: "claim-bound-sandbox"},
 		},
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: warmPoolName, Namespace: "default"},
+		Name: warmPoolName, Namespace: "default",
 	}
 
 	// We need to manually set up the indexer on the fake client's indexer if it supports it,
@@ -4338,13 +4242,11 @@ func TestIsAdoptable_RejectsUnowned(t *testing.T) {
 
 	// 2. Mock an unowned Sandbox (no OwnerReferences)
 	unownedSandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "unowned-sandbox",
-			Namespace: "default",
-			Labels: map[string]string{
-				warmPoolSandboxLabel:   poolNameHash,
-				sandboxTemplateRefHash: templateHash,
-			},
+		Name:      "unowned-sandbox",
+		Namespace: "default",
+		Labels: map[string]string{
+			warmPoolSandboxLabel:   poolNameHash,
+			sandboxTemplateRefHash: templateHash,
 		},
 	}
 
@@ -4397,22 +4299,20 @@ func TestSandboxClaimAdoptionStrategy(t *testing.T) {
 		}
 		poolNameHash := sandboxcontrollers.NameHash("test-pool")
 		return &sandboxv1beta1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:              name,
-				Namespace:         "default",
-				CreationTimestamp: creationTime,
-				Labels: map[string]string{
-					warmPoolSandboxLabel:   poolNameHash,
-					sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
-				},
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-						Kind:       "SandboxWarmPool",
-						Name:       "test-pool",
-						UID:        "warmpool-uid",
-						Controller: ptr.To(true), // nolint:modernize
-					},
+			Name:              name,
+			Namespace:         "default",
+			CreationTimestamp: creationTime,
+			Labels: map[string]string{
+				warmPoolSandboxLabel:   poolNameHash,
+				sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+					Kind:       "SandboxWarmPool",
+					Name:       "test-pool",
+					UID:        "warmpool-uid",
+					Controller: ptr.To(true), // nolint:modernize
 				},
 			},
 			Spec: sandboxv1beta1.SandboxSpec{
@@ -4437,11 +4337,9 @@ func TestSandboxClaimAdoptionStrategy(t *testing.T) {
 
 	createClaim := func(name string) *extensionsv1beta1.SandboxClaim {
 		return &extensionsv1beta1.SandboxClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: "default",
-				UID:       types.UID(name + "-uid"),
-			},
+			Name:      name,
+			Namespace: "default",
+			UID:       types.UID(name + "-uid"),
 			Spec: extensionsv1beta1.SandboxClaimSpec{
 				WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{
 					Name: "test-pool",
@@ -4491,18 +4389,16 @@ func TestSandboxClaimAdoptionStrategy(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			template := &extensionsv1beta1.SandboxTemplate{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
-				Spec:       extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}}},
+				Name: "test-template", Namespace: "default",
+				Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}}},
 			}
 
 			claim := createClaim("test-claim")
 
 			warmPool := &extensionsv1beta1.SandboxWarmPool{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pool",
-					Namespace: "default",
-					UID:       "warmpool-uid",
-				},
+				Name:      "test-pool",
+				Namespace: "default",
+				UID:       "warmpool-uid",
 				Spec: extensionsv1beta1.SandboxWarmPoolSpec{
 					TemplateRef: extensionsv1beta1.SandboxTemplateRef{
 						Name: "test-template",
@@ -4538,7 +4434,7 @@ func TestSandboxClaimAdoptionStrategy(t *testing.T) {
 				Tracer:           asmetrics.NewNoOp(),
 			}
 
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "test-claim", Namespace: "default"}}
+			req := reconcile.Request{Name: "test-claim", Namespace: "default"}
 			_, err := reconciler.Reconcile(t.Context(), req)
 			require.NoError(t, err)
 
@@ -4567,7 +4463,7 @@ func TestSandboxClaimAdoptionStrategy(t *testing.T) {
 
 func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "vct-template", Namespace: "default"},
+		Name: "vct-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
 				PodTemplate: sandboxv1beta1.PodTemplate{
@@ -4577,7 +4473,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 				},
 				VolumeClaimTemplates: []sandboxv1beta1.PersistentVolumeClaimTemplate{
 					{
-						EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"},
+						Name: "data",
 						Spec: corev1.PersistentVolumeClaimSpec{
 							AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 							Resources: corev1.VolumeResourceRequirements{
@@ -4593,8 +4489,8 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "vct-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "vct-template"}},
+		Name: "vct-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "vct-template"}},
 	}
 
 	testCases := []struct {
@@ -4612,7 +4508,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 			name: "policy=Overrides overrides template volume",
 			claimVCTs: []sandboxv1beta1.PersistentVolumeClaimTemplate{
 				{
-					EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"},
+					Name: "data",
 					Spec: corev1.PersistentVolumeClaimSpec{
 						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 						Resources: corev1.VolumeResourceRequirements{
@@ -4632,7 +4528,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 			name: "policy=Allowed allows adding new custom volumes",
 			claimVCTs: []sandboxv1beta1.PersistentVolumeClaimTemplate{
 				{
-					EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "custom"},
+					Name: "custom",
 					Spec: corev1.PersistentVolumeClaimSpec{
 						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 						Resources: corev1.VolumeResourceRequirements{
@@ -4667,7 +4563,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 			claimName := "vct-claim-" + tc.name
 
 			claim := &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: claimName, Namespace: "default", UID: types.UID(claimName)},
+				Name: claimName, Namespace: "default", UID: types.UID(claimName),
 				Spec: extensionsv1beta1.SandboxClaimSpec{
 					WarmPoolRef:          extensionsv1beta1.SandboxWarmPoolRef{Name: "vct-warmpool"},
 					VolumeClaimTemplates: tc.claimVCTs,
@@ -4686,21 +4582,19 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 			if tc.setupWarmPoolSandbox {
 				poolNameHash := sandboxcontrollers.NameHash("vct-warmpool")
 				readyWarmSandbox = &sandboxv1beta1.Sandbox{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "warm-sandbox",
-						Namespace: "default",
-						Labels: map[string]string{
-							warmPoolSandboxLabel:   poolNameHash,
-							sandboxTemplateRefHash: sandboxcontrollers.NameHash("vct-template"),
-						},
-						OwnerReferences: []metav1.OwnerReference{{
-							APIVersion: "extensions.agents.x-k8s.io/v1beta1",
-							Kind:       "SandboxWarmPool",
-							Name:       "vct-warmpool",
-							UID:        "pool-uid-123",
-							Controller: ptr.To(true), // nolint:modernize
-						}},
+					Name:      "warm-sandbox",
+					Namespace: "default",
+					Labels: map[string]string{
+						warmPoolSandboxLabel:   poolNameHash,
+						sandboxTemplateRefHash: sandboxcontrollers.NameHash("vct-template"),
 					},
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "extensions.agents.x-k8s.io/v1beta1",
+						Kind:       "SandboxWarmPool",
+						Name:       "vct-warmpool",
+						UID:        "pool-uid-123",
+						Controller: ptr.To(true), // nolint:modernize
+					}},
 					Spec: sandboxv1beta1.SandboxSpec{
 						SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 							Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "test"}}},
@@ -4731,7 +4625,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 				WarmSandboxQueue: warmSandboxQueue,
 			}
 
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
+			req := reconcile.Request{Name: claimName, Namespace: "default"}
 			_, err := reconciler.Reconcile(t.Context(), req)
 			require.NoError(t, err)
 
@@ -4776,7 +4670,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 
 func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "vct-template", Namespace: "default"},
+		Name: "vct-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
@@ -4787,8 +4681,8 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 	}
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "vct-warmpool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "vct-template"}},
+		Name: "vct-warmpool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "vct-template"}},
 	}
 
 	testCases := []struct {
@@ -4802,7 +4696,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 		{
 			name: "disallowed policy",
 			claimVCTs: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "custom"}},
+				{Name: "custom"},
 			},
 			policy:               extensionsv1beta1.VolumeClaimTemplatesPolicyDisallowed,
 			expectedError:        ErrVolumeClaimTemplatesDisallowed,
@@ -4811,10 +4705,10 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 		{
 			name: "forbidden override policy",
 			claimVCTs: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"}},
+				{Name: "data"},
 			},
 			templateVCTs: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"}},
+				{Name: "data"},
 			},
 			policy:               extensionsv1beta1.VolumeClaimTemplatesPolicyAllowed,
 			expectedError:        ErrVolumeClaimTemplatesOverrideForbidden,
@@ -4823,7 +4717,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 		{
 			name: "default empty policy is treated as Disallowed",
 			claimVCTs: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "custom"}},
+				{Name: "custom"},
 			},
 			policy:               "",
 			expectedError:        ErrVolumeClaimTemplatesDisallowed,
@@ -4832,7 +4726,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 		{
 			name: "empty volume name in claim VCTs",
 			claimVCTs: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: ""}},
+				{Name: ""},
 			},
 			policy:               extensionsv1beta1.VolumeClaimTemplatesPolicyAllowed,
 			expectedError:        ErrVolumeClaimTemplatesInvalid,
@@ -4841,8 +4735,8 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 		{
 			name: "duplicate volume name in claim VCTs",
 			claimVCTs: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"}},
-				{EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"}},
+				{Name: "data"},
+				{Name: "data"},
 			},
 			policy:               extensionsv1beta1.VolumeClaimTemplatesPolicyAllowed,
 			expectedError:        ErrVolumeClaimTemplatesInvalid,
@@ -4852,7 +4746,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 			name:      "empty volume name in template VCTs",
 			claimVCTs: nil,
 			templateVCTs: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: ""}},
+				{Name: ""},
 			},
 			policy:               extensionsv1beta1.VolumeClaimTemplatesPolicyAllowed,
 			expectedError:        ErrVolumeClaimTemplatesInvalid,
@@ -4862,8 +4756,8 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 			name:      "duplicate volume name in template VCTs",
 			claimVCTs: nil,
 			templateVCTs: []sandboxv1beta1.PersistentVolumeClaimTemplate{
-				{EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"}},
-				{EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{Name: "data"}},
+				{Name: "data"},
+				{Name: "data"},
 			},
 			policy:               extensionsv1beta1.VolumeClaimTemplatesPolicyAllowed,
 			expectedError:        ErrVolumeClaimTemplatesInvalid,
@@ -4877,7 +4771,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 			claimName := "vct-error-claim-" + tc.name
 
 			claim := &extensionsv1beta1.SandboxClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: claimName, Namespace: "default", UID: types.UID(claimName)},
+				Name: claimName, Namespace: "default", UID: types.UID(claimName),
 				Spec: extensionsv1beta1.SandboxClaimSpec{
 					WarmPoolRef:          extensionsv1beta1.SandboxWarmPoolRef{Name: "vct-warmpool"},
 					VolumeClaimTemplates: tc.claimVCTs,
@@ -4902,7 +4796,7 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 				WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 			}
 
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
+			req := reconcile.Request{Name: claimName, Namespace: "default"}
 			_, err := reconciler.Reconcile(t.Context(), req)
 			require.NoError(t, err)
 
@@ -4923,33 +4817,31 @@ func TestCreateSandboxClaimVolumeClaimTemplatesErrors(t *testing.T) {
 func TestSandboxClaimReconcile_PatchErrorPreservesStatus(t *testing.T) {
 	scheme := newScheme(t)
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
+		Name: "test-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}},
 		},
 	}
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-pool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim", Namespace: "default", UID: "claim-uid"},
-		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-pool"}},
+		Name: "test-claim", Namespace: "default", UID: "claim-uid",
+		Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-pool"}},
 		Status: extensionsv1beta1.SandboxClaimStatus{
 			SandboxStatus: extensionsv1beta1.SandboxStatus{Name: "warm-sandbox"},
 		},
 	}
 	sandbox := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "warm-sandbox", Namespace: "default",
-			Labels: map[string]string{
-				sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeWarm,
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim",
-				Name: "test-claim", UID: "claim-uid", Controller: new(true),
-			}},
+		Name: "warm-sandbox", Namespace: "default",
+		Labels: map[string]string{
+			sandboxv1beta1.SandboxLaunchTypeLabel: sandboxv1beta1.SandboxLaunchTypeWarm,
 		},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim",
+			Name: "test-claim", UID: "claim-uid", Controller: new(true),
+		}},
 		Spec: sandboxv1beta1.SandboxSpec{
 			OperatingMode:    sandboxv1beta1.SandboxOperatingModeRunning,
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}},
@@ -4978,7 +4870,7 @@ func TestSandboxClaimReconcile_PatchErrorPreservesStatus(t *testing.T) {
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: "default"}}
+	req := reconcile.Request{Name: claim.Name, Namespace: "default"}
 	_, err := reconciler.Reconcile(t.Context(), req)
 	require.Error(t, err)
 
@@ -4992,18 +4884,18 @@ func TestSandboxClaimReconcile_TransientLookupErrorPreservesStatus(t *testing.T)
 	scheme := newScheme(t)
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-template", Namespace: "default"},
+		Name: "test-template", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}},
 		},
 	}
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default"},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
+		Name: "test-pool", Namespace: "default",
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-claim", Namespace: "default", UID: "claim-uid"},
-		Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-pool"}},
+		Name: "test-claim", Namespace: "default", UID: "claim-uid",
+		Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-pool"}},
 		Status: extensionsv1beta1.SandboxClaimStatus{
 			SandboxStatus: extensionsv1beta1.SandboxStatus{Name: "warm-sandbox"},
 		},
@@ -5031,7 +4923,7 @@ func TestSandboxClaimReconcile_TransientLookupErrorPreservesStatus(t *testing.T)
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claim.Name, Namespace: "default"}}
+	req := reconcile.Request{Name: claim.Name, Namespace: "default"}
 	_, err := reconciler.Reconcile(t.Context(), req)
 	require.Error(t, err)
 
@@ -5044,13 +4936,11 @@ func TestSandboxClaimReconcile_TransientLookupErrorPreservesStatus(t *testing.T)
 func TestReconcile_TracingNormalization(t *testing.T) {
 	claimName := "tracing-test-claim"
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      claimName,
-			Namespace: "default",
-			UID:       "uid-claim-1",
-			Labels: map[string]string{
-				sandboxv1beta1.CreatedByLabel: "invalid-value",
-			},
+		Name:      claimName,
+		Namespace: "default",
+		UID:       "uid-claim-1",
+		Labels: map[string]string{
+			sandboxv1beta1.CreatedByLabel: "invalid-value",
 		},
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "test-warmpool"},
@@ -5073,7 +4963,7 @@ func TestReconcile_TracingNormalization(t *testing.T) {
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
 
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: claimName, Namespace: "default"}}
+	req := reconcile.Request{Name: claimName, Namespace: "default"}
 	_, err := reconciler.Reconcile(t.Context(), req)
 	_ = err
 
@@ -5084,7 +4974,7 @@ func TestReconcile_TracingNormalization(t *testing.T) {
 func TestStageAnnotationsElidesItsWriteAfterAnotherClaimWrite(t *testing.T) {
 	scheme := newScheme(t)
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "default", UID: "c-uid"},
+		Name: "c", Namespace: "default", UID: "c-uid",
 	}
 	patches := 0
 	fakeClient := fake.NewClientBuilder().
@@ -5119,7 +5009,7 @@ func TestStageAnnotationsElidesItsWriteAfterAnotherClaimWrite(t *testing.T) {
 func TestStageAnnotationsWritesWhenNothingElseTouchedTheClaim(t *testing.T) {
 	scheme := newScheme(t)
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "default", UID: "c-uid"},
+		Name: "c", Namespace: "default", UID: "c-uid",
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(claim).Build()
 	r := &SandboxClaimReconciler{Client: fakeClient, Scheme: scheme, Tracer: asmetrics.NewNoOp()}
@@ -5140,7 +5030,7 @@ func TestExpiredClaimStillPersistsItsObservabilityAnnotation(t *testing.T) {
 	// status-update-and-return branch, which happens before the normal flush point.
 	pastTime := metav1.NewTime(time.Now().Add(-time.Hour))
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "c", Namespace: "default", UID: "c-uid"},
+		Name: "c", Namespace: "default", UID: "c-uid",
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "p"},
 			Lifecycle: &extensionsv1beta1.Lifecycle{
@@ -5160,7 +5050,7 @@ func TestExpiredClaimStillPersistsItsObservabilityAnnotation(t *testing.T) {
 		WarmSandboxQueue: queue.NewSimpleSandboxQueue(),
 	}
 	_, err := r.Reconcile(t.Context(), reconcile.Request{
-		NamespacedName: types.NamespacedName{Name: "c", Namespace: "default"},
+		Name: "c", Namespace: "default",
 	})
 	require.NoError(t, err)
 
@@ -5177,10 +5067,8 @@ func TestStagedAnnotationsSurviveAPartialClaimPatch(t *testing.T) {
 	// observability annotation for this pass.
 	scheme := newScheme(t)
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "c", Namespace: "default", UID: "c-uid",
-			Annotations: map[string]string{extensionsv1beta1.AssignedSandboxNameAnnotation: "sb-stale"},
-		},
+		Name: "c", Namespace: "default", UID: "c-uid",
+		Annotations: map[string]string{extensionsv1beta1.AssignedSandboxNameAnnotation: "sb-stale"},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(claim).Build()
 	r := &SandboxClaimReconciler{Client: fakeClient, Scheme: scheme, Tracer: asmetrics.NewNoOp()}
@@ -5205,11 +5093,9 @@ func TestFlushDoesNotResurrectAClearedAnnotation(t *testing.T) {
 	// undo a stale assigned-sandbox reference another step just cleared.
 	scheme := newScheme(t)
 	claim := &extensionsv1beta1.SandboxClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "c", Namespace: "default", UID: "c-uid",
-			Annotations: map[string]string{
-				extensionsv1beta1.AssignedSandboxNameAnnotation: "sb-stale",
-			},
+		Name: "c", Namespace: "default", UID: "c-uid",
+		Annotations: map[string]string{
+			extensionsv1beta1.AssignedSandboxNameAnnotation: "sb-stale",
 		},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(claim).Build()

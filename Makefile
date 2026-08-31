@@ -24,9 +24,18 @@ $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
 ## Tool versions
-GOLANGCILINT_VERSION ?= v2.12.2
+GOLANGCILINT_VERSION ?= v2.13.2
 GOLANGCILINT_ROOT := $(LOCALBIN)/golangci-lint-$(GOLANGCILINT_VERSION)
 GOLANGCILINT := $(GOLANGCILINT_ROOT)/golangci-lint
+
+GOFUMPT_VERSION ?= v0.11.0
+GOFUMPT_ROOT := $(LOCALBIN)/gofumpt-$(GOFUMPT_VERSION)
+GOFMT := $(GOFUMPT_ROOT)/gofumpt
+
+GOIMPORTS_VERSION ?= v0.49.0
+GOIMPORTS_ROOT := $(LOCALBIN)/goimports-$(GOIMPORTS_VERSION)
+GOIMPORTS := $(GOIMPORTS_ROOT)/goimports
+GOIMPORTS_LOCAL_PREFIXES := github.com/cocoonstack/
 
 .DEFAULT_GOAL := all
 
@@ -35,6 +44,16 @@ GOLANGCILINT := $(GOLANGCILINT_ROOT)/golangci-lint
 golangci-lint: $(GOLANGCILINT)
 $(GOLANGCILINT):
 	GOBIN=$(GOLANGCILINT_ROOT) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCILINT_VERSION)
+
+.PHONY: gofumpt
+gofumpt: $(GOFMT)
+$(GOFMT):
+	GOBIN=$(GOFUMPT_ROOT) go install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
+
+.PHONY: goimports
+goimports: $(GOIMPORTS)
+$(GOIMPORTS):
+	GOBIN=$(GOIMPORTS_ROOT) go install golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION)
 
 .PHONY: all
 all: fmt-check vet test build
@@ -88,12 +107,14 @@ lint: golangci-lint ## Run golangci-lint on every target OS.
 	done
 
 .PHONY: fmt
-fmt: ## Format Go source files.
-	gofmt -w $$(find . -name '*.go' -not -path './.git/*')
+fmt: gofumpt goimports ## Format code with gofumpt and goimports.
+	$(GOFMT) -l -w .
+	$(GOIMPORTS) -l -w --local '$(GOIMPORTS_LOCAL_PREFIXES)' .
 
 .PHONY: fmt-check
-fmt-check: ## Fail if a Go source file is not gofmt-clean.
-	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './.git/*'))"
+fmt-check: gofumpt goimports ## Check formatting (fails if files need formatting).
+	@test -z "$$($(GOFMT) -l .)" || { echo "Files need formatting (gofumpt):"; $(GOFMT) -l .; exit 1; }
+	@test -z "$$($(GOIMPORTS) -l .)" || { echo "Files need formatting (goimports):"; $(GOIMPORTS) -l .; exit 1; }
 
 .PHONY: generate
 generate: ## Regenerate CRDs, deep copies, and RBAC.

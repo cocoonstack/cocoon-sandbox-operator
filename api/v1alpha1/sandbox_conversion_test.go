@@ -66,16 +66,14 @@ func TestSandboxConversion(t *testing.T) {
 
 			// Create src v1alpha1 Sandbox
 			src := &Sandbox{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "my-sandbox",
-					Namespace: "default",
-					Labels: map[string]string{
-						"foo": "bar",
-					},
-					Annotations: map[string]string{
-						"baz":                          "qux",
-						v1alpha1SandboxStateAnnotation: "some-old-state",
-					},
+				Name:      "my-sandbox",
+				Namespace: "default",
+				Labels: map[string]string{
+					"foo": "bar",
+				},
+				Annotations: map[string]string{
+					"baz":                          "qux",
+					v1alpha1SandboxStateAnnotation: "some-old-state",
 				},
 				Spec: SandboxSpec{
 					PodTemplate: PodTemplate{
@@ -95,9 +93,7 @@ func TestSandboxConversion(t *testing.T) {
 					},
 					VolumeClaimTemplates: []PersistentVolumeClaimTemplate{
 						{
-							EmbeddedObjectMetadata: EmbeddedObjectMetadata{
-								Name: "workspace",
-							},
+							Name: "workspace",
 							Spec: corev1.PersistentVolumeClaimSpec{
 								AccessModes: []corev1.PersistentVolumeAccessMode{
 									corev1.ReadWriteOnce,
@@ -218,12 +214,10 @@ func TestConvertFromLegacyFullObjectState(t *testing.T) {
 		t.Fatalf("marshal legacy state: %v", err)
 	}
 	hub := &v1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        "legacy",
-			Namespace:   "default",
-			Annotations: map[string]string{v1alpha1SandboxStateAnnotation: string(legacyJSON)},
-		},
-		Spec: v1beta1.SandboxSpec{OperatingMode: v1beta1.SandboxOperatingModeRunning},
+		Name:        "legacy",
+		Namespace:   "default",
+		Annotations: map[string]string{v1alpha1SandboxStateAnnotation: string(legacyJSON)},
+		Spec:        v1beta1.SandboxSpec{OperatingMode: v1beta1.SandboxOperatingModeRunning},
 	}
 	got := &Sandbox{}
 	if err := got.ConvertFrom(hub); err != nil {
@@ -264,10 +258,8 @@ func TestSandboxConversionFromHub(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			src := &v1beta1.Sandbox{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "my-sandbox",
-					Namespace: "default",
-				},
+				Name:      "my-sandbox",
+				Namespace: "default",
 				Spec: v1beta1.SandboxSpec{
 					OperatingMode: tc.mode,
 				},

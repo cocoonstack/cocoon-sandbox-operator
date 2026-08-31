@@ -133,8 +133,8 @@ func (r *SandboxTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	np := &networkingv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: npName, Namespace: npNamespace},
-		Spec:       desiredSpec,
+		Name: npName, Namespace: npNamespace,
+		Spec: desiredSpec,
 	}
 
 	if err := controllerutil.SetControllerReference(template, np, r.Scheme); err != nil {

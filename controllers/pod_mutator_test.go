@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
@@ -67,7 +66,7 @@ func (f podMutatorFunc) MutatePod(ctx context.Context, sandbox *sandboxv1beta1.S
 
 func testSandboxForPodMutation() *sandboxv1beta1.Sandbox {
 	return &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{Name: "runtime-test", Namespace: "default", UID: sandboxUID},
+		Name: "runtime-test", Namespace: "default", UID: sandboxUID,
 		Spec: sandboxv1beta1.SandboxSpec{
 			OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning,
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{

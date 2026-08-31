@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -83,10 +82,10 @@ func TestReconcileWritesWarmStatus(t *testing.T) {
 	// Two nodes each already reporting 4 warm of the pool's key → status 8.
 	for _, name := range []string{"a", "b"} {
 		inv.Put(&scale.NodeInventory{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Node:       name,
-			Address:    "10.0.0." + name + ":7777",
-			Pools:      []extv1beta1.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 4, Target: 4}},
+			Name:    name,
+			Node:    name,
+			Address: "10.0.0." + name + ":7777",
+			Pools:   []extv1beta1.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 4, Target: 4}},
 		})
 		setter.reportWarm("10.0.0."+name+":7777", 4)
 	}
@@ -114,10 +113,10 @@ func TestStatusPrefersPutResponseOverStaleInventory(t *testing.T) {
 		addr := "10.0.0." + name + ":7777"
 		// Inventory still carries the pre-fill snapshot: 4 warm per node.
 		inv.Put(&scale.NodeInventory{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Node:       name,
-			Address:    addr,
-			Pools:      []extv1beta1.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 4, Target: 10}},
+			Name:    name,
+			Node:    name,
+			Address: addr,
+			Pools:   []extv1beta1.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 4, Target: 10}},
 		})
 		// The node itself now reports 7 — the truth as of this tick.
 		setter.reportWarm(addr, 7)
@@ -143,10 +142,10 @@ func TestStatusFallsBackToInventoryWhenPutFails(t *testing.T) {
 	for _, name := range []string{"a", "b"} {
 		addr := "10.0.0." + name + ":7777"
 		inv.Put(&scale.NodeInventory{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Node:       name,
-			Address:    addr,
-			Pools:      []extv1beta1.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 5, Target: 10}},
+			Name:    name,
+			Node:    name,
+			Address: addr,
+			Pools:   []extv1beta1.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 5, Target: 10}},
 		})
 		setter.reportWarm(addr, 9)
 	}
@@ -306,7 +305,7 @@ func newTestDriver(t testing.TB, objs ...client.Object) (*Driver, *fakeSetter, *
 
 func warmPool(name string, replicas int32) *extv1beta1.SandboxWarmPool {
 	return &extv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name},
+		Namespace: "ns", Name: name,
 		Spec: extv1beta1.SandboxWarmPoolSpec{
 			Replicas:    new(replicas),
 			TemplateRef: extv1beta1.SandboxTemplateRef{Name: "tpl"},
@@ -316,7 +315,7 @@ func warmPool(name string, replicas int32) *extv1beta1.SandboxWarmPool {
 
 func template() *extv1beta1.SandboxTemplate {
 	return &extv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "tpl"},
+		Namespace: "ns", Name: "tpl",
 		Spec: extv1beta1.SandboxTemplateSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
 				PodTemplate: sandboxv1beta1.PodTemplate{
@@ -331,9 +330,9 @@ func putNodes(inv *scale.StaticInventorySource, n int) {
 	for i := range n {
 		name := string(rune('a' + i))
 		inv.Put(&scale.NodeInventory{
-			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Node:       name,
-			Address:    "10.0.0." + name + ":7777",
+			Name:    name,
+			Node:    name,
+			Address: "10.0.0." + name + ":7777",
 		})
 	}
 }

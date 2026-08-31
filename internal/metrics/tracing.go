@@ -54,7 +54,8 @@ func (n *noopInstrumenter) StartSpan(ctx context.Context, _ metav1.Object, _ str
 func (n *noopInstrumenter) GetTraceContext(_ context.Context) string                  { return "" }
 func (n *noopInstrumenter) AddEvent(_ context.Context, _ string, _ map[string]string) {}
 func (n *noopInstrumenter) IsRecording(_ context.Context) bool                        { return false }
-func NewNoOp() Instrumenter                                                           { return &noopInstrumenter{} }
+
+func NewNoOp() Instrumenter { return &noopInstrumenter{} }
 
 type otelInstrumenter struct {
 	tracer     trace.Tracer

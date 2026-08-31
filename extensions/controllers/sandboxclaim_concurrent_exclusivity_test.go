@@ -46,34 +46,32 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 	warmPoolUID := types.UID("pool-uid")
 
 	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{Name: "tpl", Namespace: "default"},
+		Name: "tpl", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxTemplateSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
 		}}},
 	}
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "pool", Namespace: "default", UID: warmPoolUID},
-		Spec:       extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "tpl"}},
+		Name: "pool", Namespace: "default", UID: warmPoolUID,
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "tpl"}},
 	}
 
 	warmSandbox := func(name string) *sandboxv1beta1.Sandbox {
 		return &sandboxv1beta1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:              name,
-				Namespace:         "default",
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute)),
-				Labels: map[string]string{
-					sandboxv1beta1.SandboxWarmPoolLabel:        poolHash,
-					sandboxv1beta1.SandboxTemplateRefHashLabel: tmplHash,
-				},
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: extensionsv1beta1.GroupVersion.String(),
-					Kind:       "SandboxWarmPool",
-					Name:       "pool",
-					UID:        warmPoolUID,
-					Controller: new(true),
-				}},
+			Name:              name,
+			Namespace:         "default",
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute)),
+			Labels: map[string]string{
+				sandboxv1beta1.SandboxWarmPoolLabel:        poolHash,
+				sandboxv1beta1.SandboxTemplateRefHashLabel: tmplHash,
 			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: extensionsv1beta1.GroupVersion.String(),
+				Kind:       "SandboxWarmPool",
+				Name:       "pool",
+				UID:        warmPoolUID,
+				Controller: new(true),
+			}},
 			Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}},
 			}}},
@@ -102,12 +100,10 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 	claims := make([]*extensionsv1beta1.SandboxClaim, claimCount)
 	for i := range claims {
 		claims[i] = &extensionsv1beta1.SandboxClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("claim-%02d", i),
-				Namespace: "default",
-				UID:       types.UID(fmt.Sprintf("claim-%02d-uid", i)),
-			},
-			Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "pool"}},
+			Name:      fmt.Sprintf("claim-%02d", i),
+			Namespace: "default",
+			UID:       types.UID(fmt.Sprintf("claim-%02d-uid", i)),
+			Spec:      extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "pool"}},
 		}
 		builder = builder.WithObjects(claims[i])
 	}
@@ -129,7 +125,7 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: name, Namespace: "default"}}
+			req := reconcile.Request{Name: name, Namespace: "default"}
 			for range 10 {
 				if _, err := reconciler.Reconcile(ctx, req); err != nil {
 					continue // transient optimistic-concurrency conflict: retry

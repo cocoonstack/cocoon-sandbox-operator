@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -20,14 +19,14 @@ const (
 func BenchmarkMapWarmPoolToClaims(b *testing.B) {
 	scheme := newScheme(b)
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{Name: "bench-pool", Namespace: "default"},
+		Name: "bench-pool", Namespace: "default",
 	}
 	objs := make([]client.Object, 0, benchClaimTotal+1)
 	objs = append(objs, warmPool)
 	for i := range benchClaimTotal {
 		claim := &extensionsv1beta1.SandboxClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("claim-%d", i), Namespace: "default"},
-			Spec:       extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPool.Name}},
+			Name: fmt.Sprintf("claim-%d", i), Namespace: "default",
+			Spec: extensionsv1beta1.SandboxClaimSpec{WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: warmPool.Name}},
 		}
 		if i >= benchClaimUnbound {
 			claim.Status.SandboxStatus.Name = fmt.Sprintf("sb-%d", i)

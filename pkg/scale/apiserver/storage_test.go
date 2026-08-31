@@ -22,12 +22,10 @@ import (
 // the k8s object name.
 func TestDelete_ReleasesByClaimIDAnnotation(t *testing.T) {
 	sb := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   "ns",
-			Name:        "s1",
-			Annotations: map[string]string{ClaimIDAnnotation: "sb_abc123"},
-		},
-		Status: sandboxv1beta1.SandboxStatus{NodeName: "n1"},
+		Namespace:   "ns",
+		Name:        "s1",
+		Annotations: map[string]string{ClaimIDAnnotation: "sb_abc123"},
+		Status:      sandboxv1beta1.SandboxStatus{NodeName: "n1"},
 	}
 	store := &fakeStore{getSandbox: sb}
 	r := NewSandboxREST(store).(*sandboxREST)
@@ -46,8 +44,8 @@ func TestDelete_ReleasesByClaimIDAnnotation(t *testing.T) {
 // would target the wrong claim. It must error and release nothing.
 func TestDelete_FailsLoudWithoutClaimID(t *testing.T) {
 	sb := &sandboxv1beta1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "s1"},
-		Status:     sandboxv1beta1.SandboxStatus{NodeName: "n1"},
+		Namespace: "ns", Name: "s1",
+		Status: sandboxv1beta1.SandboxStatus{NodeName: "n1"},
 	}
 	store := &fakeStore{getSandbox: sb}
 	r := NewSandboxREST(store).(*sandboxREST)
@@ -202,7 +200,7 @@ func nsCtx(t *testing.T, ns string) context.Context {
 }
 
 func submittedSandbox(name string, anns map[string]string) *sandboxv1beta1.Sandbox {
-	sb := &sandboxv1beta1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: anns}}
+	sb := &sandboxv1beta1.Sandbox{Name: name, Annotations: anns}
 	sb.Spec.PodTemplate.Spec.Containers = []corev1.Container{{Name: "c", Image: "img"}}
 	return sb
 }
