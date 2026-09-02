@@ -17,8 +17,8 @@ package controllers
 import (
 	corev1 "k8s.io/api/core/v1"
 
-	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
 )
 
 // ApplySandboxSecureDefaults applies the controller's "Secure by Default" logic to a PodSpec.
@@ -50,5 +50,5 @@ func ApplySandboxSecureDefaults(template *extensionsv1beta1.SandboxTemplate, spe
 
 // SandboxTemplateRefHash encapsulates the generation of the hash for a sandbox template ref.
 func SandboxTemplateRefHash(templateRefName string) string {
-	return sandboxcontrollers.NameHash(templateRefName)
+	return hash.Name(templateRefName)
 }

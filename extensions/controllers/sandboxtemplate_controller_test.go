@@ -30,8 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
@@ -167,7 +167,7 @@ func TestSandboxTemplateReconcileNetworkPolicy(t *testing.T) {
 			existingObjects:     []client.Object{templateWithNP},
 			expectNetworkPolicy: true,
 			validateNetworkPolicy: func(t *testing.T, np *networkingv1.NetworkPolicy) {
-				expectedHash := sandboxcontrollers.NameHash("test-template-custom")
+				expectedHash := hash.Name("test-template-custom")
 				if np.Spec.PodSelector.MatchLabels[sandboxTemplateRefHash] != expectedHash {
 					t.Errorf("unexpected pod selector hash")
 				}

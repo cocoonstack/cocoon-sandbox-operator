@@ -17,9 +17,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
@@ -41,7 +41,7 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 		claimCount = 24 // more claims than warm sandboxes: the surplus must cold-start, never double-adopt
 	)
 
-	poolHash := sandboxcontrollers.NameHash("pool")
+	poolHash := hash.Name("pool")
 	tmplHash := SandboxTemplateRefHash("tpl")
 	warmPoolUID := types.UID("pool-uid")
 

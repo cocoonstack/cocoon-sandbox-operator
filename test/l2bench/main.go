@@ -41,8 +41,8 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
-	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/test/benchutil"
 )
 

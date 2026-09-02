@@ -9,6 +9,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
@@ -28,7 +29,7 @@ func TestReconcilePodAppliesPodMutator(t *testing.T) {
 		}),
 	}
 
-	pod, err := reconciler.reconcilePod(t.Context(), sandbox, NameHash(sandbox.Name))
+	pod, err := reconciler.reconcilePod(t.Context(), sandbox, hash.Name(sandbox.Name))
 	if err != nil {
 		t.Fatalf("reconcilePod: %v", err)
 	}
@@ -49,7 +50,7 @@ func TestReconcilePodDoesNotCreatePodWhenMutatorFails(t *testing.T) {
 		}),
 	}
 
-	if _, err := reconciler.reconcilePod(t.Context(), sandbox, NameHash(sandbox.Name)); err == nil {
+	if _, err := reconciler.reconcilePod(t.Context(), sandbox, hash.Name(sandbox.Name)); err == nil {
 		t.Fatal("reconcilePod succeeded when mutator failed")
 	}
 	var pod corev1.Pod

@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
@@ -44,8 +44,8 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 	scheme := newScheme(t)
 	ctx := t.Context()
 
-	poolNameHash := sandboxcontrollers.NameHash("pool")
-	templateHash := sandboxcontrollers.NameHash("tpl")
+	poolNameHash := hash.Name("pool")
+	templateHash := hash.Name("tpl")
 	warmPoolUID := types.UID("pool-uid")
 
 	template := &extensionsv1beta1.SandboxTemplate{

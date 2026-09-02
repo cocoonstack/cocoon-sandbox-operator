@@ -10,8 +10,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
@@ -69,7 +69,7 @@ func newBenchPool(b *testing.B) (*SandboxWarmPoolReconciler, *extensionsv1beta1.
 			TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: template.Name},
 		},
 	}
-	poolNameHash := sandboxcontrollers.NameHash(pool.Name)
+	poolNameHash := hash.Name(pool.Name)
 	members := make([]sandboxv1beta1.Sandbox, benchPoolMembers)
 	objs := make([]runtime.Object, 0, benchPoolMembers+2)
 	objs = append(objs, pool, template)

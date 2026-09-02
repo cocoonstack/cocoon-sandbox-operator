@@ -36,8 +36,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
 )
 
 func TestReconcilePool(t *testing.T) {
@@ -61,7 +61,7 @@ func TestReconcilePool(t *testing.T) {
 		},
 	}
 
-	poolNameHash := sandboxcontrollers.NameHash(poolName)
+	poolNameHash := hash.Name(poolName)
 	scheme := newTestScheme()
 
 	testCases := []struct {
@@ -186,7 +186,7 @@ func TestReconcilePoolControllerRef(t *testing.T) {
 		},
 	}
 
-	poolNameHash := sandboxcontrollers.NameHash(poolName)
+	poolNameHash := hash.Name(poolName)
 
 	createSandboxWithOwner := func(suffix string, ownerUID string) *sandboxv1beta1.Sandbox {
 		sb := createPoolSandbox(poolName, poolNamespace, poolNameHash, template, suffix)
@@ -355,7 +355,7 @@ func TestPoolLabelValueInIntegration(t *testing.T) {
 			EnableWarmPoolEviction: true,
 		}
 
-		expectedPoolNameHash := sandboxcontrollers.NameHash(poolName)
+		expectedPoolNameHash := hash.Name(poolName)
 
 		_, err := r.reconcilePool(ctx, warmPool)
 		require.NoError(t, err)
@@ -368,7 +368,7 @@ func TestPoolLabelValueInIntegration(t *testing.T) {
 		for _, sb := range list.Items {
 			require.Equal(t, expectedPoolNameHash, sb.Labels[warmPoolSandboxLabel],
 				"sandbox %s should have correct warm pool label", sb.Name)
-			require.Equal(t, sandboxcontrollers.NameHash(templateName), sb.Labels[sandboxTemplateRefHash],
+			require.Equal(t, hash.Name(templateName), sb.Labels[sandboxTemplateRefHash],
 				"sandbox %s should have correct template ref label", sb.Name)
 			require.Equal(t, sandboxv1beta1.SandboxLaunchTypeWarm, sb.Labels[sandboxv1beta1.SandboxLaunchTypeLabel],
 				"sandbox %s should have warm launch type label", sb.Name)
@@ -585,7 +585,7 @@ func TestReconcilePoolReadyReplicas(t *testing.T) {
 		},
 	}
 
-	poolNameHash := sandboxcontrollers.NameHash(poolName)
+	poolNameHash := hash.Name(poolName)
 
 	createSandboxWithReadyCondition := func(suffix string, ready metav1.ConditionStatus) *sandboxv1beta1.Sandbox {
 		sb := createPoolSandbox(poolName, poolNamespace, poolNameHash, template, suffix)
@@ -718,7 +718,7 @@ func TestReconcilePoolGCStuckSandboxes(t *testing.T) {
 		},
 	}
 
-	poolNameHash := sandboxcontrollers.NameHash(poolName)
+	poolNameHash := hash.Name(poolName)
 
 	createSandboxWithAge := func(suffix string, ready metav1.ConditionStatus, age time.Duration) *sandboxv1beta1.Sandbox {
 		sb := createPoolSandbox(poolName, poolNamespace, poolNameHash, template, suffix)
@@ -1046,7 +1046,7 @@ func TestReconcilePool_TemplateRefUpdate_SameSpec(t *testing.T) {
 	for _, sb := range sandboxes.Items {
 		// Sandboxes should be recreated (new names) because TemplateRef changed
 		require.False(t, initialSandboxNames[sb.Name], "Sandbox should have been recreated with new name")
-		require.Equal(t, sandboxcontrollers.NameHash(templateName2), sb.Labels[sandboxTemplateRefHash], "Sandbox should have updated template ref hash label")
+		require.Equal(t, hash.Name(templateName2), sb.Labels[sandboxTemplateRefHash], "Sandbox should have updated template ref hash label")
 		// The pod spec is identical, so the image remains image-v1
 		require.Equal(t, "image-v1", sb.Spec.PodTemplate.Spec.Containers[0].Image, "Sandbox should retain original image since spec is identical")
 	}
@@ -1315,7 +1315,7 @@ func TestIsSandboxStale_OrphanedSandboxVetting(t *testing.T) {
 		Labels: map[string]string{
 			sandboxv1beta1.SandboxTemplateHashLabel: currentSandboxBlueprintHash,
 			sandboxTemplateRefHash:                  templateRefHash,
-			warmPoolSandboxLabel:                    sandboxcontrollers.NameHash(poolName),
+			warmPoolSandboxLabel:                    hash.Name(poolName),
 		},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: *spoofedSpec}}},
 	}
@@ -1334,7 +1334,7 @@ func TestIsSandboxStale_OrphanedSandboxVetting(t *testing.T) {
 		Labels: map[string]string{
 			sandboxv1beta1.SandboxTemplateHashLabel: currentSandboxBlueprintHash,
 			sandboxTemplateRefHash:                  templateRefHash,
-			warmPoolSandboxLabel:                    sandboxcontrollers.NameHash(poolName),
+			warmPoolSandboxLabel:                    hash.Name(poolName),
 		},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: *genuineSpec}}},
 	}
@@ -2098,7 +2098,7 @@ func createPoolSandbox(poolName, namespace, poolNameHash string, template *exten
 	var podSpec corev1.PodSpec
 
 	if template != nil {
-		templateRefHash = sandboxcontrollers.NameHash(template.Name)
+		templateRefHash = hash.Name(template.Name)
 		podSpec = *template.Spec.PodTemplate.Spec.DeepCopy()
 		ApplySandboxSecureDefaults(template, &podSpec)
 		// If template has a version label, we could use it as part of the hash placeholder
@@ -2107,10 +2107,10 @@ func createPoolSandbox(poolName, namespace, poolNameHash string, template *exten
 			sandboxBlueprintHash = "blueprint-hash-" + v
 		} else {
 			podTemplateJSON, _ := json.Marshal(template.Spec.PodTemplate)
-			podTemplateHash = sandboxcontrollers.NameHash(string(podTemplateJSON))
+			podTemplateHash = hash.Name(string(podTemplateJSON))
 
 			sandboxBlueprintJSON, _ := json.Marshal(template.Spec.SandboxBlueprint)
-			sandboxBlueprintHash = sandboxcontrollers.NameHash(string(sandboxBlueprintJSON))
+			sandboxBlueprintHash = hash.Name(string(sandboxBlueprintJSON))
 		}
 	} else {
 		// Fallback for tests that don't provide a template
@@ -2123,10 +2123,10 @@ func createPoolSandbox(poolName, namespace, poolNameHash string, template *exten
 			},
 		}
 		podTemplateJSON, _ := json.Marshal(sandboxv1beta1.PodTemplate{Spec: podSpec})
-		podTemplateHash = sandboxcontrollers.NameHash(string(podTemplateJSON))
+		podTemplateHash = hash.Name(string(podTemplateJSON))
 
 		sandboxBlueprintJSON, _ := json.Marshal(sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: podSpec}})
-		sandboxBlueprintHash = sandboxcontrollers.NameHash(string(sandboxBlueprintJSON))
+		sandboxBlueprintHash = hash.Name(string(sandboxBlueprintJSON))
 	}
 
 	return &sandboxv1beta1.Sandbox{

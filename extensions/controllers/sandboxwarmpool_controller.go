@@ -42,8 +42,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
@@ -161,7 +161,7 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 	}
 
 	// Compute hash of the warm pool name for the pool label
-	poolNameHash := sandboxcontrollers.NameHash(warmPool.Name)
+	poolNameHash := hash.Name(warmPool.Name)
 
 	// List all Sandbox CRs with the warm pool label
 	sandboxList := &sandboxv1beta1.SandboxList{}
@@ -300,7 +300,7 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 // the current CR-backed member count (typically zero in that mode) and never
 // mutates the aggregated node-local claim path.
 func (r *SandboxWarmPoolReconciler) reconcilePoolStatusOnly(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) error {
-	poolNameHash := sandboxcontrollers.NameHash(warmPool.Name)
+	poolNameHash := hash.Name(warmPool.Name)
 	labelSelector := labels.SelectorFromSet(labels.Set{warmPoolSandboxLabel: poolNameHash})
 
 	sandboxList := &sandboxv1beta1.SandboxList{}
@@ -732,7 +732,7 @@ func computeSandboxBlueprintHash(template *extensionsv1beta1.SandboxTemplate) (s
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal sandbox blueprint for hashing: %w", err)
 	}
-	return sandboxcontrollers.NameHash(string(specJSON)), nil
+	return hash.Name(string(specJSON)), nil
 }
 
 // sandboxWarmPoolLabelIndexer extracts the warmPoolSandboxLabel value for the
