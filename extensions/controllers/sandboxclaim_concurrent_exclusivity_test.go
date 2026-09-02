@@ -23,22 +23,13 @@ import (
 	"github.com/cocoonstack/sandbox-operator/internal/queue"
 )
 
-// TestWarmPoolConcurrentClaimExclusivity is the L1 fast-path intent test: under
-// many claims racing a shared warm pool concurrently, the pod-exclusivity
-// invariant (#127) must hold — each warm Sandbox is adopted by at most one claim,
-// each claim owns at most one Sandbox, and every warm Sandbox is consumed exactly
-// once. The exclusivity guard is the in-memory WarmSandboxQueue: each candidate
-// key is popped exactly once under its mutex, so two concurrent claims can never
-// select the same warm Sandbox. This complements the sequential
-// TestWarmPoolPodExclusivity by exercising the guard under real goroutine
-// contention, the condition the decentralized claim fast-path is built for.
 func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 	scheme := newScheme(t)
 	ctx := t.Context()
 
 	const (
 		warmCount  = 12
-		claimCount = 24 // more claims than warm sandboxes: the surplus must cold-start, never double-adopt
+		claimCount = 24
 	)
 
 	poolHash := hash.Name("pool")
@@ -118,8 +109,6 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 		MaxConcurrentReconciles: claimCount,
 	}
 
-	// Fire every claim concurrently; each goroutine drives its own claim to Bound
-	// (bounded requeue passes) so the race is on adoption, not on scheduling.
 	var wg sync.WaitGroup
 	for _, cl := range claims {
 		wg.Add(1)
@@ -139,7 +128,6 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Build sandbox -> owning claims across every Sandbox in the namespace.
 	var allSandboxes sandboxv1beta1.SandboxList
 	require.NoError(t, fc.List(ctx, &allSandboxes, client.InNamespace("default")))
 

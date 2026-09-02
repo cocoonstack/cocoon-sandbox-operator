@@ -17,9 +17,6 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
-// TestDelete_ReleasesByClaimIDAnnotation proves Delete releases the microVM by
-// the sandboxd claim id the node published (the claim-id annotation), never by
-// the k8s object name.
 func TestDelete_ReleasesByClaimIDAnnotation(t *testing.T) {
 	sb := &sandboxv1beta1.Sandbox{
 		Namespace:   "ns",
@@ -39,9 +36,6 @@ func TestDelete_ReleasesByClaimIDAnnotation(t *testing.T) {
 	assert.Equal(t, "sb_abc123", store.releaseID, "must release by the sandboxd claim id, not the k8s name")
 }
 
-// TestDelete_FailsLoudWithoutClaimID proves Delete refuses to release when the
-// node has not published a claim id — releasing by the k8s name (the old bug)
-// would target the wrong claim. It must error and release nothing.
 func TestDelete_FailsLoudWithoutClaimID(t *testing.T) {
 	sb := &sandboxv1beta1.Sandbox{
 		Namespace: "ns", Name: "s1",
@@ -126,8 +120,6 @@ func TestCreate_ReportsGrantedDeadline(t *testing.T) {
 	assert.Nil(t, out.Spec.ShutdownTime, "the submitted spec is echoed, not rewritten")
 }
 
-// fakeStore is a scale.SandboxStore stub: Get returns a preset sandbox, Claim
-// and Release record their arguments. The read-path verbs are unused.
 type fakeStore struct {
 	getSandbox *sandboxv1beta1.Sandbox
 	getErr     error
@@ -165,8 +157,6 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	return f.releaseErr
 }
 
-// The lifecycle verbs are not exercised by these tests; they satisfy the
-// SandboxStore contract so the fake stays a drop-in.
 func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
 
 func (f *fakeStore) Resume(context.Context, string, string) error { return nil }

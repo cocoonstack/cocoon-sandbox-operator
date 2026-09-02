@@ -37,9 +37,6 @@ import (
 	"github.com/cocoonstack/sandbox-operator/internal/queue"
 )
 
-// TestWarmPoolPodExclusivity is a regression test for the 1:1 sandbox-to-pod
-// invariant (#127). When more claims exist than warm pool sandboxes, each
-// sandbox must be adopted by at most one claim.
 func TestWarmPoolPodExclusivity(t *testing.T) {
 	scheme := newScheme(t)
 	ctx := t.Context()
@@ -140,7 +137,6 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 		require.NoError(t, err, "reconcile %s", cl.Name)
 	}
 
-	// Collect all sandboxes and build sandbox → []owning claims
 	var allSandboxes sandboxv1beta1.SandboxList
 	require.NoError(t, fc.List(ctx, &allSandboxes, client.InNamespace("default")))
 

@@ -1080,7 +1080,7 @@ func TestComparePodSpecsNormalization(t *testing.T) {
 		templateSpec   corev1.PodSpec
 		actualSpec     corev1.PodSpec
 		secureByDef    bool
-		expectedResult bool // true if they should be considered equal
+		expectedResult bool
 	}{
 		{
 			name: "Identical specs should match",
@@ -1985,10 +1985,6 @@ func TestCompareSandboxBlueprint(t *testing.T) {
 	}
 }
 
-// TestSandboxBlueprintFieldsAreCompared verifies that compareSandboxBlueprint()
-// accounts for all fields in the SandboxBlueprint struct. A field missing from the
-// comparison logic is not tracked for drift, so a warm sandbox will not be detected
-// as stale when that field changes.
 func TestSandboxBlueprintFieldsAreCompared(t *testing.T) {
 	expectedFields := []string{"PodTemplate", "VolumeClaimTemplates", "Service"}
 
@@ -2030,7 +2026,6 @@ func TestNewPoolSandboxesCarryOnlyTheRenamedHashLabel(t *testing.T) {
 	}
 }
 
-// Create a test scheme with extensions types registered.
 func newTestScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))

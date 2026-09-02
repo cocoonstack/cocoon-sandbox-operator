@@ -181,7 +181,7 @@ type NodeInventory struct {
     metav1.TypeMeta   `json:",inline"`
     metav1.ObjectMeta `json:"metadata,omitempty"`
     Node    string           `json:"node"`
-    Entries []InventoryEntry `json:"entries"` // {name, id, phase, claimRef, addr, deadline}
+    Entries []InventoryEntry `json:"entries"` // {name, id, phase, template, claimRef, addr, deadline}
 }
 ```
 

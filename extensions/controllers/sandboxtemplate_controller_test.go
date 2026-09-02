@@ -299,7 +299,6 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 			t.Fatalf("reconcile: (%v)", err)
 		}
 
-		// Check if unownedNP still exists
 		var np networkingv1.NetworkPolicy
 		err = client.Get(t.Context(), types.NamespacedName{Name: "victim-network-policy", Namespace: "default"}, &np)
 		if err != nil {
@@ -343,7 +342,6 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 			t.Logf("Reconcile returned error (expected after fix): %v", err)
 		}
 
-		// Check if unownedNP was updated
 		var np networkingv1.NetworkPolicy
 		err = client.Get(t.Context(), types.NamespacedName{Name: "victim-network-policy", Namespace: "default"}, &np)
 		if err != nil {

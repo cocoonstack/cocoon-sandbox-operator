@@ -49,7 +49,10 @@ const (
 	phaseHibernated = "Hibernated"
 )
 
-var errSandboxNotFound = errors.New("sandbox not found")
+var (
+	errSandboxNotFound = errors.New("sandbox not found")
+	errNoOwningNode    = errors.New("sandbox inventory entry names no owning node")
+)
 
 // Options configures the compat server.
 type Options struct {
@@ -265,8 +268,10 @@ func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 	node := sb.Status.NodeName
 	if node == "" {
-		// No owning node resolved: nothing to release against.
-		w.WriteHeader(http.StatusNoContent)
+		// The release cannot be routed, and a 204 would tell the caller a still
+		// running sandbox was freed.
+		s.opts.Log.Error(errNoOwningNode, "e2b delete: release failed", "sandboxID", id)
+		writeError(w, http.StatusInternalServerError, "failed to release the sandbox")
 		return
 	}
 	// Release against the raw node-local claim id, never the id as the client

@@ -37,8 +37,6 @@ func TestClaimSuccess(t *testing.T) {
 	require.Equal(t, "10.0.0.5:7777", res.OwnerAddr)
 }
 
-// TestSandboxdClaimFallbackOn429 asserts a 429 maps to ErrNodeAtCapacity, the
-// signal the gateway turns into an L1 fallback.
 func TestSandboxdClaimFallbackOn429(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -51,8 +49,6 @@ func TestSandboxdClaimFallbackOn429(t *testing.T) {
 	require.ErrorIs(t, err, ErrNodeAtCapacity)
 }
 
-// TestSandboxdClaimRedirectIsCapacityMiss asserts a 200 that carries only a peer
-// redirect (no delivered id) is treated as a capacity miss, not a bogus success.
 func TestSandboxdClaimRedirectIsCapacityMiss(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

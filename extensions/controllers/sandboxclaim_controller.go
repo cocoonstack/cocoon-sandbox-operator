@@ -112,6 +112,13 @@ type triggeredAdoptionEntry struct {
 	sandbox string
 }
 
+// nodeSpread is one node's queued warm-sandbox count and the arrival position
+// of its first key, the pair the NodeSpread pick needs in a single pass.
+type nodeSpread struct {
+	count int
+	first int
+}
+
 // failure is the reason/message pair behind a not-Ready claim.
 type failure struct {
 	reason  string
@@ -646,35 +653,8 @@ func (r *SandboxClaimReconciler) getCandidate(ctx context.Context, claim *extens
 		}
 	}()
 
-	// NodeSpread: the node with the most remaining warm sandboxes has been
-	// picked the least, so drain it first. Two passes, no intermediate slices:
-	// this runs under the pool's lock on every warm claim.
-	pickSmart := func(keys []queue.SandboxKey) (queue.SandboxKey, bool) {
-		if len(keys) == 0 {
-			return queue.SandboxKey{}, false
-		}
-		nodeCounts := make(map[string]int, len(keys))
-		maxCount := 0
-		for _, key := range keys {
-			if key.NodeName == "" {
-				continue
-			}
-			nodeCounts[key.NodeName]++
-			maxCount = max(maxCount, nodeCounts[key.NodeName])
-		}
-		if maxCount == 0 {
-			return keys[0], true
-		}
-		for _, key := range keys {
-			if key.NodeName != "" && nodeCounts[key.NodeName] == maxCount {
-				return key, true
-			}
-		}
-		return keys[0], true
-	}
-
 	for {
-		adoptedKey, ok := r.WarmSandboxQueue.GetWithStrategy(namespacedWarmPoolName, pickSmart)
+		adoptedKey, ok := r.WarmSandboxQueue.GetWithStrategy(namespacedWarmPoolName, pickNodeSpread)
 		if !ok {
 			if fallbackSandbox != nil {
 				adoptingFallback = true
@@ -1784,6 +1764,35 @@ func stagedAnnotationsSurvived(claim *extensionsv1beta1.SandboxClaim, staged map
 	return true
 }
 
+// pickNodeSpread picks the queued sandbox on the node with the most remaining
+// warm capacity, which has been drawn from the least, breaking ties by arrival
+// order. One pass and one map: it runs under the pool's lock on every warm claim.
+func pickNodeSpread(keys []queue.SandboxKey) (queue.SandboxKey, bool) {
+	if len(keys) == 0 {
+		return queue.SandboxKey{}, false
+	}
+	nodes := make(map[string]nodeSpread, len(keys))
+	best := nodeSpread{first: -1}
+	for i, key := range keys {
+		if key.NodeName == "" {
+			continue
+		}
+		seen := nodes[key.NodeName]
+		if seen.count == 0 {
+			seen.first = i
+		}
+		seen.count++
+		nodes[key.NodeName] = seen
+		if seen.count > best.count || (seen.count == best.count && seen.first < best.first) {
+			best = seen
+		}
+	}
+	if best.count == 0 {
+		return keys[0], true
+	}
+	return keys[best.first], true
+}
+
 // setOrDeleteLabel forces labels[key] to want, removing the entry when want is
 // empty.
 func setOrDeleteLabel(labels map[string]string, key, want string) {
@@ -1866,17 +1875,19 @@ func claimSandboxChangePredicate() predicate.Funcs {
 				oldSb.DeletionTimestamp.IsZero() != newSb.DeletionTimestamp.IsZero() ||
 				!maps.Equal(oldSb.Labels, newSb.Labels) ||
 				!slices.Equal(oldSb.Status.PodIPs, newSb.Status.PodIPs) ||
-				isSandboxReady(oldSb) != isSandboxReady(newSb) ||
-				finishedConditionChanged(oldSb, newSb)
+				sandboxConditionChanged(oldSb, newSb, string(v1beta1.SandboxConditionReady)) ||
+				sandboxConditionChanged(oldSb, newSb, string(v1beta1.SandboxConditionFinished))
 		},
 	}
 }
 
-// finishedConditionChanged reports whether the Finished condition the claim
-// mirrors verbatim differs between two revisions.
-func finishedConditionChanged(oldSb, newSb *v1beta1.Sandbox) bool {
-	oldCond := meta.FindStatusCondition(oldSb.Status.Conditions, string(v1beta1.SandboxConditionFinished))
-	newCond := meta.FindStatusCondition(newSb.Status.Conditions, string(v1beta1.SandboxConditionFinished))
+// sandboxConditionChanged reports whether a condition the claim mirrors
+// verbatim differs between two revisions. Reason and message count: the claim
+// forwards the whole condition, so a reason flip under an unchanged status is a
+// status change the claim must observe.
+func sandboxConditionChanged(oldSb, newSb *v1beta1.Sandbox, conditionType string) bool {
+	oldCond := meta.FindStatusCondition(oldSb.Status.Conditions, conditionType)
+	newCond := meta.FindStatusCondition(newSb.Status.Conditions, conditionType)
 	if oldCond == nil || newCond == nil {
 		return oldCond != newCond
 	}

@@ -7,7 +7,6 @@ import (
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
-// Fleet shapes: the deployed 26-node fleet and the 50k-microVM projection.
 var benchFleets = []struct {
 	name    string
 	nodes   int
@@ -17,8 +16,6 @@ var benchFleets = []struct {
 	{"200x2000", 200, 2000},
 }
 
-// BenchmarkStoreGet resolves one sandbox living on the last node in enumeration
-// order — the sequential worst case a Get pays on a miss-heavy sweep.
 func BenchmarkStoreGet(b *testing.B) {
 	for _, fleet := range benchFleets {
 		b.Run(fleet.name, func(b *testing.B) {
@@ -37,8 +34,6 @@ func BenchmarkStoreGet(b *testing.B) {
 	}
 }
 
-// BenchmarkStoreWarmCandidates sweeps every node inventory for warm capacity —
-// the node-pick cost every aggregated Create/claim pays.
 func BenchmarkStoreWarmCandidates(b *testing.B) {
 	for _, fleet := range benchFleets {
 		b.Run(fleet.name, func(b *testing.B) {
@@ -58,8 +53,6 @@ func BenchmarkStoreWarmCandidates(b *testing.B) {
 	}
 }
 
-// benchStore publishes nodes×perNode inventory entries, every node advertising
-// warm capacity for the returned pool key.
 func benchStore(b *testing.B, nodes, perNode int) (*scatterGatherStore, PoolKey) {
 	b.Helper()
 	pool := PoolKey{Template: "ghcr.io/cocoonstack/sandbox/rt:24.04", Net: NetDefault, Size: SizeClassSmall}

@@ -2,11 +2,6 @@ package e2bcompat
 
 import "testing"
 
-// TestPublicIDIsDNSLabelSafe is the reason this mapping exists: the e2b SDK
-// builds the in-sandbox envd host as "{port}-{sandboxID}.{domain}". A sandboxd
-// claim id is "sb_"+hex, and that underscore is illegal in a DNS label — an id
-// published raw yields a host that cannot resolve, so the sandbox is created
-// but unreachable.
 func TestPublicIDIsDNSLabelSafe(t *testing.T) {
 	for _, tt := range []struct {
 		name string
@@ -32,9 +27,6 @@ func TestPublicIDIsDNSLabelSafe(t *testing.T) {
 	}
 }
 
-// TestMatchesIDAcceptsBothForms: an id observed through either surface has to
-// keep working. A client that saw the published (DNS-safe) id sends that back;
-// something reading the raw claim id from the node sends the original.
 func TestMatchesIDAcceptsBothForms(t *testing.T) {
 	const claim = "sb_0123456789abcdef"
 
@@ -49,9 +41,6 @@ func TestMatchesIDAcceptsBothForms(t *testing.T) {
 	}
 }
 
-// TestMatchesIDRejectsEmpty guards the lookup loop: a sandbox whose node has
-// not published a claim id has an empty annotation, and an empty request path
-// is equally meaningless. Matching those would return an arbitrary sandbox.
 func TestMatchesIDRejectsEmpty(t *testing.T) {
 	if matchesID("", "") {
 		t.Error("empty must not match empty")

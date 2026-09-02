@@ -17,8 +17,6 @@ import (
 
 const benchPoolMembers = 2500
 
-// BenchmarkWarmPoolReconcileSteady measures one full steady-state Reconcile of a
-// pool at the validated scale — the cost every member event used to pay.
 func BenchmarkWarmPoolReconcileSteady(b *testing.B) {
 	r, pool, _ := newBenchPool(b)
 	req := ctrl.Request{Namespace: pool.Namespace, Name: pool.Name}
@@ -31,9 +29,6 @@ func BenchmarkWarmPoolReconcileSteady(b *testing.B) {
 	}
 }
 
-// BenchmarkPoolMemberDeepCopy measures deep-copying the full member list — the
-// per-List cost the informer cache pays for this controller unless the read is
-// declared copy-free.
 func BenchmarkPoolMemberDeepCopy(b *testing.B) {
 	_, _, members := newBenchPool(b)
 	b.ReportAllocs()
@@ -44,8 +39,6 @@ func BenchmarkPoolMemberDeepCopy(b *testing.B) {
 	}
 }
 
-// newBenchPool builds a reconciler over a steady pool: desired == current ==
-// benchPoolMembers, every member owned, warm-labeled, hash-fresh, and Ready.
 func newBenchPool(b *testing.B) (*SandboxWarmPoolReconciler, *extensionsv1beta1.SandboxWarmPool, []sandboxv1beta1.Sandbox) {
 	scheme := newScheme(b)
 	template := &extensionsv1beta1.SandboxTemplate{

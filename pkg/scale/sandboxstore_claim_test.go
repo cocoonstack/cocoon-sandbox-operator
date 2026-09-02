@@ -170,8 +170,6 @@ func TestStoreClaimReportsNoCapacityOnlyWhenEveryNodeRaced(t *testing.T) {
 	assert.Equal(t, 2, f.calls, "each node must be tried exactly once")
 }
 
-// raceFactory answers ErrNodeAtCapacity for nodes that advertised warm capacity
-// they no longer hold.
 type raceFactory struct {
 	emptyAddr string
 	emptyAll  bool
@@ -185,8 +183,6 @@ func (r *raceFactory) factory() SandboxdClientFactory {
 	}
 }
 
-// raceClient embeds recordingClient for the rest of the SandboxdClient surface
-// and only decides whether this node still has the warm microVM it advertised.
 type raceClient struct {
 	*recordingClient
 	f    *raceFactory
@@ -201,7 +197,6 @@ func (c *raceClient) Claim(context.Context, sandboxd.ClaimSpec) (sandboxd.ClaimR
 	return c.f.result, nil
 }
 
-// poolInv builds a NodeInventory advertising a sandboxd address and pool capacities.
 func poolInv(node, addr string, pools ...PoolCapacity) *NodeInventory {
 	return &NodeInventory{
 		Name:    node,
@@ -211,9 +206,6 @@ func poolInv(node, addr string, pools ...PoolCapacity) *NodeInventory {
 	}
 }
 
-// recordingFactory captures how the store built and called the per-node sandboxd
-// client, so tests can assert claim/release routing (address + uniform token) and
-// the derived claim spec without a live node.
 type recordingFactory struct {
 	builtAddr    string
 	builtToken   string
@@ -254,8 +246,6 @@ func (c *recordingClient) Release(_ context.Context, id, token string) error {
 	return c.f.releaseErr
 }
 
-// The lifecycle verbs are not exercised here; they satisfy the SandboxdClient
-// port so the recorder stays a drop-in.
 func (c *recordingClient) Hibernate(context.Context, string) error { return nil }
 
 func (c *recordingClient) Wake(context.Context, string) error { return nil }

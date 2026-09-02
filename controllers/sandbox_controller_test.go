@@ -1048,7 +1048,7 @@ func TestReconcilePod(t *testing.T) {
 		wantPod                *corev1.Pod
 		expectErr              bool
 		wantSandboxAnnotations map[string]string
-		wantPodSurvives        string // if set, verify this pod still exists after reconcile
+		wantPodSurvives        string
 	}{
 		{
 			name: "updates label and owner reference if Pod already exists",
@@ -2401,7 +2401,7 @@ func TestReconcileService(t *testing.T) {
 		sandbox               *sandboxv1beta1.Sandbox
 		wantService           *corev1.Service
 		expectErr             bool
-		errContains           string // substring that must appear in the error
+		errContains           string
 		wantNilService        bool
 		wantServiceDeleted    bool
 		wantStatusService     string
@@ -3338,10 +3338,6 @@ func TestMergeVolumeClaimVolumes(t *testing.T) {
 	})
 }
 
-// TestSandboxReconcile_ConditionsDoNotAccumulate verifies that reconciling a
-// ready sandbox many times does not grow the conditions slice. A bug
-// that appends instead of upserts the Ready condition will cause unbounded
-// status growth.
 func TestSandboxReconcile_ConditionsDoNotAccumulate(t *testing.T) {
 	sbName := "no-grow-sandbox"
 	sbNs := "default"

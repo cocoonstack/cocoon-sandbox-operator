@@ -8,10 +8,6 @@ import (
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
-// TestMutateSandboxdRoutesToHotPool: sandboxd mode pins the pod to the
-// vk-sandbox virtual node, tolerates its taint, stamps the runtime, and
-// defaults the claim template from the container image — the contract the
-// vk-sandbox provider consumes. vk-cocoon must NOT be involved.
 func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
 	m, err := NewMutator(ModeSandboxd)
 	if err != nil {
@@ -45,7 +41,6 @@ func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
 	}
 }
 
-// TestMutateSandboxdRespectsExplicitTemplate: a user-set template is preserved.
 func TestMutateSandboxdRespectsExplicitTemplate(t *testing.T) {
 	m, _ := NewMutator(ModeStandard)
 	sandbox := &sandboxv1beta1.Sandbox{Name: "sb", Namespace: "ns"}
@@ -62,7 +57,6 @@ func TestMutateSandboxdRespectsExplicitTemplate(t *testing.T) {
 	}
 }
 
-// TestMutateSandboxdRejectsPinnedNode: a pinned NodeName would misroute.
 func TestMutateSandboxdRejectsPinnedNode(t *testing.T) {
 	m, _ := NewMutator(ModeSandboxd)
 	sandbox := &sandboxv1beta1.Sandbox{Name: "sb", Namespace: "ns"}
@@ -73,7 +67,6 @@ func TestMutateSandboxdRejectsPinnedNode(t *testing.T) {
 	}
 }
 
-// TestNewMutatorAcceptsSandboxd guards the flag surface.
 func TestNewMutatorAcceptsSandboxd(t *testing.T) {
 	if _, err := NewMutator(ModeSandboxd); err != nil {
 		t.Fatalf("NewMutator must accept sandboxd: %v", err)

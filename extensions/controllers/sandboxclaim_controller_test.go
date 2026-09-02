@@ -1084,8 +1084,6 @@ func TestSandboxClaimReconcile(t *testing.T) {
 	}
 }
 
-// TestSandboxClaimCleanupPolicy verifies that the Claim deletes itself
-// based on its own timestamp, and deletes the Sandbox if Policy=Retain.
 func TestSandboxClaimCleanupPolicy(t *testing.T) {
 	template := &extensionsv1beta1.SandboxTemplate{
 		Name: "cleanup-template", Namespace: "default",
@@ -1143,10 +1141,10 @@ func TestSandboxClaimCleanupPolicy(t *testing.T) {
 		claim                      *extensionsv1beta1.SandboxClaim
 		sandboxIsExpired           bool
 		isWarmPool                 bool
-		sandboxNotOwned            bool // sandbox exists at statusName but belongs to a different owner
+		sandboxNotOwned            bool
 		expectClaimDeleted         bool
 		expectSandboxDeleted       bool
-		expectSandboxStatusCleared bool // SandboxStatus.Name and PodIPs must be empty
+		expectSandboxStatusCleared bool
 		expectStatus               string
 	}{
 		{
@@ -1250,7 +1248,6 @@ func TestSandboxClaimCleanupPolicy(t *testing.T) {
 				}
 			}
 
-			// 1. Verify Claim
 			var fetchedClaim extensionsv1beta1.SandboxClaim
 			err = client.Get(t.Context(), req.NamespacedName, &fetchedClaim)
 
@@ -1283,7 +1280,6 @@ func TestSandboxClaimCleanupPolicy(t *testing.T) {
 				}
 			}
 
-			// 2. Verify Sandbox
 			var fetchedSandbox sandboxv1beta1.Sandbox
 
 			err = client.Get(t.Context(), types.NamespacedName{Name: sandbox.Name, Namespace: sandbox.Namespace}, &fetchedSandbox)
@@ -1599,7 +1595,6 @@ func TestSandboxClaimTTLCleanupRequiresPersistedExpiredStatus(t *testing.T) {
 	require.True(t, k8errors.IsNotFound(err))
 }
 
-// TestSandboxProvisionEvent verifies that Sandbox creation emits "SandboxProvisioned".
 func TestSandboxProvisionEvent(t *testing.T) {
 	scheme := newScheme(t)
 	claimName := "provision-event-claim"
@@ -2179,7 +2174,7 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 			}
 
 			if tc.expectSandboxAdoption {
-				// Verify the adopted sandbox has correct labels and owner reference
+
 				var adoptedSandbox sandboxv1beta1.Sandbox
 				err = fakeClient.Get(ctx, types.NamespacedName{
 					Name:      tc.expectedAdoptedSandbox,
@@ -2239,7 +2234,6 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 					require.Equal(t, expected, adoptedSandbox.Spec.PodTemplate.ObjectMeta.Labels[key])
 				}
 
-				// 5. Verify the claim records the assigned sandbox annotation
 				var updatedClaim extensionsv1beta1.SandboxClaim
 				if err := fakeClient.Get(ctx, req.NamespacedName, &updatedClaim); err != nil {
 					t.Fatalf("failed to get updated claim: %v", err)
@@ -2247,7 +2241,7 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 				require.Equal(t, tc.expectedAdoptedSandbox, updatedClaim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation])
 
 			} else if tc.expectNewSandboxCreated {
-				// Verify a new sandbox was created with the claim's name
+
 				var sandbox sandboxv1beta1.Sandbox
 				err = fakeClient.Get(ctx, req.NamespacedName, &sandbox)
 				if err != nil {
@@ -2309,8 +2303,6 @@ func TestWarmPoolEventHandler_Delete_RemovesEntireQueue(t *testing.T) {
 	}
 }
 
-// TestSandboxClaimNoReAdoption verifies that a second reconcile does not adopt another
-// sandbox from the warm pool when the claim already owns one.
 func TestSandboxClaimNoReAdoption(t *testing.T) {
 	scheme := newScheme(t)
 
@@ -2385,7 +2377,6 @@ func TestSandboxClaimNoReAdoption(t *testing.T) {
 		t.Fatalf("reconcile failed: %v", err)
 	}
 
-	// Verify the pool sandbox was NOT adopted (still has warm pool labels)
 	var extra sandboxv1beta1.Sandbox
 	if err := fakeClient.Get(ctx, types.NamespacedName{Name: "pool-sb-extra", Namespace: "default"}, &extra); err != nil {
 		t.Fatalf("failed to get pool sandbox: %v", err)
@@ -3256,9 +3247,6 @@ func TestVerifySandboxCandidate_NamespaceIsolation(t *testing.T) {
 	}
 }
 
-// TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag verifies that during informer cache lag,
-// the assigned sandbox annotation on the claim is used to identify the previously adopted Sandbox,
-// preventing duplicate adoptions from the warm pool.
 func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 	scheme := newScheme(t)
 
@@ -3389,7 +3377,6 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 		t.Errorf("expected Ready condition reason %q during cache lag, got %q (message: %q)", "AdoptionPending", readyCondition.Reason, readyCondition.Message)
 	}
 
-	// Verify that the extra warm sandbox was NOT adopted (it should still have its warm pool labels)
 	var extra sandboxv1beta1.Sandbox
 	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "pool-sb-extra", Namespace: "default"}, &extra); err != nil {
 		t.Fatalf("failed to get extra warm sandbox: %v", err)
@@ -3398,8 +3385,6 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 		t.Error("expected extra warm sandbox to still have warm pool label, meaning it was not incorrectly adopted during cache lag")
 	}
 
-	// Simulate the cache catching up!
-	// Fetch the adopted sandbox object, add the SandboxClaim owner reference, and update it in fakeClient.
 	var adopted sandboxv1beta1.Sandbox
 	if err := fakeClient.Get(t.Context(), types.NamespacedName{Name: "adopted-sb", Namespace: "default"}, &adopted); err != nil {
 		t.Fatalf("failed to get adopted sandbox: %v", err)
@@ -3442,10 +3427,6 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 	}
 }
 
-// TestSandboxClaimAdoptionCacheLagDoesNotRepatch verifies that while the informer cache
-// keeps returning the stale (warm-pool-owned) view of an already-adopted sandbox, the
-// bounded cache-lag requeues wait for convergence WITHOUT re-sending the adoption patch
-// on every pass.
 func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 	scheme := newScheme(t)
 
@@ -3563,10 +3544,6 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 	}
 }
 
-// TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus verifies that a claim whose
-// status was already finalized with a sandbox (e.g. a controller restart racing a stale
-// informer) does NOT have its SandboxStatus.Name/PodIPs wiped or its Ready condition
-// downgraded by a benign cache-lag adoption retry pass.
 func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 	scheme := newScheme(t)
 
@@ -3692,11 +3669,6 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 	}
 }
 
-// TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag verifies that the primary
-// warm-adoption entry point (adoptSandboxFromCandidates) records the completed adoption
-// in the dedup cache, so the very next cache-lag pass waits via the bounded requeue
-// without re-sending the adoption patch — and without wiping the status finalized on
-// the adoption pass.
 func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 	scheme := newScheme(t)
 
@@ -3974,7 +3946,6 @@ func TestSandboxClaimRecoveryWhenTemplateCreated(t *testing.T) {
 		t.Errorf("expected RequeueAfter to be 1 minute, got %v", result.RequeueAfter)
 	}
 
-	// Verify status is set to TemplateNotFound
 	var updatedClaim extensionsv1beta1.SandboxClaim
 	if err := fakeClient.Get(t.Context(), req.NamespacedName, &updatedClaim); err != nil {
 		t.Fatalf("failed to get claim: %v", err)
@@ -3993,7 +3964,6 @@ func TestSandboxClaimRecoveryWhenTemplateCreated(t *testing.T) {
 		t.Fatalf("expected no error when template exists, but got %v", err)
 	}
 
-	// Verify sandbox is created
 	var sandbox sandboxv1beta1.Sandbox
 	if err := fakeClient.Get(t.Context(), req.NamespacedName, &sandbox); err != nil {
 		t.Fatalf("expected sandbox to be created, but got error: %v", err)
@@ -4260,7 +4230,6 @@ func TestSandboxClaimAdoptionStrategy(t *testing.T) {
 			require.NotNil(t, controllerRef)
 			require.Equal(t, claim.UID, controllerRef.UID)
 
-			// Verify that the expected remaining sandbox keys are still queued properly (regression test)
 			var actualRemaining []string
 			namespacedWarmPoolName := queue.GetNamespacedWarmPoolName("default", "test-pool")
 			for {
@@ -4450,7 +4419,6 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 				require.NotNil(t, controllerRef)
 				require.Equal(t, claim.UID, controllerRef.UID)
 
-				// Verify claim's AssignedSandboxName annotation
 				var updatedClaim extensionsv1beta1.SandboxClaim
 				require.NoError(t, fakeClient.Get(t.Context(), req.NamespacedName, &updatedClaim))
 				require.Equal(t, tc.expectedAdoptedSandbox, updatedClaim.Annotations[extensionsv1beta1.AssignedSandboxNameAnnotation])
@@ -4919,6 +4887,90 @@ func TestFlushDoesNotResurrectAClearedAnnotation(t *testing.T) {
 		"the staged observability annotation still has to land")
 }
 
+func TestClaimSandboxPredicatePassesAReasonOnlyReadyChange(t *testing.T) {
+	ready := func(status metav1.ConditionStatus, reason, message string) *sandboxv1beta1.Sandbox {
+		return &sandboxv1beta1.Sandbox{
+			Name: "sb", Namespace: "default",
+			Status: sandboxv1beta1.SandboxStatus{Conditions: []metav1.Condition{{
+				Type:    string(sandboxv1beta1.SandboxConditionReady),
+				Status:  status,
+				Reason:  reason,
+				Message: message,
+			}}},
+		}
+	}
+	pass := claimSandboxChangePredicate().Update
+
+	cases := []struct {
+		name     string
+		old, new *sandboxv1beta1.Sandbox
+		want     bool
+	}{
+		{
+			name: "reason and message change under an unchanged False",
+			old:  ready(metav1.ConditionFalse, sandboxv1beta1.SandboxReasonDependenciesNotReady, "Pod exists with phase: Pending"),
+			new:  ready(metav1.ConditionFalse, sandboxv1beta1.SandboxReasonPodFailed, "Pod failed"),
+			want: true,
+		},
+		{
+			name: "status flips",
+			old:  ready(metav1.ConditionFalse, sandboxv1beta1.SandboxReasonDependenciesNotReady, "Pod is Running but not Ready"),
+			new:  ready(metav1.ConditionTrue, sandboxv1beta1.SandboxReasonDependenciesReady, "Pod is Ready"),
+			want: true,
+		},
+		{
+			name: "identical condition",
+			old:  ready(metav1.ConditionFalse, sandboxv1beta1.SandboxReasonDependenciesNotReady, "Pod does not exist"),
+			new:  ready(metav1.ConditionFalse, sandboxv1beta1.SandboxReasonDependenciesNotReady, "Pod does not exist"),
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, pass(event.UpdateEvent{ObjectOld: tc.old, ObjectNew: tc.new}))
+		})
+	}
+}
+
+func TestPickNodeSpreadDrainsTheFullestNodeAndBreaksTiesByArrival(t *testing.T) {
+	key := func(name, node string) queue.SandboxKey {
+		return queue.SandboxKey{Namespace: "default", Name: name, NodeName: node}
+	}
+	cases := []struct {
+		name string
+		keys []queue.SandboxKey
+		want string
+	}{
+		{
+			name: "fullest node wins",
+			keys: []queue.SandboxKey{key("a", "node-1"), key("b", "node-2"), key("c", "node-2")},
+			want: "b",
+		},
+		{
+			name: "equal counts break by arrival",
+			keys: []queue.SandboxKey{key("a", "node-1"), key("b", "node-2"), key("c", "node-2"), key("d", "node-1")},
+			want: "a",
+		},
+		{
+			name: "unscheduled keys are skipped while a node has capacity",
+			keys: []queue.SandboxKey{key("a", ""), key("b", "node-1")},
+			want: "b",
+		},
+		{
+			name: "all unscheduled falls back to arrival order",
+			keys: []queue.SandboxKey{key("a", ""), key("b", "")},
+			want: "a",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := pickNodeSpread(tc.keys)
+			require.True(t, ok)
+			require.Equal(t, tc.want, got.Name)
+		})
+	}
+}
+
 func newScheme(t testing.TB) *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
@@ -4966,7 +5018,6 @@ func (c *conflictClient) Patch(ctx context.Context, obj client.Object, patch cli
 	return c.Client.Patch(ctx, obj, patch, opts...)
 }
 
-// countObservedTimesEntries returns the number of live entries in the observedTimes map.
 func countObservedTimesEntries(r *SandboxClaimReconciler) int {
 	count := 0
 	r.observedTimes.inner.Range(func(_, _ any) bool { count++; return true })

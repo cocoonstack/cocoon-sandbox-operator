@@ -20,9 +20,6 @@ import (
 
 const testKey = "e2b_testkey"
 
-// TestCreateClaimsFromTemplatePool is the core contract: an e2b create is the
-// same node-local claim, keyed on the template the caller asked for, and the
-// response carries the fields the SDK requires.
 func TestCreateClaimsFromTemplatePool(t *testing.T) {
 	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_abc123", Node: "node-a", Token: "tok-1"}}
 	h := newTestServer(t, store, func(o *Options) { o.Domain = "sandbox.example.com" })
@@ -66,7 +63,6 @@ func TestCreateClaimsFromTemplatePool(t *testing.T) {
 	}
 }
 
-// TestCreateNetworkLane checks e2b's internet flag selects the pool's net axis.
 func TestCreateNetworkLane(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -90,8 +86,6 @@ func TestCreateNetworkLane(t *testing.T) {
 	}
 }
 
-// TestCreateNoWarmCapacityIsRetryable keeps the retryable signal retryable: a
-// drained pool refills asynchronously, so it must not surface as a 500.
 func TestCreateNoWarmCapacityIsRetryable(t *testing.T) {
 	store := &fakeStore{claimErr: scale.ErrNoWarmCapacity}
 	h := newTestServer(t, store)
@@ -117,8 +111,6 @@ func TestCreateRejectsNegativeTimeout(t *testing.T) {
 	}
 }
 
-// TestAuthRequiresAPIKey proves the claim endpoint is closed without the key
-// the SDK presents.
 func TestAuthRequiresAPIKey(t *testing.T) {
 	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}}
 	h := newTestServer(t, store)
@@ -139,8 +131,6 @@ func TestAuthRequiresAPIKey(t *testing.T) {
 	}
 }
 
-// TestNewServerRefusesOpenByDefault: forgetting to configure a key must fail
-// loud at startup, not silently serve an open claim endpoint.
 func TestNewServerRefusesOpenByDefault(t *testing.T) {
 	if _, err := NewServer(&fakeStore{}, Options{Namespace: "x"}); err == nil {
 		t.Fatal("NewServer accepted no API key without explicit anonymous access")
@@ -157,8 +147,6 @@ func TestHealthNeedsNoKey(t *testing.T) {
 	}
 }
 
-// TestDeleteReleasesTheClaimedID checks release targets the node-local claim id
-// rather than the Kubernetes name — releasing by name would free the wrong VM.
 func TestDeleteReleasesTheClaimedID(t *testing.T) {
 	store := &fakeStore{items: []sandboxv1beta1.Sandbox{
 		liveSandbox("e2b-aaa", "sb_one", "node-a", "img:1"),
@@ -186,7 +174,6 @@ func TestDeleteUnknownSandboxIs404(t *testing.T) {
 	}
 }
 
-// TestGetReportsDetail checks the detail shape the SDK decodes on getInfo.
 func TestGetReportsDetail(t *testing.T) {
 	got := getDetail(t, liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04"))
 	if got.SandboxID != "sb-one" || got.TemplateID != "registry/rt:24.04" || got.ClientID != "node-a" {
@@ -217,7 +204,6 @@ func TestGetReportsTheDefaultEndAtWithoutADeadline(t *testing.T) {
 	}
 }
 
-// TestListReturnsArray: the SDK decodes a bare JSON array, not an object.
 func TestListReturnsArray(t *testing.T) {
 	store := &fakeStore{items: []sandboxv1beta1.Sandbox{
 		liveSandbox("a", "sb_one", "node-a", "i:1"),
@@ -242,8 +228,6 @@ func TestListReturnsArray(t *testing.T) {
 	}
 }
 
-// TestListEmptyIsArrayNotNull: an empty pool must encode as [], since `null`
-// breaks callers that iterate the result directly.
 func TestListEmptyIsArrayNotNull(t *testing.T) {
 	h := newTestServer(t, &fakeStore{})
 	w := do(t, h, http.MethodGet, "/sandboxes", "", testKey)
@@ -252,8 +236,6 @@ func TestListEmptyIsArrayNotNull(t *testing.T) {
 	}
 }
 
-// TestTimeoutAndRefreshAckLiveSandbox: both verbs confirm the sandbox exists
-// before acknowledging, so a caller never gets an OK for a dead sandbox.
 func TestTimeoutAndRefreshAckLiveSandbox(t *testing.T) {
 	store := &fakeStore{items: []sandboxv1beta1.Sandbox{liveSandbox("a", "sb_one", "node-a", "i")}}
 	h := newTestServer(t, store)
@@ -276,7 +258,6 @@ func TestTimeoutAndRefreshAckLiveSandbox(t *testing.T) {
 	})
 }
 
-// TestErrorBodyCarriesMessage: the SDK surfaces `message` from the envelope.
 func TestErrorBodyCarriesMessage(t *testing.T) {
 	h := newTestServer(t, &fakeStore{})
 	w := do(t, h, http.MethodPost, "/sandboxes", `{}`, testKey)
@@ -289,9 +270,6 @@ func TestErrorBodyCarriesMessage(t *testing.T) {
 	}
 }
 
-// TestLookupUsesClaimIDResolver pins the id-keyed fast path over the real
-// scatter-gather store: both id spellings resolve without a fleet List, other
-// namespaces stay invisible, and a miss is a plain not-found.
 func TestLookupUsesClaimIDResolver(t *testing.T) {
 	src := scale.NewStaticInventorySource()
 	src.Put(&scale.NodeInventory{
@@ -326,8 +304,6 @@ func TestLookupUsesClaimIDResolver(t *testing.T) {
 	}
 }
 
-// TestDetailStateFollowsThePhaseLabel pins the e2b state mapping: a Hibernated
-// phase reports paused, anything else running.
 func TestDetailStateFollowsThePhaseLabel(t *testing.T) {
 	s, err := NewServer(&fakeStore{}, Options{AllowAnonymous: true})
 	if err != nil {
@@ -343,8 +319,20 @@ func TestDetailStateFollowsThePhaseLabel(t *testing.T) {
 	}
 }
 
-// fakeStore records what the compat layer asked of the store and replays canned
-// answers, so the tests assert the translation rather than the node behavior.
+func TestDeleteWithoutAnOwningNodeIs500(t *testing.T) {
+	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "img:1")
+	sb.Status.NodeName = ""
+	store := &fakeStore{items: []sandboxv1beta1.Sandbox{sb}}
+	h := newTestServer(t, store)
+
+	if w := do(t, h, http.MethodDelete, "/sandboxes/sb_one", "", testKey); w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: a 204 would report an unreleased sandbox as freed", w.Code)
+	}
+	if store.releasedID != "" {
+		t.Errorf("released %q with no owning node", store.releasedID)
+	}
+}
+
 type fakeStore struct {
 	claimPool scale.PoolKey
 	claimNS   string
@@ -401,8 +389,6 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	return f.releaseErr
 }
 
-// The lifecycle verbs are not exercised by these tests; they satisfy the
-// SandboxStore contract so the fake stays a drop-in.
 func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
 
 func (f *fakeStore) Resume(context.Context, string, string) error { return nil }

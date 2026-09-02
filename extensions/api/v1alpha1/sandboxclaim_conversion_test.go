@@ -229,9 +229,6 @@ func TestSandboxClaimConversionFromHub(t *testing.T) {
 	}
 }
 
-// TestSandboxClaimVolumeClaimTemplatesRoundTrip asserts the v1beta1-only
-// spec.volumeClaimTemplates survives a v1beta1 -> v1alpha1 -> v1beta1 round trip.
-// v1alpha1 SandboxClaim has no such field, so it must be carried in an annotation.
 func TestSandboxClaimVolumeClaimTemplatesRoundTrip(t *testing.T) {
 	vcts := []sandboxv1beta1.PersistentVolumeClaimTemplate{
 		{
@@ -270,8 +267,6 @@ func TestSandboxClaimVolumeClaimTemplatesRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSandboxClaimNoVolumeClaimTemplatesNoAnnotation asserts a claim without
-// volumeClaimTemplates does not gain the preservation annotation.
 func TestSandboxClaimNoVolumeClaimTemplatesNoAnnotation(t *testing.T) {
 	src := &v1beta1.SandboxClaim{
 		Name: "claim", Namespace: "ns",

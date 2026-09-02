@@ -309,14 +309,12 @@ func inv(node string, entries ...InventoryEntry) *NodeInventory {
 
 func entry(name, phase string) InventoryEntry { return InventoryEntry{Name: name, Phase: phase} }
 
-// sliceLive is a NodeLiveSource fed from an in-memory slice.
 type sliceLive []InventoryEntry
 
 func (s sliceLive) LiveSandboxes(context.Context) ([]InventoryEntry, error) {
 	return []InventoryEntry(s), nil
 }
 
-// mutableLive is a NodeLiveSource whose entries can change between publishes.
 type mutableLive struct{ entries []InventoryEntry }
 
 func (m *mutableLive) LiveSandboxes(context.Context) ([]InventoryEntry, error) {
@@ -325,7 +323,6 @@ func (m *mutableLive) LiveSandboxes(context.Context) ([]InventoryEntry, error) {
 
 type sandboxStatusView struct{ node, label string }
 
-// waitForType drains events until one of type want arrives or the deadline hits.
 func waitForType(t *testing.T, w watch.Interface, want watch.EventType, timeout time.Duration) watch.Event {
 	t.Helper()
 	deadline := time.After(timeout)
