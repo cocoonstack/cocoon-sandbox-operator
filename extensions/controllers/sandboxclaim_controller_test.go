@@ -1086,7 +1086,6 @@ func TestSandboxClaimReconcile(t *testing.T) {
 					t.Errorf("unexpected condition:\n%s", diff)
 				}
 			}
-
 		})
 	}
 }
