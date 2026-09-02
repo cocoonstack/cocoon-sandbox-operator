@@ -57,9 +57,7 @@ func TestMutatePod(t *testing.T) {
 				t.Fatalf("vk-cocoon mutation = %v, want %v", gotVKC, tt.wantVKC)
 			}
 			if !tt.wantVKC {
-				// Standard runtime must leave the Pod untouched: no virtual-node
-				// selector, no vk toleration, and none of the cocoon runtime
-				// annotations. This is the core --default-runtime=standard invariant.
+
 				if _, found := pod.Spec.NodeSelector[vkNodeLabelKey]; found {
 					t.Errorf("standard runtime leaked node selector %s", vkNodeLabelKey)
 				}

@@ -56,7 +56,7 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 |---|---|---|
 | `POST /sandboxes` | `store.Claim` | `templateID` → pool template; `timeout` → the claim's TTL (15s when omitted); `allow_internet_access` → `egress` lane, else the hardened `none` lane. `201` on success, `503` when the pool is drained (retryable). |
 | `GET /sandboxes`, `GET /v2/sandboxes` | `store.List` | Live sandboxes in the compat namespace. |
-| `GET /sandboxes/{id}` | `store.List` + id match | `404` when no live sandbox carries the id. |
+| `GET /sandboxes/{id}` | `store.GetByClaimID` | Resolves the owning node and materializes only that entry; `404` when no live sandbox carries the id. |
 | `DELETE /sandboxes/{id}` | `store.Release` | Releases the node-local claim id, never by Kubernetes name. `204`. |
 | `POST /sandboxes/{id}/timeout` | existence check | TTL is fixed by the node at claim time; the call is verified and acknowledged, not silently faked. |
 | `POST /sandboxes/{id}/refreshes` | existence check | Verifies that the sandbox is still live; it does not extend or refresh the node-owned deadline. |
@@ -84,9 +84,18 @@ const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
   `memUsed`, and `memTotal` come from the owning node when available;
   `cpuUsedPct`, `memCache`, `diskUsed`, and `diskTotal` are reported as zero.
 - **List/detail schema fields are compatibility values.** `startedAt` uses the
-  synthesized Sandbox creation time; `endAt` is `startedAt + 15s`, not the
-  owning node's authoritative deadline. `cpuCount`, `memoryMB`, and
-  `diskSizeMB` are reported as zero on these responses.
+  synthesized Sandbox creation time; `endAt` is the node-granted deadline when
+  the owning node published one, and `startedAt + 15s` otherwise. `cpuCount`,
+  `memoryMB`, and `diskSizeMB` are reported as zero on these responses.
+- **`envdAccessToken` is returned only at claim time.** `POST /sandboxes` and
+  `POST /sandboxes/{id}/fork` carry the token the node just issued. The read
+  paths (`GET /sandboxes`, `GET /sandboxes/{id}`, `POST /sandboxes/{id}/connect`)
+  report it empty: node inventory deliberately carries no per-sandbox secret,
+  so a reconnecting client must keep the token from its create response.
+- **`templateID` on read paths comes from node inventory.** The owning node
+  publishes the pool template with each entry; a node that does not yet publish
+  it makes `GET /sandboxes` and `GET /sandboxes/{id}` report an empty
+  `templateID`. `POST /sandboxes` always echoes the requested one.
 - **Size class** is pinned (`small`) — e2b's `NewSandbox` carries no size
   selector.
 - `metadata`, `envVars`, `autoPause`, and `secure` are accepted so SDK calls do

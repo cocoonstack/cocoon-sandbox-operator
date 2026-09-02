@@ -56,7 +56,6 @@ func TestSandboxTemplateRefHash(t *testing.T) {
 		})
 	}
 
-	// Check that different inputs produce different hashes
 	for descA, resultA := range results {
 		for descB, resultB := range results {
 			if descA == descB {

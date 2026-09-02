@@ -211,7 +211,6 @@ func main() {
 	fs := newFakeSandboxd()
 	defer fs.srv.Close()
 
-	// --- claim-path latency (gateway overhead must be sub-millisecond) ---
 	gw := scale.NewGateway(scale.GatewayConfig{
 		Node: node, Client: sandboxd.New(fs.srv.URL, "root-token"),
 		Authorizer: allowAuthorizer{}, Recorder: &countingRecorder{},
@@ -221,7 +220,6 @@ func main() {
 	p50 := pct(lat, 50)
 	p95 := pct(lat, 95)
 
-	// --- orphan-binding convergence (adopt-only; zero VM destroys) ---
 	reconciled, remaining := injectAndReconcileOrphans(ctx, fs, *orphansFlag)
 	destroys := fs.releases.Load()
 

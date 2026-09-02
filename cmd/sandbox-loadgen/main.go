@@ -37,16 +37,20 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
+	"github.com/cocoonstack/sandbox-operator/pkg/podruntime"
 )
 
 const (
-	runtimeAnnotation = "sandbox.cocoonstack.io/runtime"
+	runtimeAnnotation = podruntime.RuntimeAnnotation
 	templateName      = "loadgen-tpl"
-	warmPoolName      = "loadgen-pool"
+	// releaseTimeout bounds the detached release so shutdown cannot hang on it.
+	releaseTimeout = 10 * time.Second
+	warmPoolName   = "loadgen-pool"
 	// observedAtAnnotation is read by the operator to compute the claim-startup
 	// latency (time.Since). Stamping it at create-time makes the operator record
 	// agent_sandbox_claim_startup_latency_ms for our claims.
-	observedAtAnnotation = "agents.x-k8s.io/controller-first-observed-at"
+	observedAtAnnotation = asmetrics.ObservabilityAnnotation
 )
 
 var (
@@ -293,6 +297,19 @@ func (l *loadgen) claimOnce(ctx context.Context, name string) {
 		return
 	}
 	claimsTotal.Inc()
+	// Deferred and detached from ctx: an early return on shutdown would otherwise
+	// strand the claim, and with it the warm sandbox, until its own expiry.
+	defer func() {
+		rel := &unstructured.Unstructured{}
+		rel.SetGroupVersionKind(gvk("SandboxClaim"))
+		rel.SetNamespace(l.o.namespace)
+		rel.SetName(name)
+		relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
+		defer cancel()
+		if err := l.cl.Delete(relCtx, rel); err != nil && !apierrors.IsNotFound(err) {
+			claimFailed.WithLabelValues("delete").Inc()
+		}
+	}()
 
 	poll := time.NewTicker(l.o.poll)
 	defer poll.Stop()
@@ -319,14 +336,6 @@ func (l *loadgen) claimOnce(ctx context.Context, name string) {
 		if time.Now().After(deadline) {
 			break
 		}
-	}
-	// release
-	rel := &unstructured.Unstructured{}
-	rel.SetGroupVersionKind(gvk("SandboxClaim"))
-	rel.SetNamespace(l.o.namespace)
-	rel.SetName(name)
-	if err := l.cl.Delete(ctx, rel); err != nil && !apierrors.IsNotFound(err) {
-		claimFailed.WithLabelValues("delete").Inc()
 	}
 }
 

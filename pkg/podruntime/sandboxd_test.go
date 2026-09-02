@@ -36,7 +36,7 @@ func TestMutateSandboxdRoutesToHotPool(t *testing.T) {
 	if pod.Annotations[sandboxdTemplateAnnotation] != "base:24.04" {
 		t.Fatalf("template default = %q, want base:24.04", pod.Annotations[sandboxdTemplateAnnotation])
 	}
-	// No cocoon MicroVM annotations leaked in.
+
 	if _, ok := pod.Annotations[cocoonModeAnnotation]; ok {
 		t.Fatal("sandboxd pod must not carry cocoon vk-cocoon annotations")
 	}

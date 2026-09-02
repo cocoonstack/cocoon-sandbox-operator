@@ -32,7 +32,6 @@ func TestSandboxWarmPoolConversion(t *testing.T) {
 			},
 		},
 		{
-			// Exercises the nil branch of convertWarmPoolSpecTo/convertWarmPoolSpecFrom.
 			name:           "nil update strategy",
 			updateStrategy: nil,
 		},
@@ -64,13 +63,11 @@ func TestSandboxWarmPoolConversion(t *testing.T) {
 				},
 			}
 
-			// Convert to Hub (v1beta1)
 			dst := &v1beta1.SandboxWarmPool{}
 			if err := src.ConvertTo(dst); err != nil {
 				t.Fatalf("failed to convert to v1beta1: %v", err)
 			}
 
-			// Verify src annotations and labels were not mutated during ConvertTo
 			if val, ok := src.Annotations[v1alpha1SandboxWarmPoolStateAnnotation]; !ok || val != "some-old-state" {
 				t.Errorf("src.Annotations was mutated during ConvertTo! expected 'some-old-state', got %q", val)
 			}
@@ -85,7 +82,6 @@ func TestSandboxWarmPoolConversion(t *testing.T) {
 				t.Errorf("dst.Annotations carries the v1alpha1 state stash; the conversion is lossless and must not persist a second copy")
 			}
 
-			// Verify v1beta1 fields
 			if dst.Spec.Replicas == nil || *dst.Spec.Replicas != 3 {
 				t.Errorf("unexpected replicas: %v", dst.Spec.Replicas)
 			}
@@ -103,18 +99,15 @@ func TestSandboxWarmPoolConversion(t *testing.T) {
 				t.Errorf("unexpected ready replicas: %d", dst.Status.ReadyReplicas)
 			}
 
-			// Convert back to Spoke (v1alpha1)
 			roundTrip := &SandboxWarmPool{}
 			if err := roundTrip.ConvertFrom(dst); err != nil {
 				t.Fatalf("failed to convert back to v1alpha1: %v", err)
 			}
 
-			// Verify state annotation was stripped during ConvertFrom
 			if _, ok := roundTrip.Annotations[v1alpha1SandboxWarmPoolStateAnnotation]; ok {
 				t.Errorf("roundTrip.Annotations still contains the state annotation after ConvertFrom!")
 			}
 
-			// Verify round-trip preserves all fields
 			if roundTrip.Spec.Replicas != src.Spec.Replicas {
 				t.Errorf("roundtrip Replicas mismatch: expected %d, got %d", src.Spec.Replicas, roundTrip.Spec.Replicas)
 			}

@@ -49,9 +49,9 @@ import (
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	ctrls "github.com/cocoonstack/sandbox-operator/extensions/controllers"
-	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
 	"github.com/cocoonstack/sandbox-operator/internal/hash"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
+	"github.com/cocoonstack/sandbox-operator/internal/queue"
 	"github.com/cocoonstack/sandbox-operator/test/benchutil"
 )
 

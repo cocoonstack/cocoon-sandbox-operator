@@ -27,16 +27,14 @@ import (
 	"strings"
 	"time"
 
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
 	"github.com/felixge/fgprof"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	_ "k8s.io/client-go/plugin/pkg/client/auth" // every kubeconfig auth plugin an operator may be handed
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -48,8 +46,8 @@ import (
 	extensionsv1alpha1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1alpha1"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	extensionscontrollers "github.com/cocoonstack/sandbox-operator/extensions/controllers"
-	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
+	"github.com/cocoonstack/sandbox-operator/internal/queue"
 	"github.com/cocoonstack/sandbox-operator/internal/version"
 	"github.com/cocoonstack/sandbox-operator/pkg/podruntime"
 	//+kubebuilder:scaffold:imports
@@ -188,8 +186,7 @@ func (o *options) run() error {
 	}
 	defer cleanup()
 
-	// Importing net/http/pprof registers handlers on the global DefaultServeMux.
-	// Reset it so no server using the default mux exposes pprof by accident.
+	// net/http/pprof registers on DefaultServeMux at import time, so reset it.
 	http.DefaultServeMux = http.NewServeMux()
 
 	scheme := controllers.Scheme
@@ -207,8 +204,13 @@ func (o *options) run() error {
 		return fmt.Errorf("webhook certificate setup: %w", err)
 	}
 
+	cacheByObject, err := controllers.CacheByObject()
+	if err != nil {
+		return err
+	}
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                  scheme,
+		Cache:                   cache.Options{ByObject: cacheByObject},
 		Metrics:                 metricsserver.Options{BindAddress: o.metricsAddr, ExtraHandlers: o.pprofHandlers()},
 		HealthProbeBindAddress:  o.probeAddr,
 		LeaderElection:          o.enableLeaderElection,

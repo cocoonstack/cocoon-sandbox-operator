@@ -138,3 +138,8 @@ cloc: ## Count lines of code excluding tests (requires cloc).
 .PHONY: help
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+.PHONY: api-docs
+## Regenerate docs/api.md from the API types
+api-docs:
+	GOWORK=off go run github.com/elastic/crd-ref-docs@v0.2.0 --config=hack/crd-ref-docs.yaml --source-path=. --renderer=markdown --output-path=docs/api.md --max-depth=12

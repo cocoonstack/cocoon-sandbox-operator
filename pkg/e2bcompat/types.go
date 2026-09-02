@@ -1,10 +1,7 @@
 package e2bcompat
 
-// The wire types below mirror the e2b REST API schemas the e2b SDKs consume
-// (e2b-dev/E2B spec/openapi.yml: NewSandbox, Sandbox, SandboxDetail,
-// ListedSandbox, ResumedSandbox). Field names and JSON casing are fixed by that
-// contract — the SDK unmarshals them directly — so they are reproduced exactly
-// rather than restyled to this repo's own conventions.
+// Field names and JSON casing below are fixed by the e2b OpenAPI contract the
+// SDKs unmarshal directly, so they are reproduced rather than restyled.
 
 // Sandbox states reported to the SDK (spec: SandboxState).
 const (

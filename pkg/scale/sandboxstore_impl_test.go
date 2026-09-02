@@ -29,12 +29,10 @@ func TestScatterGatherList_FlattensAllNodes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list.Items, 3)
 
-	// Sorted by namespace then name.
 	assert.Equal(t, "ns-a/s1", list.Items[0].Namespace+"/"+list.Items[0].Name)
 	assert.Equal(t, "ns-a/s3", list.Items[1].Namespace+"/"+list.Items[1].Name)
 	assert.Equal(t, "ns-b/s2", list.Items[2].Namespace+"/"+list.Items[2].Name)
 
-	// The owning node is stamped into status and the node label.
 	byName := map[string]sandboxStatusView{}
 	for _, it := range list.Items {
 		byName[it.Name] = sandboxStatusView{node: it.Status.NodeName, label: it.Labels[NodeLabel]}
@@ -96,11 +94,9 @@ func TestScatterGatherList_ToleratesPartitionedNode(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(inv("n1", entry("ns/s1", "Running")))
 	src.Put(inv("n2", entry("ns/s2", "Running")))
-	src.Partition("n2") // listed by ListNodes but its inventory fetch fails
+	src.Partition("n2")
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()))
 
-	// A partitioned node degrades to eventual consistency: its sandboxes are
-	// omitted, but the list still succeeds with the reachable node's sandboxes.
 	list, err := store.List(t.Context(), ListOptions{})
 	require.NoError(t, err)
 	require.Len(t, list.Items, 1)
@@ -133,8 +129,7 @@ func TestScatterGatherGet_SynthesizesStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"10.1.2.3"}, got.Status.PodIPs)
 	assert.Equal(t, "claim-1", got.Labels[ClaimLabel])
-	// The sandboxd claim id rides as an annotation so the apiserver's Delete can
-	// release exactly this microVM (never by k8s name).
+
 	assert.Equal(t, "sb_abc123", got.Annotations[ClaimIDAnnotation])
 	require.Len(t, got.Status.Conditions, 1)
 	assert.Equal(t, metav1.ConditionTrue, got.Status.Conditions[0].Status)
@@ -145,8 +140,6 @@ func TestEntryToSandbox_StampsClaimIDAnnotation(t *testing.T) {
 	withID := entryToSandbox("n1", InventoryEntry{Name: "ns/s1", ID: "sb_abc", Phase: "Running"})
 	assert.Equal(t, "sb_abc", withID.Annotations[ClaimIDAnnotation])
 
-	// A node that has not published the id yet stamps no annotation, so Delete
-	// refuses to release rather than guessing by name.
 	noID := entryToSandbox("n1", InventoryEntry{Name: "ns/s1", Phase: "Running"})
 	_, ok := noID.Annotations[ClaimIDAnnotation]
 	assert.False(t, ok, "expected no claim-id annotation when the entry has no id")
@@ -176,11 +169,9 @@ func TestScatterGatherWatch_EmitsAddModifyDelete(t *testing.T) {
 	added := waitForType(t, w, watch.Added, time.Second)
 	assert.Equal(t, "s1", added.Object.(*sandboxv1beta1.Sandbox).Name)
 
-	// Phase change → Modified (a content-sensitive ResourceVersion changed).
 	src.Put(inv("n1", entry("ns/s1", "Running")))
 	waitForType(t, w, watch.Modified, 2*time.Second)
 
-	// Entry disappears → Deleted.
 	src.Put(inv("n1"))
 	waitForType(t, w, watch.Deleted, 2*time.Second)
 }
@@ -196,8 +187,7 @@ func TestScatterGather_ObjectCountIsPoolsPlusNodes(t *testing.T) {
 		for i := range perNode {
 			entries = append(entries, entry(fmt.Sprintf("ns/s-%d-%d", k, i), "Running"))
 		}
-		pub := NewNodeInventoryPublisher(node, entries, src, logr.Discard())
-		n, err := pub.Publish(ctx)
+		n, err := publish(ctx, node, entries, src)
 		require.NoError(t, err)
 		require.Equal(t, perNode, n)
 	}
@@ -206,14 +196,11 @@ func TestScatterGather_ObjectCountIsPoolsPlusNodes(t *testing.T) {
 	list, err := store.List(ctx, ListOptions{})
 	require.NoError(t, err)
 
-	// The store serves every sandbox...
 	require.Len(t, list.Items, nodes*perNode)
-	// ...while the durable object count is O(nodes) NodeInventory (pool intent
-	// objects are separate and counted in the l3 aggregation evidence): the write
-	// path is one server-side-apply per node, not per sandbox.
+
 	assert.Equal(t, nodes, src.ObjectCount())
 	assert.Equal(t, nodes, src.ApplyCount())
-	// The etcd object count must NOT scale with the sandbox count.
+
 	assert.Less(t, src.ObjectCount(), len(list.Items))
 }
 
@@ -221,19 +208,15 @@ func TestPublisher_RebuildsFromLiveAfterLoss(t *testing.T) {
 	ctx := t.Context()
 	live := &mutableLive{entries: []InventoryEntry{entry("ns/a", "Running")}}
 	src := NewStaticInventorySource()
-	pub := NewNodeInventoryPublisher("n1", live, src, logr.Discard())
-
-	_, err := pub.Publish(ctx)
+	_, err := publish(ctx, "n1", live, src)
 	require.NoError(t, err)
 	require.Equal(t, 1, src.ObjectCount())
 
-	// The node's NodeInventory object is lost.
 	src.Remove("n1")
 	require.Equal(t, 0, src.ObjectCount())
 
-	// Live state moved on; the next publish rebuilds the object from live state.
 	live.entries = []InventoryEntry{entry("ns/a", "Running"), entry("ns/b", "Running")}
-	n, err := pub.Publish(ctx)
+	n, err := publish(ctx, "n1", live, src)
 	require.NoError(t, err)
 	require.Equal(t, 2, n)
 
@@ -250,7 +233,6 @@ func TestNodeInventory_DeepCopyIsIndependent(t *testing.T) {
 	assert.Equal(t, "Running", orig.Entries[0].Phase, "deep copy must not alias entries")
 	assert.Equal(t, "n1", orig.Node)
 
-	// DeepCopyObject returns an independent runtime.Object of the same type.
 	obj := orig.DeepCopyObject()
 	require.NotNil(t, obj)
 	clone, ok := obj.(*NodeInventory)
@@ -268,8 +250,6 @@ func TestWatchSeesAShortLivedSandbox(t *testing.T) {
 	defer w.Stop()
 	require.Equal(t, watch.Added, (<-w.ResultChan()).Type)
 
-	// A sandbox that comes and goes must still be observed. A watch that widened
-	// its interval while quiet would step over this entirely.
 	src.Put(inv("n1", entry("sb-1", "Running"), entry("sb-2", "Running")))
 
 	deadline := time.After(3 * time.Second)
@@ -288,25 +268,35 @@ func TestWatchSeesAShortLivedSandbox(t *testing.T) {
 func TestSSAApplier_UpsertsOneObjectPerNode(t *testing.T) {
 	ctx := t.Context()
 	cli := fake.NewClientBuilder().WithScheme(newScaleScheme(t)).Build()
-	pub := NewNodeInventoryPublisher("n1", sliceLive{entry("ns/a", "Running")},
-		NewSSAInventoryApplier(cli, "vk-test"), logr.Discard())
-
-	_, err := pub.Publish(ctx)
+	_, err := publish(ctx, "n1", sliceLive{entry("ns/a", "Running")}, NewSSAInventoryApplier(cli, "vk-test"))
 	require.NoError(t, err)
 
 	got := &extv1beta1.NodeInventory{}
 	require.NoError(t, cli.Get(ctx, client.ObjectKey{Name: "n1"}, got))
 	require.Len(t, got.Entries, 1)
 
-	pub = NewNodeInventoryPublisher("n1", sliceLive{entry("ns/a", "Running"), entry("ns/b", "Running")},
-		NewSSAInventoryApplier(cli, "vk-test"), logr.Discard())
-	_, err = pub.Publish(ctx)
+	_, err = publish(ctx, "n1", sliceLive{entry("ns/a", "Running"), entry("ns/b", "Running")},
+		NewSSAInventoryApplier(cli, "vk-test"))
 	require.NoError(t, err)
 
 	list := &extv1beta1.NodeInventoryList{}
 	require.NoError(t, cli.List(ctx, list))
 	require.Len(t, list.Items, 1)
 	assert.Len(t, list.Items[0].Entries, 2)
+}
+
+func publish(ctx context.Context, node string, live NodeLiveSource, applier InventoryApplier) (int, error) {
+	entries, err := live.LiveSandboxes(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return len(entries), applier.Apply(ctx, &NodeInventory{
+		Kind:       NodeInventoryGVK.Kind,
+		APIVersion: NodeInventoryGVK.GroupVersion().String(),
+		Name:       node,
+		Node:       node,
+		Entries:    entries,
+	})
 }
 
 func inv(node string, entries ...InventoryEntry) *NodeInventory {

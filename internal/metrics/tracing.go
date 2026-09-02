@@ -63,9 +63,7 @@ type otelInstrumenter struct {
 	logger     logr.Logger
 }
 
-// StartSpan starts a span, potentially continuing one extracted from resource annotations.
 func (o *otelInstrumenter) StartSpan(ctx context.Context, obj metav1.Object, spanName string, attrs map[string]string) (context.Context, func()) {
-	// 1. Extract Parent Context from annotations if present.
 	if obj != nil && obj.GetAnnotations() != nil {
 		if tc, ok := obj.GetAnnotations()[TraceContextAnnotation]; ok && tc != "" {
 			var carrier map[string]string
@@ -77,7 +75,6 @@ func (o *otelInstrumenter) StartSpan(ctx context.Context, obj metav1.Object, spa
 		}
 	}
 
-	// 2. Prepare initial attributes (WithAttributes)
 	opts := []trace.SpanStartOption{}
 	if len(attrs) > 0 {
 		otelAttrs := make([]attribute.KeyValue, 0, len(attrs))
@@ -87,12 +84,10 @@ func (o *otelInstrumenter) StartSpan(ctx context.Context, obj metav1.Object, spa
 		opts = append(opts, trace.WithAttributes(otelAttrs...))
 	}
 
-	// 3. Start Span with options
 	ctx, span := o.tracer.Start(ctx, spanName, opts...)
 	return ctx, func() { span.End() }
 }
 
-// GetTraceContext returns the current W3C context as a JSON string for persistence.
 func (o *otelInstrumenter) GetTraceContext(ctx context.Context) string {
 	carrier := propagation.MapCarrier{}
 	o.propagator.Inject(ctx, carrier)
@@ -104,7 +99,6 @@ func (o *otelInstrumenter) GetTraceContext(ctx context.Context) string {
 	return string(data)
 }
 
-// AddEvent uses WithAttributes to provide info about state changes or progress.
 func (o *otelInstrumenter) AddEvent(ctx context.Context, name string, attrs map[string]string) {
 	span := trace.SpanFromContext(ctx)
 	otelAttrs := make([]attribute.KeyValue, 0, len(attrs))
@@ -115,7 +109,6 @@ func (o *otelInstrumenter) AddEvent(ctx context.Context, name string, attrs map[
 	span.AddEvent(name, trace.WithAttributes(otelAttrs...))
 }
 
-// Returns true if the span in the context is a real, sampled-in span.
 func (o *otelInstrumenter) IsRecording(ctx context.Context) bool {
 	return trace.SpanFromContext(ctx).IsRecording()
 }
@@ -136,7 +129,7 @@ func SetupOTel(ctx context.Context, serviceName string) (Instrumenter, func(), e
 		)),
 	)
 	otel.SetTracerProvider(tp)
-	// Use standard W3C Context propagator only (no Baggage).
+	// no Baggage: only the W3C trace context crosses the annotation.
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	return &otelInstrumenter{

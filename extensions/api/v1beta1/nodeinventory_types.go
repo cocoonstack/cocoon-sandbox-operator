@@ -38,6 +38,11 @@ type InventoryEntry struct {
 	ID string `json:"id,omitempty"`
 	// phase is the node-reported sandbox phase (e.g. Running).
 	Phase string `json:"phase"`
+	// template is the pool template (base image) the sandbox was claimed from.
+	// It is the only place the aggregated read path can recover it: no
+	// per-sandbox object holds the pod spec.
+	// +optional
+	Template string `json:"template,omitempty"`
 	// claimRef is the "<namespace>/<name>" of the SandboxClaim the sandbox is
 	// bound to, if any.
 	// +optional

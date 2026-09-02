@@ -93,7 +93,6 @@ func TestSandboxClaimConversion(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create src v1alpha1 SandboxClaim
 			wpPolicy := WarmPoolPolicy(tc.warmPool)
 			src := &SandboxClaim{
 				Name:      tc.claimName,
@@ -120,13 +119,11 @@ func TestSandboxClaimConversion(t *testing.T) {
 				src.Spec.WarmPool = &wpPolicy
 			}
 
-			// Convert to Hub (v1beta1)
 			dst := &v1beta1.SandboxClaim{}
 			if err := src.ConvertTo(dst); err != nil {
 				t.Fatalf("failed to convert to v1beta1: %v", err)
 			}
 
-			// Verify src annotations and labels were not mutated during ConvertTo
 			if val, ok := src.Annotations[v1alpha1SandboxClaimStateAnnotation]; !ok || val != "some-old-state" {
 				t.Errorf("src.Annotations was mutated during ConvertTo! expected 'some-old-state', got %q", val)
 			}
@@ -137,7 +134,6 @@ func TestSandboxClaimConversion(t *testing.T) {
 				t.Errorf("expected 1 label in src, got %d", len(src.Labels))
 			}
 
-			// Verify the marshaled state in dst does not contain the state annotation itself (no nesting)
 			marshaledState := dst.Annotations[v1alpha1SandboxClaimStateAnnotation]
 			var stateObj SandboxClaim
 			if err := json.Unmarshal([]byte(marshaledState), &stateObj); err != nil {
@@ -147,23 +143,19 @@ func TestSandboxClaimConversion(t *testing.T) {
 				t.Errorf("dst.Annotations state nestedly contains the state annotation! causing exponential growth")
 			}
 
-			// Verify WarmPoolRef name in v1beta1
 			if dst.Spec.WarmPoolRef.Name != tc.expectedWarmPoolRef {
 				t.Errorf("expected WarmPoolRef.Name %q, got %q", tc.expectedWarmPoolRef, dst.Spec.WarmPoolRef.Name)
 			}
 
-			// Convert back to Spoke (v1alpha1)
 			roundTrip := &SandboxClaim{}
 			if err := roundTrip.ConvertFrom(dst); err != nil {
 				t.Fatalf("failed to convert back to v1alpha1: %v", err)
 			}
 
-			// Verify state annotation was stripped during ConvertFrom
 			if _, ok := roundTrip.Annotations[v1alpha1SandboxClaimStateAnnotation]; ok {
 				t.Errorf("roundTrip.Annotations still contains the state annotation after ConvertFrom!")
 			}
 
-			// Verify round-trip preserves fields losslessly (due to state annotation preservation)
 			if roundTrip.Spec.TemplateRef.Name != src.Spec.TemplateRef.Name {
 				t.Errorf("roundtrip TemplateRef mismatch: expected %q, got %q", src.Spec.TemplateRef.Name, roundTrip.Spec.TemplateRef.Name)
 			}
@@ -181,7 +173,6 @@ func TestSandboxClaimConversion(t *testing.T) {
 }
 
 func TestSandboxClaimConversionFromHub(t *testing.T) {
-	// Test conversion of a v1beta1 SandboxClaim created without v1alpha1 state annotation (e.g. created directly via v1beta1 API)
 	tests := []struct {
 		name                string
 		warmPoolRefName     string
@@ -257,7 +248,6 @@ func TestSandboxClaimVolumeClaimTemplatesRoundTrip(t *testing.T) {
 		},
 	}
 
-	// v1beta1 -> v1alpha1: the field must be preserved in the annotation.
 	alpha := &SandboxClaim{}
 	if err := alpha.ConvertFrom(src); err != nil {
 		t.Fatalf("ConvertFrom: %v", err)
@@ -266,7 +256,6 @@ func TestSandboxClaimVolumeClaimTemplatesRoundTrip(t *testing.T) {
 		t.Fatalf("volumeClaimTemplates annotation not set on v1alpha1 object")
 	}
 
-	// v1alpha1 -> v1beta1: the field must be restored and the annotation stripped.
 	dst := &v1beta1.SandboxClaim{}
 	if err := alpha.ConvertTo(dst); err != nil {
 		t.Fatalf("ConvertTo: %v", err)

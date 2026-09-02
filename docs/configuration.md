@@ -7,7 +7,8 @@ standard kubelet scheduling.
 ## Runtime and API surface
 
 - `--default-runtime` (`standard`): default backend for newly created Sandbox
-  Pods. Valid values are `vk-cocoon` and `standard`.
+  Pods. Valid values are `standard`, `vk-cocoon`, and `sandboxd`; `sandboxd`
+  routes Sandbox Pods to the vk-sandbox hot-pool virtual node.
 - `--extensions` (`true`): enable `SandboxTemplate`, `SandboxWarmPool`, and
   `SandboxClaim` controllers and webhooks.
 - `--cluster-domain` (`cluster.local`): suffix used to construct Sandbox
@@ -16,6 +17,15 @@ standard kubelet scheduling.
 An explicit Pod-template `runtimeClassName` always selects standard kubelet.
 An explicit `sandbox.cocoonstack.io/runtime` annotation takes precedence over
 the default.
+
+## Cache scoping
+
+The operator's Pod, Service, and PersistentVolumeClaim informers are label
+scoped to `agents.x-k8s.io/sandbox-name-hash`, so they watch only the children
+the operator itself labels rather than every object in the cluster. A Pod,
+Service, or PVC created outside the operator is therefore invisible to it: an
+external warm pool that wants its objects adopted must set that label, and the
+`agents.x-k8s.io/adoptable` label alone is not enough.
 
 ## Controller concurrency
 
@@ -28,6 +38,10 @@ was measured with, so an out-of-box install reproduces the published numbers.
 - `--sandbox-template-concurrent-workers` (1)
 - `--sandbox-warm-pool-max-batch-size` (300)
 - `--enable-warm-pool-eviction` (`true`)
+- `--sandbox-warm-pool-disable-cr-management` (`false`) — the warm-pool
+  controller only reports pool status and creates no Sandbox CRs. Set it when
+  the L3 aggregated apiserver owns warm capacity, so the two do not both
+  provision
 - `--kube-api-qps` (200) — a negative value disables client-side rate limiting
   entirely, which also makes `--kube-api-burst` meaningless
 - `--kube-api-burst` (400)
@@ -53,6 +67,11 @@ manages both externally.
 - `--enable-tracing` (`false`)
 - `--enable-pprof` (`false`)
 - `--enable-pprof-debug` (`false`)
+- `--pprof-block-profile-rate` (1000000) — goroutine block profiling rate,
+  applied only with `--enable-pprof-debug`
+- `--pprof-mutex-profile-fraction` (10) — mutex contention sampling, applied
+  only with `--enable-pprof-debug`
+- `--version` — print the build identity and exit
 
 Use `--enable-pprof-debug` only in controlled environments because it exposes
 process details and enables block/mutex sampling.

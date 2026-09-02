@@ -24,21 +24,20 @@ func TestStoreClaim_RoutesToAWarmNode(t *testing.T) {
 	assert.Equal(t, "n2", a.Node)
 	assert.Equal(t, "sb-abc", a.SandboxName)
 	assert.Equal(t, "10.0.0.2:9000", a.Address)
-	// The claim routed to the picked node's advertise address with the uniform token.
+
 	assert.Equal(t, "10.0.0.2:7777", f.builtAddr)
 	assert.Equal(t, "uniform-token", f.builtToken)
 	assert.Equal(t, "img", f.claimSpec.Template)
 	assert.Equal(t, 600, f.claimSpec.TTLSeconds, "the caller's TTL must reach sandboxd")
 	assert.Equal(t, deadline, a.Deadline, "the node-granted deadline must ride the assignment back")
-	// The claim carries the k8s "<namespace>/<name>" so the node echoes it into
-	// its operator index and the aggregated read path can resolve this sandbox.
+
 	assert.Equal(t, "ns/s1", f.claimSpec.ClaimRef)
 	assert.Equal(t, 1, f.claimCalls)
 }
 
 func TestStoreClaim_NoWarmCapacityIsRetryable(t *testing.T) {
 	src := NewStaticInventorySource()
-	// Warm==0 everywhere: no node can hand over a microVM.
+
 	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 0, Target: 5}))
 	f := &recordingFactory{}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
@@ -51,7 +50,7 @@ func TestStoreClaim_NoWarmCapacityIsRetryable(t *testing.T) {
 
 func TestStoreClaim_PoolKeyMatchingNormalizesDefaults(t *testing.T) {
 	src := NewStaticInventorySource()
-	// A pool advertised with unset net/size serves the default-named ("none"/"small") key.
+
 	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 2, Target: 2}))
 	f := &recordingFactory{claimResult: sandboxd.ClaimResult{ID: "sb-1"}}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
@@ -59,7 +58,6 @@ func TestStoreClaim_PoolKeyMatchingNormalizesDefaults(t *testing.T) {
 	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img", Net: "none", Size: "small"}, 0)
 	require.NoError(t, err)
 
-	// A different net finds no matching pool.
 	_, err = store.Claim(t.Context(), "ns", "s2", PoolKey{Template: "img", Net: "egress"}, 0)
 	require.Error(t, err)
 	assert.True(t, IsNoWarmCapacity(err), "net mismatch must be no-capacity, got %v", err)
@@ -68,7 +66,7 @@ func TestStoreClaim_PoolKeyMatchingNormalizesDefaults(t *testing.T) {
 func TestStoreClaim_SandboxdCapacityRaceIsRetryable(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
-	// The advertised warm count raced to zero: sandboxd answers at-capacity.
+
 	f := &recordingFactory{claimErr: sandboxd.ErrNodeAtCapacity}
 	store := NewScatterGatherStore(src, WithLogger(logr.Discard()), WithClaimRouting("t", f.factory()))
 
@@ -94,7 +92,7 @@ func TestStoreRelease_RoutesToNodeAddressWithUniformToken(t *testing.T) {
 func TestStoreClaimRelease_FailClosedWithoutRouting(t *testing.T) {
 	src := NewStaticInventorySource()
 	src.Put(poolInv("n1", "10.0.0.1:7777", PoolCapacity{Template: "img", Warm: 1, Target: 1}))
-	store := NewScatterGatherStore(src, WithLogger(logr.Discard())) // no WithClaimRouting
+	store := NewScatterGatherStore(src, WithLogger(logr.Discard()))
 
 	_, err := store.Claim(t.Context(), "ns", "s1", PoolKey{Template: "img"}, 0)
 	require.Error(t, err)
@@ -120,8 +118,7 @@ func TestPickWarmNodeSpreadsAcrossTheFleet(t *testing.T) {
 		best, _ := pickPowerOfTwo(candidates)
 		picked[best.node]++
 	}
-	// Deterministic max-first would put all 200 on one node. Equal warmth means
-	// power-of-two sampling must reach every node.
+
 	assert.Len(t, picked, 4, "burst funneled onto a subset: %v", picked)
 }
 
@@ -140,15 +137,11 @@ func TestPickWarmNodePrefersTheWarmerSample(t *testing.T) {
 			warmPicks++
 		}
 	}
-	// Two samples with replacement pick the cold node only when both land on it.
+
 	assert.Greater(t, warmPicks, 130, "sampling lost its bias toward warm capacity")
 }
 
 func TestStoreClaimFallsBackWhenTheSampledNodeRacedToZero(t *testing.T) {
-	// The classic stale-inventory shape: a node still advertising one warm
-	// microVM it no longer has, next to a node that is genuinely warm. Sampling
-	// picks the empty one often enough that giving up on it would 503 callers
-	// the fleet can serve.
 	src := NewStaticInventorySource()
 	src.Put(poolInv("stale", "stale:7777", PoolCapacity{Template: "img", Warm: 1, Target: 5}))
 	src.Put(poolInv("warm", "warm:7777", PoolCapacity{Template: "img", Warm: 100, Target: 200}))
@@ -280,14 +273,6 @@ func (c *recordingClient) Checkpoints(context.Context) ([]sandboxd.Checkpoint, e
 }
 
 func (c *recordingClient) DeleteCheckpoint(context.Context, string) error { return nil }
-
-func (c *recordingClient) ClaimCheckpoint(context.Context, string, sandboxd.CheckpointClaimSpec) (sandboxd.ClaimResult, error) {
-	return sandboxd.ClaimResult{}, nil
-}
-
-func (c *recordingClient) Promote(context.Context, string, sandboxd.PromoteSpec) (sandboxd.PoolKey, error) {
-	return sandboxd.PoolKey{}, nil
-}
 
 func (c *recordingClient) Stats(context.Context, string) (sandboxd.SandboxStats, error) {
 	return sandboxd.SandboxStats{}, nil

@@ -87,7 +87,6 @@ type SandboxWarmPoolReconciler struct {
 func (r *SandboxWarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Fetch the SandboxWarmPool instance
 	warmPool := &extensionsv1beta1.SandboxWarmPool{}
 	if err := r.Get(ctx, req.NamespacedName, warmPool); err != nil {
 		if k8serrors.IsNotFound(err) {
@@ -98,22 +97,18 @@ func (r *SandboxWarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
-	// Handle deletion
 	if !warmPool.DeletionTimestamp.IsZero() {
 		logger.Info("SandboxWarmPool is being deleted")
 		return ctrl.Result{}, nil
 	}
 
-	// Save old status for comparison
 	oldStatus := warmPool.Status.DeepCopy()
 
-	// Reconcile the pool (create or delete Sandboxes as needed)
 	requeueAfter, err := r.reconcilePool(ctx, warmPool)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Update status if it has changed
 	if err := r.updateStatus(ctx, oldStatus, warmPool); err != nil {
 		logger.Error(err, "Failed to update SandboxWarmPool status")
 		return ctrl.Result{}, err
@@ -160,10 +155,8 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 		return 0, r.reconcilePoolStatusOnly(ctx, warmPool)
 	}
 
-	// Compute hash of the warm pool name for the pool label
 	poolNameHash := hash.Name(warmPool.Name)
 
-	// List all Sandbox CRs with the warm pool label
 	sandboxList := &sandboxv1beta1.SandboxList{}
 	labelSelector := labels.SelectorFromSet(labels.Set{
 		warmPoolSandboxLabel: poolNameHash,
@@ -180,25 +173,23 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 		return 0, err
 	}
 
-	// Fetch template and compute hash once to avoid repeated expensive operations,
 	template, currentSandboxBlueprintHash, tmplErr := r.fetchTemplateAndHash(ctx, warmPool)
 
-	// Delete stale pods, filter pods by ownership and adopt orphans
 	activeSandboxes, allErrors := r.filterActiveSandboxes(ctx, warmPool, sandboxList.Items, template, currentSandboxBlueprintHash, tmplErr)
 
 	const warmPoolReadinessGracePeriod = 5 * time.Minute
 
 	now := time.Now()
-	var healthySandboxes []sandboxv1beta1.Sandbox
+	var healthySandboxes []*sandboxv1beta1.Sandbox
 	var stuckRecheck time.Duration
 	for _, sb := range activeSandboxes {
-		if !isSandboxReady(&sb) && !sb.CreationTimestamp.IsZero() {
+		if !isSandboxReady(sb) && !sb.CreationTimestamp.IsZero() {
 			age := now.Sub(sb.CreationTimestamp.Time)
 			if age > warmPoolReadinessGracePeriod {
 				logger.Info("Deleting stuck warm pool sandbox",
 					"sandbox", sb.Name,
 					"age", age.Round(time.Second))
-				if err := r.Delete(ctx, &sb); err != nil {
+				if err := r.Delete(ctx, sb); err != nil {
 					logger.Error(err, "Failed to delete stuck sandbox", "sandbox", sb.Name)
 					allErrors = errors.Join(allErrors, err)
 				}
@@ -227,10 +218,9 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 	warmPool.Status.Replicas = currentReplicas
 	warmPool.Status.Selector = labelSelector.String()
 
-	// Calculate ready replicas by checking Sandbox Ready condition
 	readyReplicas := int32(0)
 	for i := range activeSandboxes {
-		if isSandboxReady(&activeSandboxes[i]) {
+		if isSandboxReady(activeSandboxes[i]) {
 			readyReplicas++
 		}
 	}
@@ -264,9 +254,9 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 
 		// Prioritize deleting unready sandboxes before ready ones,
 		// then newest first within each group.
-		slices.SortFunc(activeSandboxes, func(a, b sandboxv1beta1.Sandbox) int {
-			aReady := isSandboxReady(&a)
-			bReady := isSandboxReady(&b)
+		slices.SortFunc(activeSandboxes, func(a, b *sandboxv1beta1.Sandbox) int {
+			aReady := isSandboxReady(a)
+			bReady := isSandboxReady(b)
 			if aReady != bReady {
 				if aReady {
 					return 1 // a ready, b not ready -> b first (delete unready first)
@@ -279,7 +269,7 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 		toDeleteCount := min(sandboxesToDelete, int32(len(activeSandboxes)))
 		// Parallel sandbox deletion with adaptive slow-start batching (starts with 1 and doubles on success)
 		_, deleteErr := slowStartBatch(ctx, int(toDeleteCount), 1, func(idx int) error {
-			return r.deletePoolSandbox(ctx, &activeSandboxes[idx])
+			return r.deletePoolSandbox(ctx, activeSandboxes[idx])
 		})
 		if deleteErr != nil {
 			logger.Error(deleteErr, "Failed to delete pool sandboxes")
@@ -336,9 +326,9 @@ func (r *SandboxWarmPoolReconciler) adoptSandbox(ctx context.Context, warmPool *
 }
 
 // filterActiveSandboxes filters the list of sandboxes, deleting stale ones and adopting orphans.
-func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool, sandboxes []sandboxv1beta1.Sandbox, template *extensionsv1beta1.SandboxTemplate, currentSandboxBlueprintHash string, tmplErr error) ([]sandboxv1beta1.Sandbox, error) {
+func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool, sandboxes []sandboxv1beta1.Sandbox, template *extensionsv1beta1.SandboxTemplate, currentSandboxBlueprintHash string, tmplErr error) ([]*sandboxv1beta1.Sandbox, error) {
 	logger := log.FromContext(ctx)
-	var activeSandboxes []sandboxv1beta1.Sandbox
+	var activeSandboxes []*sandboxv1beta1.Sandbox
 	var allErrors error
 
 	vettedHashes := make(map[string]bool)
@@ -347,7 +337,6 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 		currentTemplateRefHash = SandboxTemplateRefHash(template.Name)
 	}
 
-	// Determine the update strategy, defaulting to OnReplenish if not specified or unknown.
 	var updateStrategyType extensionsv1beta1.SandboxWarmPoolUpdateStrategyType
 	if warmPool.Spec.UpdateStrategy != nil {
 		updateStrategyType = warmPool.Spec.UpdateStrategy.Type
@@ -364,12 +353,13 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 		updateStrategy = extensionsv1beta1.OnReplenishSandboxWarmPoolUpdateStrategyType
 	}
 
-	for _, sb := range sandboxes {
+	for i := range sandboxes {
+		sb := &sandboxes[i]
 		if !sb.DeletionTimestamp.IsZero() {
 			continue
 		}
 
-		controllerRef := metav1.GetControllerOf(&sb)
+		controllerRef := metav1.GetControllerOf(sb)
 		isOrphan := controllerRef == nil
 		isControlledByPool := controllerRef != nil && controllerRef.UID == warmPool.UID
 
@@ -379,9 +369,9 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 		}
 
 		if tmplErr == nil && (updateStrategy == extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType || isOrphan) {
-			if r.isSandboxStale(ctx, &sb, template, currentTemplateRefHash, currentSandboxBlueprintHash, vettedHashes) {
+			if r.isSandboxStale(ctx, sb, template, currentTemplateRefHash, currentSandboxBlueprintHash, vettedHashes) {
 				logger.Info("Deleting stale sandbox", "sandbox", sb.Name, "isOrphan", isOrphan)
-				if err := r.Delete(ctx, &sb); err != nil {
+				if err := r.Delete(ctx, sb); err != nil {
 					logger.Error(err, "Failed to delete stale sandbox", "sandbox", sb.Name)
 					allErrors = errors.Join(allErrors, err)
 				}
@@ -398,7 +388,7 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 				allErrors = errors.Join(allErrors, err)
 				continue
 			}
-			sb = *fresh
+			sb = fresh
 		}
 
 		if isOrphan {
@@ -409,7 +399,7 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 				allErrors = errors.Join(allErrors, err)
 				continue
 			}
-			sb = *fresh
+			sb = fresh
 		}
 
 		activeSandboxes = append(activeSandboxes, sb)
@@ -462,13 +452,11 @@ func (r *SandboxWarmPoolReconciler) buildSandboxCR(
 		Namespace:    warmPool.Namespace,
 		Labels:       sandboxLabels,
 		Annotations:  sandboxAnnotations,
-		// Deep-copy the entire shared blueprint
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: *template.Spec.SandboxBlueprint.DeepCopy(),
 		},
 	}
 
-	// Propagate pool and template labels to pod template for consistency and targeting
 	if sandbox.Spec.PodTemplate.ObjectMeta.Labels == nil {
 		sandbox.Spec.PodTemplate.ObjectMeta.Labels = make(map[string]string)
 	}
@@ -487,7 +475,6 @@ func (r *SandboxWarmPoolReconciler) buildSandboxCR(
 		}
 	}
 
-	// Apply secure defaults to the sandbox pod spec
 	ApplySandboxSecureDefaults(template, &sandbox.Spec.PodTemplate.Spec)
 
 	if err := ctrl.SetControllerReference(warmPool, sandbox, r.Scheme); err != nil {
@@ -525,7 +512,6 @@ func (r *SandboxWarmPoolReconciler) deletePoolSandbox(ctx context.Context, sb *s
 func (r *SandboxWarmPoolReconciler) updateStatus(ctx context.Context, oldStatus *extensionsv1beta1.SandboxWarmPoolStatus, warmPool *extensionsv1beta1.SandboxWarmPool) error {
 	logger := log.FromContext(ctx)
 
-	// Check if status has changed
 	if equality.Semantic.DeepEqual(oldStatus, &warmPool.Status) {
 		return nil
 	}
@@ -570,45 +556,35 @@ func (r *SandboxWarmPoolReconciler) isSandboxStale(
 ) bool {
 	sandboxHash := sandbox.Labels[sandboxv1beta1.SandboxTemplateHashLabel]
 
-	// If the templateRefHash doesn't match, it's stale.
 	if sandbox.Labels[sandboxTemplateRefHash] != currentTemplateRefHash {
 		return true
 	}
 
-	// Check if the sandbox is unowned (orphaned).
 	controllerRef := metav1.GetControllerOf(sandbox)
 	isOrphan := controllerRef == nil
 	if isOrphan {
-		// Always perform full semantic comparison for orphans.
 		return !r.compareSandboxBlueprint(template, &sandbox.Spec.SandboxBlueprint)
 	}
 
-	// If hashes match, it's fresh.
 	if sandboxHash != "" && sandboxHash == currentSandboxBlueprintHash {
 		return false
 	}
 
-	// If currentSandboxBlueprintHash is empty, it means we failed to compute it.
-	// In this case, we should log an error and treat it as NOT stale to avoid
-	// mass-deleting existing sandboxes due to a marshal failure.
+	// A marshal failure leaves the hash empty; treating that as stale would
+	// mass-delete the pool.
 	if currentSandboxBlueprintHash == "" {
 		log.FromContext(ctx).Error(nil, "currentSandboxBlueprintHash is empty, skipping staleness check", "sandbox", sandbox.Name)
 		return false
 	}
 
-	// Check if we've already evaluated this specific old version.
 	if sandboxHash != "" {
 		if isStale, found := vettedHashes[sandboxHash]; found {
 			return isStale
 		}
 	}
 
-	// Perform a semantic comparison of the sandbox blueprint.
-	// We normalize the pod spec by applying the same secure defaults
-	// used during creation to avoid false positives from controller-injected fields.
 	isStale := !r.compareSandboxBlueprint(template, &sandbox.Spec.SandboxBlueprint)
 
-	// Save the result for the next sandbox with this same hash.
 	if sandboxHash != "" {
 		vettedHashes[sandboxHash] = isStale
 	}
@@ -619,13 +595,10 @@ func (r *SandboxWarmPoolReconciler) isSandboxStale(
 // comparePodSpecs checks if the pod spec in the sandbox is semantically equal to the template,
 // normalizing for fields that the controller populates by default.
 func (r *SandboxWarmPoolReconciler) comparePodSpecs(template *extensionsv1beta1.SandboxTemplate, actualSandboxSpec *corev1.PodSpec) bool {
-	// Create what the sandbox SHOULD look like if it were created from the current template.
 	expectedSpec := template.Spec.PodTemplate.Spec.DeepCopy()
 	ApplySandboxSecureDefaults(template, expectedSpec)
 
-	// Compare the actual sandbox spec to the expected "perfect" spec.
-	// Since both have now undergone the exact same defaulting logic,
-	// any remaining difference is a TRUE template drift.
+	// Both sides carry the same defaulting, so a remaining difference is drift.
 	return equality.Semantic.DeepEqual(expectedSpec, actualSandboxSpec)
 }
 

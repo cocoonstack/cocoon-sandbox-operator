@@ -1,6 +1,8 @@
 package scale
 
 import (
+	"cmp"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -41,6 +43,13 @@ func PoolKeyFor(containers []corev1.Container, net string) PoolKey {
 		net = NetDefault
 	}
 	return PoolKey{Template: template, Net: net, Size: SizeClassForContainers(containers)}
+}
+
+// NetForAnnotations resolves the pool network axis from an object's own
+// annotations, falling back to its pod template's. Create and the warm-pool
+// driver resolve it through this one function so both derive the same key.
+func NetForAnnotations(object, podTemplate map[string]string) string {
+	return cmp.Or(object[NetAnnotation], podTemplate[NetAnnotation])
 }
 
 // SizeClassForContainers maps the first container's CPU/memory onto small|medium|

@@ -64,7 +64,6 @@ func TestSandboxConversion(t *testing.T) {
 			policy := ShutdownPolicyDelete
 			bTrue := true
 
-			// Create src v1alpha1 Sandbox
 			src := &Sandbox{
 				Name:      "my-sandbox",
 				Namespace: "default",
@@ -118,13 +117,11 @@ func TestSandboxConversion(t *testing.T) {
 				},
 			}
 
-			// Convert to Hub (v1beta1)
 			dst := &v1beta1.Sandbox{}
 			if err := src.ConvertTo(dst); err != nil {
 				t.Fatalf("failed to convert to v1beta1: %v", err)
 			}
 
-			// Verify src annotations and labels were not mutated during ConvertTo
 			if val, ok := src.Annotations[v1alpha1SandboxStateAnnotation]; !ok || val != "some-old-state" {
 				t.Errorf("src.Annotations was mutated during ConvertTo! expected 'some-old-state', got %q", val)
 			}
@@ -135,7 +132,6 @@ func TestSandboxConversion(t *testing.T) {
 				t.Errorf("expected 1 label in src, got %d", len(src.Labels))
 			}
 
-			// Verify the marshaled state in dst does not contain the state annotation itself (no nesting)
 			marshaledState := dst.Annotations[v1alpha1SandboxStateAnnotation]
 			var stateObj Sandbox
 			if err := json.Unmarshal([]byte(marshaledState), &stateObj); err != nil {
@@ -145,7 +141,6 @@ func TestSandboxConversion(t *testing.T) {
 				t.Errorf("dst.Annotations state nestedly contains the state annotation! causing exponential growth")
 			}
 
-			// Verify fields in v1beta1
 			if dst.Spec.OperatingMode != tc.expectedMode {
 				t.Errorf("expected OperatingMode %q, got %q", tc.expectedMode, dst.Spec.OperatingMode)
 			}
@@ -159,18 +154,15 @@ func TestSandboxConversion(t *testing.T) {
 				t.Errorf("expected ShutdownPolicy %q, got %v", ShutdownPolicyDelete, dst.Spec.ShutdownPolicy)
 			}
 
-			// Convert back to Spoke (v1alpha1)
 			roundTrip := &Sandbox{}
 			if err := roundTrip.ConvertFrom(dst); err != nil {
 				t.Fatalf("failed to convert back to v1alpha1: %v", err)
 			}
 
-			// Verify state annotation was stripped during ConvertFrom
 			if _, ok := roundTrip.Annotations[v1alpha1SandboxStateAnnotation]; ok {
 				t.Errorf("roundTrip.Annotations still contains the state annotation after ConvertFrom!")
 			}
 
-			// Verify round-trip preserves fields losslessly
 			if tc.replicas == nil {
 				if roundTrip.Spec.Replicas != nil {
 					t.Errorf("roundtrip Replicas mismatch: expected nil, got %v", *roundTrip.Spec.Replicas)
@@ -232,7 +224,6 @@ func TestConvertFromLegacyFullObjectState(t *testing.T) {
 }
 
 func TestSandboxConversionFromHub(t *testing.T) {
-	// Test conversion of a v1beta1 Sandbox created without v1alpha1 state annotation (e.g. created directly via v1beta1 API)
 	tests := []struct {
 		name             string
 		mode             v1beta1.SandboxOperatingMode

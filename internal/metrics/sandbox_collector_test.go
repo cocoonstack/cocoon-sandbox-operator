@@ -170,7 +170,7 @@ func TestSandboxCollector(t *testing.T) {
 					},
 				},
 			},
-			expectedCount: 3, // We expect 3 distinct metric series for the 4 sandboxes
+			expectedCount: 3,
 			expectedLabels: map[string]int{
 				"created_by:unknown expired:false launch_type:cold namespace:default owned_by:None ready_condition:true sandbox_template:unknown":     1,
 				"created_by:unknown expired:true launch_type:warm namespace:test-ns owned_by:None ready_condition:false sandbox_template:my-template": 1,
@@ -330,7 +330,7 @@ func TestSandboxCollector(t *testing.T) {
 						for _, l := range m.GetLabel() {
 							labelStr += l.GetName() + ":" + l.GetValue() + " "
 						}
-						// Trim trailing space
+
 						if len(labelStr) > 0 {
 							labelStr = labelStr[:len(labelStr)-1]
 						}

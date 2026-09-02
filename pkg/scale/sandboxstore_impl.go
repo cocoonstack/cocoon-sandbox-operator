@@ -44,6 +44,10 @@ const (
 	PhaseLabel = "sandbox.cocoonstack.io/phase"
 	// ClaimLabel carries the claim name a synthesized Sandbox is bound to.
 	ClaimLabel = "sandbox.cocoonstack.io/claim"
+	// TemplateLabel carries the pool template a synthesized Sandbox was claimed
+	// from; it is the only recoverable source, since no per-sandbox object holds
+	// the pod spec the template would otherwise be read off.
+	TemplateLabel = "sandbox.cocoonstack.io/template"
 
 	// ClaimIDAnnotation carries the owning node's sandboxd claim id ("sb_...") on a
 	// synthesized Sandbox. Unlike the label keys above it is an annotation — an
@@ -56,6 +60,12 @@ const (
 	// Sandbox: stamped from inventory on reads and from the claim on Create.
 	// apiserver.DeadlineAnnotation aliases it.
 	DeadlineAnnotation = "sandbox.cocoonstack.io/deadline"
+	// NetAnnotation selects the pool network mode. Create and the warm-pool
+	// driver must read the same key or a claim never matches provisioned warm
+	// capacity (perpetual 503).
+	NetAnnotation = "sandbox.cocoonstack.io/net"
+	// TokenAnnotation carries the per-sandbox ownership token handed back on Create.
+	TokenAnnotation = "sandbox.cocoonstack.io/token"
 
 	// Connection pooling for the node-local claim path. Idle conns per host are
 	// sized to the per-node claim fan-out so a burst reuses connections instead
@@ -101,6 +111,9 @@ type InventorySource interface {
 	// NodeInventory returns one node's authoritative inventory. A partitioned or
 	// not-yet-published node returns an error, which List logs and skips.
 	NodeInventory(ctx context.Context, node string) (*NodeInventory, error)
+	// NodeCapacity returns one node's advertise address and warm pools without
+	// decoding its entry list, which the claim and routing paths never read.
+	NodeCapacity(ctx context.Context, node string) (address string, pools []PoolCapacity, err error)
 }
 
 // warmCandidate is one node advertising warm capacity for a requested pool.
@@ -140,14 +153,12 @@ func WithClaimRouting(token string, factory SandboxdClientFactory) StoreOption {
 	}
 }
 
-// NewSandboxdClientFactory returns the production SandboxdClientFactory: an HTTP
-// sandboxd client per node advertise address (a bare "host:port" is given the
-// http scheme; an address that already carries a scheme is used verbatim).
-func NewSandboxdClientFactory() SandboxdClientFactory {
-	// One client for the whole fleet: a per-call client would fall back to
-	// http.DefaultTransport, whose MaxIdleConnsPerHost of 2 forces a fresh TCP
-	// handshake on every concurrent claim past the second to the same node.
-	hc := &http.Client{
+// NewSandboxdHTTPClient returns one HTTP client for the whole fleet. A per-call
+// client would fall back to http.DefaultTransport, whose MaxIdleConnsPerHost of
+// 2 forces a fresh TCP handshake on every concurrent claim past the second to
+// the same node.
+func NewSandboxdHTTPClient() *http.Client {
+	return &http.Client{
 		Timeout: sandboxdRequestTimeout,
 		Transport: &http.Transport{
 			MaxIdleConns:        sandboxdMaxIdleConns,
@@ -155,12 +166,24 @@ func NewSandboxdClientFactory() SandboxdClientFactory {
 			IdleConnTimeout:     sandboxdIdleConnTimeout,
 		},
 	}
+}
+
+// SandboxdBaseURL renders a node advertise address as a sandboxd base URL: a
+// bare "host:port" is given the http scheme, an address that already carries
+// one is used verbatim.
+func SandboxdBaseURL(addr string) string {
+	if strings.Contains(addr, "://") {
+		return addr
+	}
+	return "http://" + addr
+}
+
+// NewSandboxdClientFactory returns the production SandboxdClientFactory: an HTTP
+// sandboxd client per node advertise address, over the shared client.
+func NewSandboxdClientFactory() SandboxdClientFactory {
+	hc := NewSandboxdHTTPClient()
 	return func(addr, token string) SandboxdClient {
-		base := addr
-		if !strings.Contains(base, "://") {
-			base = "http://" + base
-		}
-		return sandboxd.New(base, token, sandboxd.WithHTTPClient(hc))
+		return sandboxd.New(SandboxdBaseURL(addr), token, sandboxd.WithHTTPClient(hc))
 	}
 }
 
@@ -175,6 +198,7 @@ type scatterGatherStore struct {
 	log         logr.Logger
 	concurrency int
 	watchPoll   time.Duration
+	index       *nodeIndex
 
 	// sandboxdToken is the uniform fleet api_token; sandboxdFactory builds a
 	// per-node sandboxd client. Both are nil/empty until WithClaimRouting is set,
@@ -189,6 +213,7 @@ func NewScatterGatherStore(src InventorySource, opts ...StoreOption) *scatterGat
 		src:         src,
 		concurrency: 16,
 		watchPoll:   time.Second,
+		index:       newNodeIndex(nodeIndexMaxEntries),
 	}
 	for _, o := range opts {
 		o(s)
@@ -242,7 +267,7 @@ func (s *scatterGatherStore) List(ctx context.Context, opts ListOptions) (*sandb
 // is the authoritative view available, so Get returns from it directly rather
 // than from an eventually-consistent cluster-wide summary.
 func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*sandboxv1beta1.Sandbox, error) {
-	found, err := s.findEntry(ctx, "get", func(inv *NodeInventory, i int) bool {
+	found, err := s.findEntry(ctx, "get", nameKey(namespace, name), func(inv *NodeInventory, i int) bool {
 		ens, ename := splitNamespacedName(inv.Entries[i].Name)
 		return ens == namespace && ename == name
 	})
@@ -257,9 +282,11 @@ func (s *scatterGatherStore) Get(ctx context.Context, namespace, name string) (*
 
 // GetByClaimID resolves the sandbox whose node-local claim id satisfies match,
 // fanning out per node and canceling on the first hit; only the matching entry
-// is materialized. An empty namespace matches every namespace.
-func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error) {
-	found, err := s.findEntry(ctx, "claim-id get", func(inv *NodeInventory, i int) bool {
+// is materialized. An empty namespace matches every namespace. id is the
+// caller's spelling of the claim id and keys the owning-node index; match owns
+// which node-local id it accepts.
+func (s *scatterGatherStore) GetByClaimID(ctx context.Context, namespace, id string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error) {
+	found, err := s.findEntry(ctx, "claim-id get", claimKey(namespace, id), func(inv *NodeInventory, i int) bool {
 		if inv.Entries[i].ID == "" || !match(inv.Entries[i].ID) {
 			return false
 		}
@@ -305,6 +332,7 @@ func (s *scatterGatherStore) Claim(ctx context.Context, namespace, name string, 
 			ClaimRef: namespace + "/" + name,
 		})
 		if claimErr == nil {
+			s.index.remember(nameKey(namespace, name), best.node)
 			return Assignment{SandboxName: res.ID, Node: best.node, Address: res.OwnerAddr, Token: res.Token, Deadline: res.Deadline}, nil
 		}
 		if !errors.Is(claimErr, sandboxd.ErrNodeAtCapacity) {
@@ -349,10 +377,17 @@ func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch
 	return w, nil
 }
 
-// findEntry sweeps every node inventory with List's bounded fan-out and returns
-// the first entry matching match synthesized as a Sandbox, canceling the rest
-// of the sweep on the hit. Nil with a nil error means no entry matched.
-func (s *scatterGatherStore) findEntry(ctx context.Context, op string, match func(inv *NodeInventory, i int) bool) (*sandboxv1beta1.Sandbox, error) {
+// findEntry resolves the first entry matching match, synthesized as a Sandbox.
+// It reads the node the index last saw holding key and only sweeps the whole
+// fleet on a miss, canceling the rest of the sweep on the hit. Nil with a nil
+// error means no entry matched.
+func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, match func(inv *NodeInventory, i int) bool) (*sandboxv1beta1.Sandbox, error) {
+	if node, ok := s.index.lookup(key); ok {
+		if sb := s.matchOnNode(ctx, node, match); sb != nil {
+			return sb, nil
+		}
+		s.index.forget(key)
+	}
 	nodes, err := s.src.ListNodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("scale: enumerate node inventories: %w", err)
@@ -374,8 +409,12 @@ func (s *scatterGatherStore) findEntry(ctx context.Context, op string, match fun
 			}
 			inv, err := s.src.NodeInventory(gctx, node)
 			if err != nil {
-				s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
-					"node", node, "err", err.Error())
+				// A sibling goroutine's hit cancels gctx, which fails every read
+				// still in flight; those are not unavailable nodes.
+				if gctx.Err() == nil {
+					s.log.V(1).Info("node inventory unavailable during "+op+"; skipping node",
+						"node", node, "err", err.Error())
+				}
 				return nil
 			}
 			for i := range inv.Entries {
@@ -385,6 +424,7 @@ func (s *scatterGatherStore) findEntry(ctx context.Context, op string, match fun
 				mu.Lock()
 				if found == nil {
 					found = entryToSandbox(inv.Node, inv.Entries[i])
+					s.index.remember(key, inv.Node)
 				}
 				mu.Unlock()
 				cancel()
@@ -397,24 +437,39 @@ func (s *scatterGatherStore) findEntry(ctx context.Context, op string, match fun
 	return found, nil
 }
 
+// matchOnNode resolves match against one node's inventory, returning nil when
+// that node is unreadable or no longer holds the entry.
+func (s *scatterGatherStore) matchOnNode(ctx context.Context, node string, match func(inv *NodeInventory, i int) bool) *sandboxv1beta1.Sandbox {
+	inv, err := s.src.NodeInventory(ctx, node)
+	if err != nil {
+		return nil
+	}
+	for i := range inv.Entries {
+		if match(inv, i) {
+			return entryToSandbox(inv.Node, inv.Entries[i])
+		}
+	}
+	return nil
+}
+
 // warmCandidates lists every node advertising warm capacity for pool, fanning
 // out per node like List. A node whose inventory is unavailable is skipped, not
 // fatal: the fleet stays claimable while one node is partitioned.
 func (s *scatterGatherStore) warmCandidates(ctx context.Context, pool PoolKey) ([]warmCandidate, error) {
 	return fanOutNodes(ctx, s, func(gctx context.Context, n string) []warmCandidate {
-		inv, err := s.src.NodeInventory(gctx, n)
+		addr, pools, err := s.src.NodeCapacity(gctx, n)
 		if err != nil {
 			s.log.V(1).Info("node inventory unavailable during claim node-pick; skipping",
 				"node", n, "err", err.Error())
 			return nil
 		}
-		if inv.Address == "" {
+		if addr == "" {
 			return nil
 		}
 		var out []warmCandidate
-		for j := range inv.Pools {
-			if pc := inv.Pools[j]; pc.Warm > 0 && poolCapacityMatches(pc, pool) {
-				out = append(out, warmCandidate{node: n, addr: inv.Address, warm: pc.Warm})
+		for j := range pools {
+			if pc := pools[j]; pc.Warm > 0 && poolCapacityMatches(pc, pool) {
+				out = append(out, warmCandidate{node: n, addr: addr, warm: pc.Warm})
 			}
 		}
 		return out
@@ -443,8 +498,9 @@ func (s *scatterGatherStore) runWatch(ctx context.Context, opts ListOptions, w *
 
 	// A fixed cadence, deliberately: backing off while quiet would let a sandbox
 	// that is created and deleted inside the widened gap produce neither an Added
-	// nor a Deleted. Re-deriving the fleet view costs 1.6ms at 20 nodes (40ms at
-	// the 200-node projection), which is not worth losing events over.
+	// nor a Deleted. Re-deriving the fleet view costs 6.5ms at 26 nodes and 2600
+	// sandboxes, and 1.2s at the 200x2000 projection, so one watcher per fleet is
+	// the supported shape.
 	ticker := time.NewTicker(s.watchPoll)
 	defer ticker.Stop()
 	for {
@@ -589,42 +645,6 @@ type InventoryApplier interface {
 	Apply(ctx context.Context, inv *NodeInventory) error
 }
 
-// NodeInventoryPublisher server-side-applies one NodeInventory object for its
-// node on a slow cadence, summarizing the node's live sandboxes. This is the
-// entire L3 write path: O(nodes) applies, no per-sandbox etcd object.
-type NodeInventoryPublisher struct {
-	node    string
-	live    NodeLiveSource
-	applier InventoryApplier
-	log     logr.Logger
-}
-
-// NewNodeInventoryPublisher builds a publisher for node, reading live state from
-// live and applying via applier.
-func NewNodeInventoryPublisher(node string, live NodeLiveSource, applier InventoryApplier, log logr.Logger) *NodeInventoryPublisher {
-	return &NodeInventoryPublisher{node: node, live: live, applier: applier, log: log}
-}
-
-// Publish reads the node's live sandboxes and server-side-applies a single
-// NodeInventory object for the node, returning the number of summarized entries.
-func (p *NodeInventoryPublisher) Publish(ctx context.Context) (int, error) {
-	entries, err := p.live.LiveSandboxes(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("scale: read node %q live sandboxes: %w", p.node, err)
-	}
-	inv := &NodeInventory{
-		Kind:       NodeInventoryGVK.Kind,
-		APIVersion: NodeInventoryGVK.GroupVersion().String(),
-		Name:       p.node,
-		Node:       p.node,
-		Entries:    entries,
-	}
-	if err := p.applier.Apply(ctx, inv); err != nil {
-		return 0, fmt.Errorf("scale: apply node %q inventory: %w", p.node, err)
-	}
-	return len(entries), nil
-}
-
 var _ InventoryApplier = (*ssaInventoryApplier)(nil)
 
 type ssaInventoryApplier struct {
@@ -734,6 +754,20 @@ func (s *StaticInventorySource) NodeInventory(_ context.Context, node string) (*
 	return inv.DeepCopy(), nil
 }
 
+// NodeCapacity returns one node's address and pools without copying its entries.
+func (s *StaticInventorySource) NodeCapacity(_ context.Context, node string) (string, []PoolCapacity, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.partition[node]; ok {
+		return "", nil, fmt.Errorf("scale: node %q partitioned from aggregated server", node)
+	}
+	inv, ok := s.inv[node]
+	if !ok {
+		return "", nil, fmt.Errorf("scale: no inventory published for node %q", node)
+	}
+	return inv.Address, slices.Clone(inv.Pools), nil
+}
+
 // ObjectCount is the number of durable NodeInventory objects held — the O(nodes)
 // etcd object count backing every synthesized sandbox.
 func (s *StaticInventorySource) ObjectCount() int {
@@ -793,6 +827,37 @@ func (s *ClientInventorySource) NodeInventory(ctx context.Context, node string) 
 		return nil, fmt.Errorf("scale: decode node %q inventory: %w", node, err)
 	}
 	return inv, nil
+}
+
+// NodeCapacity decodes only the address and pools fields, so the claim and
+// routing paths never pay for the node's whole entry list.
+func (s *ClientInventorySource) NodeCapacity(ctx context.Context, node string) (string, []PoolCapacity, error) {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(NodeInventoryGVK)
+	if err := s.reader.Get(ctx, types.NamespacedName{Name: node}, u); err != nil {
+		return "", nil, fmt.Errorf("scale: get node %q inventory: %w", node, err)
+	}
+	addr, _, err := unstructured.NestedString(u.Object, "address")
+	if err != nil {
+		return "", nil, fmt.Errorf("scale: decode node %q address: %w", node, err)
+	}
+	raw, _, err := unstructured.NestedSlice(u.Object, "pools")
+	if err != nil {
+		return "", nil, fmt.Errorf("scale: decode node %q pools: %w", node, err)
+	}
+	pools := make([]PoolCapacity, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		pc := PoolCapacity{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(m, &pc); err != nil {
+			return "", nil, fmt.Errorf("scale: decode node %q pool capacity: %w", node, err)
+		}
+		pools = append(pools, pc)
+	}
+	return addr, pools, nil
 }
 
 // fanOutNodes enumerates the node inventories and runs work per node with
@@ -871,6 +936,9 @@ func synthLabels(node string, e InventoryEntry) map[string]string {
 	if e.Phase != "" {
 		l[PhaseLabel] = e.Phase
 	}
+	if e.Template != "" {
+		l[TemplateLabel] = e.Template
+	}
 	if e.ClaimRef != "" {
 		_, claim := splitNamespacedName(e.ClaimRef)
 		if claim != "" {
@@ -931,7 +999,7 @@ func readyReason(phase string) string {
 // unchanged one. It is opaque, as the API contract requires.
 func resourceVersionFor(ns, name string, e InventoryEntry) string {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address + "|" + deadlineValue(e)))
+	_, _ = h.Write([]byte(ns + "/" + name + "|" + e.ID + "|" + e.Phase + "|" + e.ClaimRef + "|" + e.Address + "|" + e.Template + "|" + deadlineValue(e)))
 	return strconv.FormatUint(h.Sum64(), 10)
 }
 

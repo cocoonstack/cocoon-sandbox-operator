@@ -5,19 +5,10 @@ import (
 	"unicode/utf8"
 )
 
-// A sandboxd claim id is "sb_" + hex (sandboxd pool/claim.go), whose underscore
-// is not legal in a DNS label. The e2b SDK derives the in-sandbox envd host as
-// "{port}-{sandboxID}.{domain}", so an id carrying an underscore produces a host
-// that cannot resolve — the sandbox would be created but unreachable.
-//
-// The compat surface therefore publishes a DNS-safe rendering of the claim id
-// and accepts either form on the way back in. The mapping only rewrites
-// characters that are illegal in a DNS label, so it is stable, and it round
-// trips for every id sandboxd actually mints (whose only illegal character is
-// that one underscore).
-
 // publicID renders a node-local claim id as a DNS-label-safe sandbox id, the
-// form handed to e2b clients.
+// form handed to e2b clients. A claim id is "sb_" + hex, and the SDK derives
+// the envd host as "{port}-{sandboxID}.{domain}", so the underscore would make
+// a created sandbox unreachable.
 func publicID(claimID string) string {
 	if !needsRewrite(claimID) {
 		return claimID

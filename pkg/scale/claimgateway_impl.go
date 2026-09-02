@@ -61,8 +61,6 @@ type SandboxdClient interface {
 	Checkpoint(ctx context.Context, id string, spec sandboxd.CheckpointSpec) (sandboxd.Checkpoint, error)
 	Checkpoints(ctx context.Context) ([]sandboxd.Checkpoint, error)
 	DeleteCheckpoint(ctx context.Context, checkpointID string) error
-	ClaimCheckpoint(ctx context.Context, checkpointID string, spec sandboxd.CheckpointClaimSpec) (sandboxd.ClaimResult, error)
-	Promote(ctx context.Context, id string, spec sandboxd.PromoteSpec) (sandboxd.PoolKey, error)
 	Stats(ctx context.Context, id string) (sandboxd.SandboxStats, error)
 }
 

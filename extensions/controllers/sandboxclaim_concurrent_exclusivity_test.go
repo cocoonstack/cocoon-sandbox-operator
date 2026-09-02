@@ -18,9 +18,9 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
-	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
 	"github.com/cocoonstack/sandbox-operator/internal/hash"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
+	"github.com/cocoonstack/sandbox-operator/internal/queue"
 )
 
 // TestWarmPoolConcurrentClaimExclusivity is the L1 fast-path intent test: under
@@ -128,7 +128,7 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 			req := reconcile.Request{Name: name, Namespace: "default"}
 			for range 10 {
 				if _, err := reconciler.Reconcile(ctx, req); err != nil {
-					continue // transient optimistic-concurrency conflict: retry
+					continue
 				}
 				cur := &extensionsv1beta1.SandboxClaim{}
 				if err := fc.Get(ctx, req.NamespacedName, cur); err == nil && cur.Status.SandboxStatus.Name != "" {
@@ -156,13 +156,11 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 		}
 	}
 
-	// Invariant 1: no Sandbox is controlled by more than one claim.
 	for sbName, owners := range sandboxToOwners {
 		require.LessOrEqual(t, len(owners), 1,
 			"sandbox %s adopted by multiple claims %v — pod-exclusivity violated under concurrency", sbName, owners)
 	}
 
-	// Invariant 2: each claim owns at most one Sandbox.
 	claimToSandbox := make(map[string][]string)
 	for sbName, owners := range sandboxToOwners {
 		for _, owner := range owners {
@@ -174,11 +172,8 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 			"claim %s owns multiple sandboxes %v", cl.Name, claimToSandbox[cl.Name])
 	}
 
-	// Invariant 3: every warm Sandbox was consumed exactly once (the queue is drained,
-	// none left double-adoptable). With claimCount > warmCount, all warm are adopted.
 	require.Len(t, warmAdopted, warmCount,
 		"expected all %d warm sandboxes adopted exactly once, got %d: %v", warmCount, len(warmAdopted), warmAdopted)
 
-	_, ok := testQueue.Get(npn)
-	require.False(t, ok, "warm queue must be fully drained after all warm sandboxes are claimed")
+	require.Zero(t, testQueue.Len(npn), "warm queue must be fully drained after all warm sandboxes are claimed")
 }

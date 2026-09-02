@@ -56,7 +56,7 @@ func generateWebhookCerts(ctx context.Context, c client.Client, certDir string, 
 		return adoptSecretCerts(secret, certDir)
 	}
 	if !errors.IsNotFound(getErr) {
-		return nil, fmt.Errorf("failed to check for existing shared Secret: %w", getErr)
+		return nil, fmt.Errorf("check for existing shared Secret: %w", getErr)
 	}
 
 	setupLog.Info("No shared webhook certificates found; generating new ones")
@@ -65,7 +65,7 @@ func generateWebhookCerts(ctx context.Context, c client.Client, certDir string, 
 		return nil, err
 	}
 	if err := writeCertFiles(certDir, serverPEM, serverKeyPEM); err != nil {
-		return nil, fmt.Errorf("failed to write certificate files locally: %w", err)
+		return nil, fmt.Errorf("write certificate files locally: %w", err)
 	}
 	return publishSharedSecret(ctx, c, namespace, certDir, caPEM, serverPEM, serverKeyPEM)
 }
@@ -77,7 +77,7 @@ func adoptSecretCerts(secret *corev1.Secret, certDir string) ([]byte, error) {
 		return nil, fmt.Errorf("shared Secret %s has invalid certificate data: %w", webhookSecretName, err)
 	}
 	if err := writeCertFiles(certDir, serverPEM, serverKeyPEM); err != nil {
-		return nil, fmt.Errorf("failed to write certificate files locally: %w", err)
+		return nil, fmt.Errorf("write certificate files locally: %w", err)
 	}
 	return caPEM, nil
 }
@@ -86,7 +86,7 @@ func adoptSecretCerts(secret *corev1.Secret, certDir string) ([]byte, error) {
 func issueSelfSignedPair(serviceName, namespace, clusterDomain string) (caPEM, serverPEM, serverKeyPEM []byte, err error) {
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to generate CA private key: %w", err)
+		return nil, nil, nil, fmt.Errorf("generate CA private key: %w", err)
 	}
 	caTemplate := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
@@ -99,13 +99,13 @@ func issueSelfSignedPair(serviceName, namespace, clusterDomain string) (caPEM, s
 	}
 	caBytes, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create CA certificate: %w", err)
+		return nil, nil, nil, fmt.Errorf("create CA certificate: %w", err)
 	}
 	caPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caBytes})
 
 	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to generate server private key: %w", err)
+		return nil, nil, nil, fmt.Errorf("generate server private key: %w", err)
 	}
 	serverTemplate := &x509.Certificate{
 		SerialNumber:          big.NewInt(2),
@@ -124,13 +124,13 @@ func issueSelfSignedPair(serviceName, namespace, clusterDomain string) (caPEM, s
 	}
 	serverBytes, err := x509.CreateCertificate(rand.Reader, serverTemplate, caTemplate, &serverKey.PublicKey, caKey)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create server certificate: %w", err)
+		return nil, nil, nil, fmt.Errorf("create server certificate: %w", err)
 	}
 	serverPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverBytes})
 
 	serverKeyBytes, err := x509.MarshalECPrivateKey(serverKey)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to marshal server private key: %w", err)
+		return nil, nil, nil, fmt.Errorf("marshal server private key: %w", err)
 	}
 	return caPEM, serverPEM, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: serverKeyBytes}), nil
 }
@@ -152,13 +152,13 @@ func publishSharedSecret(ctx context.Context, c client.Client, namespace, certDi
 		return caPEM, nil
 	}
 	if !errors.IsAlreadyExists(err) {
-		return nil, fmt.Errorf("failed to create shared Secret: %w", err)
+		return nil, fmt.Errorf("create shared Secret: %w", err)
 	}
 
 	setupLog.Info("Shared Secret was created concurrently by another replica; loading it", "secret", webhookSecretName)
 	winner := &corev1.Secret{}
 	if err := c.Get(ctx, types.NamespacedName{Name: webhookSecretName, Namespace: namespace}, winner); err != nil {
-		return nil, fmt.Errorf("failed to get concurrently created Secret: %w", err)
+		return nil, fmt.Errorf("get concurrently created Secret: %w", err)
 	}
 	return adoptSecretCerts(winner, certDir)
 }
@@ -224,7 +224,7 @@ func patchCRDs(ctx context.Context, c client.Client, caPEM []byte, serviceName, 
 				setupLog.Info("CRD not found, skipping patch", "crd", name)
 				continue
 			}
-			return fmt.Errorf("failed to get CRD %s: %w", name, err)
+			return fmt.Errorf("get CRD %s: %w", name, err)
 		}
 
 		if crd.Spec.Conversion == nil || crd.Spec.Conversion.Strategy != apiextensionsv1.WebhookConverter {
@@ -232,7 +232,6 @@ func patchCRDs(ctx context.Context, c client.Client, caPEM []byte, serviceName, 
 			continue
 		}
 
-		// Keep a copy of the original CRD for the merge patch
 		original := crd.DeepCopy()
 
 		webhook := crd.Spec.Conversion.Webhook
@@ -240,7 +239,6 @@ func patchCRDs(ctx context.Context, c client.Client, caPEM []byte, serviceName, 
 			webhook = &apiextensionsv1.WebhookConversion{}
 		}
 
-		// Ensure ConversionReviewVersions is set when missing
 		if len(webhook.ConversionReviewVersions) == 0 {
 			webhook.ConversionReviewVersions = []string{"v1", "v1beta1"}
 		}
@@ -253,7 +251,6 @@ func patchCRDs(ctx context.Context, c client.Client, caPEM []byte, serviceName, 
 			webhook.ClientConfig.Service = &apiextensionsv1.ServiceReference{}
 		}
 
-		// Update service details and caBundle
 		webhook.ClientConfig.Service.Name = serviceName
 		webhook.ClientConfig.Service.Namespace = namespace
 		path := "/convert"
@@ -264,7 +261,7 @@ func patchCRDs(ctx context.Context, c client.Client, caPEM []byte, serviceName, 
 
 		// Use Patch with MergeFrom to avoid write conflicts and managedFields issues
 		if err := c.Patch(ctx, crd, client.MergeFrom(original)); err != nil {
-			return fmt.Errorf("failed to patch CRD %s: %w", name, err)
+			return fmt.Errorf("patch CRD %s: %w", name, err)
 		}
 
 		setupLog.Info("Successfully patched CRD with webhook configuration", "crd", name)

@@ -95,13 +95,16 @@ type SandboxLifecycle interface {
 	Snapshots(ctx context.Context, node string) ([]Snapshot, error)
 	// DeleteSnapshot removes a checkpoint. A missing checkpoint is success.
 	DeleteSnapshot(ctx context.Context, node, snapshotID string) error
-	// ClaimSnapshot delivers a fresh sandbox branched from a checkpoint.
-	ClaimSnapshot(ctx context.Context, node, snapshotID string, ttlSeconds int) (Assignment, error)
-	// Promote publishes the sandbox as a node-local template that later claims
-	// for that key clone from.
-	Promote(ctx context.Context, node, id, template string) (PoolKey, error)
 	// Stats reports one sandbox's resource usage.
 	Stats(ctx context.Context, node, id string) (SandboxStats, error)
+}
+
+// ClaimIDResolver is the store fast path that resolves one sandbox by its
+// node-local claim id without materializing the fleet. id is the caller's
+// spelling of the id and keys the owning-node index; match decides which
+// node-local id it accepts. An empty namespace matches every namespace.
+type ClaimIDResolver interface {
+	GetByClaimID(ctx context.Context, namespace, id string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error)
 }
 
 // Snapshot is a captured sandbox state that new sandboxes can branch from.

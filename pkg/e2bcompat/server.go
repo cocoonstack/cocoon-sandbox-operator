@@ -20,7 +20,6 @@
 package e2bcompat
 
 import (
-	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -85,25 +84,25 @@ type Options struct {
 	Log logr.Logger
 }
 
-// claimIDResolver is the store fast path resolving one sandbox by node-local
-// claim id without materializing the fleet; the scatter-gather store
-// implements it, and lookup falls back to a List scan for stores that don't.
-type claimIDResolver interface {
-	GetByClaimID(ctx context.Context, namespace string, match func(claimID string) bool) (*sandboxv1beta1.Sandbox, error)
-}
-
 // Server translates e2b REST calls onto a scale.SandboxStore.
 type Server struct {
-	store scale.SandboxStore
-	opts  Options
-	keys  map[string]struct{}
+	store    scale.SandboxStore
+	resolver scale.ClaimIDResolver
+	opts     Options
+	keys     map[string]struct{}
 }
 
 // NewServer builds a compat server. It fails when no API key is configured and
-// anonymous access was not explicitly allowed.
+// anonymous access was not explicitly allowed, or when store cannot resolve a
+// sandbox by claim id — every by-id verb would otherwise degrade to a
+// cluster-wide List scan.
 func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	if store == nil {
 		return nil, errors.New("e2bcompat: store is required")
+	}
+	resolver, ok := store.(scale.ClaimIDResolver)
+	if !ok {
+		return nil, errors.New("e2bcompat: store does not implement scale.ClaimIDResolver")
 	}
 	if opts.Namespace == "" {
 		opts.Namespace = "default"
@@ -123,7 +122,7 @@ func NewServer(store scale.SandboxStore, opts Options) (*Server, error) {
 	if len(keys) == 0 && !opts.AllowAnonymous {
 		return nil, errors.New("e2bcompat: no API key configured; set one or enable anonymous access explicitly")
 	}
-	return &Server{store: store, opts: opts, keys: keys}, nil
+	return &Server{store: store, resolver: resolver, opts: opts, keys: keys}, nil
 }
 
 // Handler returns the routed, authenticated HTTP handler.
@@ -320,28 +319,16 @@ func (s *Server) lookup(r *http.Request, id string) (*sandboxv1beta1.Sandbox, er
 	if strings.TrimSpace(id) == "" {
 		return nil, errSandboxNotFound
 	}
-	if resolver, ok := s.store.(claimIDResolver); ok {
-		sb, err := resolver.GetByClaimID(r.Context(), s.opts.Namespace, func(claimID string) bool {
-			return matchesID(claimID, id)
-		})
-		if err != nil {
-			if k8serrors.IsNotFound(err) {
-				return nil, errSandboxNotFound
-			}
-			return nil, err
-		}
-		return sb, nil
-	}
-	list, err := s.store.List(r.Context(), scale.ListOptions{Namespace: s.opts.Namespace})
+	sb, err := s.resolver.GetByClaimID(r.Context(), s.opts.Namespace, id, func(claimID string) bool {
+		return matchesID(claimID, id)
+	})
 	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return nil, errSandboxNotFound
+		}
 		return nil, err
 	}
-	for i := range list.Items {
-		if matchesID(list.Items[i].Annotations[scale.ClaimIDAnnotation], id) {
-			return &list.Items[i], nil
-		}
-	}
-	return nil, errSandboxNotFound
+	return sb, nil
 }
 
 func (s *Server) writeLookupError(w http.ResponseWriter, err error, id, op string) {
@@ -355,7 +342,9 @@ func (s *Server) writeLookupError(w http.ResponseWriter, err error, id, op strin
 
 // detailFor renders a live Sandbox as the e2b detail shape. Fields e2b requires
 // but cocoon does not track per sandbox (disk size) are reported as zero values
-// rather than omitted, so the SDK's decoder stays happy.
+// rather than omitted, so the SDK's decoder stays happy. envdAccessToken is one
+// of them on this path: the token is handed out once at claim time and node
+// inventory deliberately carries no per-sandbox secret.
 func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	started := sb.CreationTimestamp.Time
 	if started.IsZero() {
@@ -370,21 +359,24 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 		endAt = deadline
 	}
 	return SandboxDetail{
-		TemplateID:      templateOf(sb),
-		SandboxID:       publicID(sb.Annotations[scale.ClaimIDAnnotation]),
-		ClientID:        sb.Status.NodeName,
-		StartedAt:       started.UTC().Format(time.RFC3339),
-		EndAt:           endAt.UTC().Format(time.RFC3339),
-		State:           state,
-		EnvdVersion:     s.opts.EnvdVersion,
-		EnvdAccessToken: sb.Annotations[tokenAnnotation],
-		Domain:          s.opts.Domain,
+		TemplateID:  templateOf(sb),
+		SandboxID:   publicID(sb.Annotations[scale.ClaimIDAnnotation]),
+		ClientID:    sb.Status.NodeName,
+		StartedAt:   started.UTC().Format(time.RFC3339),
+		EndAt:       endAt.UTC().Format(time.RFC3339),
+		State:       state,
+		EnvdVersion: s.opts.EnvdVersion,
+		Domain:      s.opts.Domain,
 	}
 }
 
-// templateOf reports the pool template a sandbox was claimed from: the first
-// container image, the same axis scale.PoolKeyFor keys on.
+// templateOf reports the pool template a sandbox was claimed from. A sandbox
+// synthesized from node inventory carries it as a label; only an object that
+// still holds its own pod spec can be read for the container image.
 func templateOf(sb *sandboxv1beta1.Sandbox) string {
+	if t := sb.Labels[scale.TemplateLabel]; t != "" {
+		return t
+	}
 	if c := sb.Spec.PodTemplate.Spec.Containers; len(c) > 0 {
 		return c[0].Image
 	}

@@ -36,10 +36,6 @@ import (
 )
 
 const (
-	// netAnnotation selects the pool network mode; it mirrors the aggregated
-	// apiserver's NetAnnotation so a Create derives the same key the driver sets.
-	netAnnotation = "sandbox.cocoonstack.io/net"
-
 	// defaultInterval is the pool resync cadence, and with it the sampling period of
 	// the fleet-wide warm count reported in pool status. Pools are O(single-digit)
 	// and every tick's node fan-out is the same PUT the driver already owes, so a 5s
@@ -66,9 +62,14 @@ type PoolSetter interface {
 // uniform fleet api_token.
 type ClientFactory func(addr, token string) PoolSetter
 
-// NewSandboxdFactory returns the production factory backed by the real HTTP client.
+// NewSandboxdFactory returns the production factory. It shares the store's
+// address rendering and keep-alive client, so a node advertising a scheme is
+// reachable here too.
 func NewSandboxdFactory() ClientFactory {
-	return func(addr, token string) PoolSetter { return sandboxd.New("http://"+addr, token) }
+	hc := scale.NewSandboxdHTTPClient()
+	return func(addr, token string) PoolSetter {
+		return sandboxd.New(scale.SandboxdBaseURL(addr), token, sandboxd.WithHTTPClient(hc))
+	}
 }
 
 // Options configures a Driver.
@@ -214,19 +215,19 @@ func (d *Driver) schedulableNodes(ctx context.Context) ([]nodeView, error) {
 	}
 	views := make([]nodeView, 0, len(names))
 	for _, name := range names {
-		inv, err := d.inv.NodeInventory(ctx, name)
+		addr, pools, err := d.inv.NodeCapacity(ctx, name)
 		if err != nil {
 			d.log.V(1).Info("skip node without readable inventory", "node", name, "err", err.Error())
 			continue
 		}
-		if inv.Address == "" {
+		if addr == "" {
 			continue
 		}
-		warmBy := make(map[scale.PoolKey]int, len(inv.Pools))
-		for _, pc := range inv.Pools {
+		warmBy := make(map[scale.PoolKey]int, len(pools))
+		for _, pc := range pools {
 			warmBy[scale.PoolKey{Template: pc.Template, Net: pc.Net, Size: pc.Size}] = pc.Warm
 		}
-		views = append(views, nodeView{name: name, addr: inv.Address, warmBy: warmBy})
+		views = append(views, nodeView{name: name, addr: addr, warmBy: warmBy})
 	}
 	slices.SortFunc(views, func(a, b nodeView) int { return cmp.Compare(a.name, b.name) })
 	return views, nil
@@ -243,10 +244,7 @@ func (d *Driver) poolKey(ctx context.Context, p *extv1beta1.SandboxWarmPool) (sc
 	if err := d.kube.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: name}, &tmpl); err != nil {
 		return scale.PoolKey{}, fmt.Errorf("get SandboxTemplate %s/%s: %w", p.Namespace, name, err)
 	}
-	net := tmpl.Annotations[netAnnotation]
-	if net == "" {
-		net = tmpl.Spec.PodTemplate.ObjectMeta.Annotations[netAnnotation]
-	}
+	net := scale.NetForAnnotations(tmpl.Annotations, tmpl.Spec.PodTemplate.ObjectMeta.Annotations)
 	return scale.PoolKeyFor(tmpl.Spec.PodTemplate.Spec.Containers, net), nil
 }
 

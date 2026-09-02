@@ -49,7 +49,6 @@ func TestClaimGatewayHappyPath(t *testing.T) {
 	require.Equal(t, "node-a", a.Node)
 	require.Equal(t, "10.0.0.5:7777", a.Address)
 
-	// The record follows the action: wait for the async job, then assert Bound.
 	gw.Wait()
 	cur := getClaim(t, fc, "c1")
 	require.Equal(t, a.SandboxName, cur.Status.SandboxStatus.Name, "async RecordBound should have set status.sandbox.name")
@@ -68,7 +67,6 @@ func TestClaimGatewayOrphanBindingConverges(t *testing.T) {
 	fs := newFakeSandboxd(t)
 	fc := newClaimClient(t, "c-orphan")
 
-	// Gateway whose async record always fails → the delivery is never recorded.
 	gw := NewGateway(GatewayConfig{
 		Node: "node-a", Client: fs.client(), Authorizer: allowAuthorizer{},
 		Recorder: failingRecorder{}, BaseContext: t.Context(), Logger: testr.New(t),
@@ -77,7 +75,6 @@ func TestClaimGatewayOrphanBindingConverges(t *testing.T) {
 	require.NoError(t, err)
 	gw.Wait()
 
-	// Orphan confirmed: delivered, but the claim carries no Bound record.
 	require.Empty(t, getClaim(t, fc, "c-orphan").Status.SandboxStatus.Name)
 
 	inv := sliceInventory{{SandboxName: a.SandboxName, Node: a.Node, Address: a.Address, ClaimNS: "default", ClaimName: "c-orphan"}}
@@ -88,7 +85,6 @@ func TestClaimGatewayOrphanBindingConverges(t *testing.T) {
 	require.Equal(t, 1, n, "the single orphan binding should be reconciled")
 	require.Equal(t, a.SandboxName, getClaim(t, fc, "c-orphan").Status.SandboxStatus.Name, "orphan binding converged to Bound")
 
-	// Idempotent: a second pass finds no orphans.
 	n, err = orc.Reconcile(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 0, n, "orphan count must converge to 0")
@@ -135,17 +131,13 @@ func TestClaimGatewayReleaseOwnerTeardownOnly(t *testing.T) {
 	require.NoError(t, err)
 	gw.Wait()
 
-	// Owner-authorized teardown of a delivered sandbox destroys exactly that VM.
 	require.NoError(t, gw.Release(t.Context(), a))
 	require.Equal(t, int64(1), fs.releases.Load(), "owner teardown must destroy the delivered VM")
 
-	// An Assignment the gateway never delivered (pod-derived / stale) must NOT
-	// reach sandboxd — no code path from pod state to a VM destroy.
 	err = gw.Release(t.Context(), Assignment{SandboxName: "sb_never_delivered", Node: "node-a"})
 	require.Error(t, err)
 	require.Equal(t, int64(1), fs.releases.Load(), "an undelivered Assignment must not trigger any destroy")
 
-	// A second release of the same sandbox is likewise refused (already handed back).
 	err = gw.Release(t.Context(), a)
 	require.Error(t, err)
 	require.Equal(t, int64(1), fs.releases.Load())

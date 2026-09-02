@@ -183,7 +183,7 @@ func (o *options) serverConfig() (*genericapiserver.Config, error) {
 // apiserver's inventory cache: the warm-pool driver and the e2b REST surface.
 func (o *options) startSidecars(ctx context.Context, restCfg *restclient.Config, token string, store scale.SandboxStore, invSource scale.InventorySource) error {
 	if o.WarmPoolDriver {
-		if err := startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval); err != nil {
+		if err := startWarmPoolDriver(ctx, restCfg, token, o.WarmPoolInterval, invSource); err != nil {
 			return err
 		}
 	}
@@ -294,8 +294,10 @@ func startInventoryCache(ctx context.Context, restCfg *restclient.Config) (cache
 // a poll tick (the only latency that ever mattered — the node side fills a pool
 // in under a second). Leader election makes exactly one of the apiserver replicas
 // drive the pools. The manager's own metrics/health servers are disabled; the
-// aggregated apiserver owns the serving port.
-func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token string, interval time.Duration) error {
+// aggregated apiserver owns the serving port. inv is the process-wide cache-fed
+// inventory source; the manager's own client would read NodeInventory
+// unstructured and so bypass its cache on every node read.
+func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token string, interval time.Duration, inv scale.InventorySource) error {
 	scheme := runtime.NewScheme()
 	if err := extv1beta1.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("register extensions scheme: %w", err)
@@ -311,7 +313,7 @@ func startWarmPoolDriver(ctx context.Context, restCfg *restclient.Config, token 
 	if err != nil {
 		return fmt.Errorf("build warm-pool manager: %w", err)
 	}
-	driver := warmpool.New(nil, nil, token, warmpool.NewSandboxdFactory(), warmpool.Options{
+	driver := warmpool.New(nil, inv, token, warmpool.NewSandboxdFactory(), warmpool.Options{
 		Interval: interval,
 		Log:      ctrl.Log.WithName("warmpool"),
 	})

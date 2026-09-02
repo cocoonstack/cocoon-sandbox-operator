@@ -52,6 +52,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale/apiserver"
 	sdk "github.com/cocoonstack/sandbox/sdk/go"
 )
 
@@ -59,9 +61,13 @@ import (
 // address, per-sandbox exec token, and sandboxd claim id. Together they let the
 // loadgen exec into exactly what it claimed (create -> exec latency).
 const (
-	addressAnnotation = "sandbox.cocoonstack.io/address"
-	tokenAnnotation   = "sandbox.cocoonstack.io/token"
-	claimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+	addressAnnotation = apiserver.AddressAnnotation
+	tokenAnnotation   = apiserver.TokenAnnotation
+	claimIDAnnotation = scale.ClaimIDAnnotation
+
+	// metricsReadHeaderTimeout bounds how long a client may take to send its
+	// request headers, so a stalled connection cannot pin a handler.
+	metricsReadHeaderTimeout = 5 * time.Second
 )
 
 var (
@@ -245,7 +251,12 @@ func main() {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-		if err := http.ListenAndServe(o.metricsAddr, mux); err != nil { //nolint:gosec // internal metrics endpoint
+		srv := &http.Server{
+			Addr:              o.metricsAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: metricsReadHeaderTimeout,
+		}
+		if err := srv.ListenAndServe(); err != nil {
 			fatalf("metrics server: %v", err)
 		}
 	}()
@@ -513,7 +524,7 @@ func newSandbox(ns, name, image string) *sandboxv1beta1.Sandbox {
 	return &sandboxv1beta1.Sandbox{
 		Namespace: ns,
 		Name:      name,
-		Labels:    map[string]string{"agents.x-k8s.io/created-by": "sdk-loadgen"},
+		Labels:    map[string]string{sandboxv1beta1.CreatedByLabel: "sdk-loadgen"},
 		Spec: sandboxv1beta1.SandboxSpec{
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
 				PodTemplate: sandboxv1beta1.PodTemplate{

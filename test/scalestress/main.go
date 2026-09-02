@@ -178,7 +178,7 @@ func main() {
 	result["rounds"] = rounds
 	result["aborted"] = abort
 
-	// Interpretation. A wedge tendency shows up as: any NEW time-out rejection on
+	// A wedge tendency shows up as: any NEW time-out rejection on
 	// the vk LIST level during the ramp, seat use approaching the nominal limit, or
 	// LIST latency climbing materially with object count.
 	newRejections, maxInUse := 0.0, 0.0

@@ -17,7 +17,7 @@ import (
 func TestPauseAlreadyPausedIs409(t *testing.T) {
 	store := &lifecycleStore{}
 	nodeReportsPaused(store)
-	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/pause", ``, testKey)
@@ -33,7 +33,7 @@ func TestPauseAlreadyPausedIs409(t *testing.T) {
 // the owning node, never the public id the client spelled.
 func TestPauseRoutesToOwningNode(t *testing.T) {
 	store := &lifecycleStore{}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/pause", ``, testKey)
@@ -52,7 +52,7 @@ func TestPauseRoutesToOwningNode(t *testing.T) {
 // caller asked for — say so instead of silently doing the other thing.
 func TestPauseFilesystemOnlyIsRejected(t *testing.T) {
 	store := &lifecycleStore{}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/pause", `{"memory":false}`, testKey)
@@ -70,7 +70,7 @@ func TestPauseFilesystemOnlyIsRejected(t *testing.T) {
 // operator whether the mmap restore path ran.
 func TestConnectRunningIs200(t *testing.T) {
 	store := &lifecycleStore{}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/connect", `{"timeout":30}`, testKey)
@@ -92,7 +92,7 @@ func TestConnectRunningIs200(t *testing.T) {
 func TestConnectPausedIs201AndResumes(t *testing.T) {
 	store := &lifecycleStore{}
 	nodeReportsPaused(store)
-	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/connect", `{"timeout":30}`, testKey)
@@ -109,7 +109,7 @@ func TestConnectPausedIs201AndResumes(t *testing.T) {
 func TestForkPausedIs409(t *testing.T) {
 	store := &lifecycleStore{}
 	nodeReportsPaused(store)
-	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/fork", `{"count":2}`, testKey)
@@ -131,7 +131,7 @@ func TestForkReturnsPerChildResults(t *testing.T) {
 			{SandboxName: "sb_c2", Node: "node-a", Token: "t2"},
 		},
 	}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/fork", `{"count":2}`, testKey)
@@ -158,7 +158,7 @@ func TestForkReturnsPerChildResults(t *testing.T) {
 // TestForkDefaultsToOneChild: count is optional in e2b's schema.
 func TestForkDefaultsToOneChild(t *testing.T) {
 	store := &lifecycleStore{forkChildren: []scale.Assignment{{SandboxName: "sb_c1", Node: "node-a"}}}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	if w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/fork", ``, testKey); w.Code != http.StatusCreated {
@@ -173,7 +173,7 @@ func TestForkDefaultsToOneChild(t *testing.T) {
 // checkpoint id a later branch is taken from.
 func TestSnapshotReturns201WithID(t *testing.T) {
 	store := &lifecycleStore{snapshot: scale.Snapshot{ID: "ck_1234", Name: "before-migration", Node: "node-a"}}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/snapshots", `{"name":"before-migration"}`, testKey)
@@ -222,9 +222,9 @@ func TestLifecycleVerbsOnUnknownSandboxAre404(t *testing.T) {
 // paused it". The owning node is authoritative and must win.
 func TestPauseTrustsTheNodeNotTheStaleView(t *testing.T) {
 	store := &lifecycleStore{}
-	store.nodePaused = true // the node has it hibernated ...
-	sb := liveSandbox("s1", "sb_abc", "node-a", "img", "tok")
-	sb.Labels = map[string]string{scale.PhaseLabel: "Running"} // ... but the view still says Running
+	store.nodePaused = true
+	sb := liveSandbox("s1", "sb_abc", "node-a", "img")
+	sb.Labels = map[string]string{scale.PhaseLabel: "Running"}
 	store.items = []sandboxv1beta1.Sandbox{sb}
 	h := newTestServer(t, store)
 
@@ -243,7 +243,7 @@ func TestPauseTrustsTheNodeNotTheStaleView(t *testing.T) {
 func TestConnectTrustsTheNodeNotTheStaleView(t *testing.T) {
 	store := &lifecycleStore{}
 	store.nodePaused = true
-	sb := liveSandbox("s1", "sb_abc", "node-a", "img", "tok")
+	sb := liveSandbox("s1", "sb_abc", "node-a", "img")
 	sb.Labels = map[string]string{scale.PhaseLabel: "Running"}
 	store.items = []sandboxv1beta1.Sandbox{sb}
 	h := newTestServer(t, store)
@@ -301,9 +301,9 @@ func (f *lifecycleStore) Snapshot(_ context.Context, _, _, name string) (scale.S
 }
 
 // pausedSandbox is a sandbox as the node publishes it while hibernated.
-func pausedSandbox(name, claimID, node, image, token string) sandboxv1beta1.Sandbox {
-	sb := liveSandbox(name, claimID, node, image, token)
-	sb.Labels = map[string]string{scale.PhaseLabel: phaseHibernated}
+func pausedSandbox(name, claimID, node, template string) sandboxv1beta1.Sandbox {
+	sb := liveSandbox(name, claimID, node, template)
+	sb.Labels[scale.PhaseLabel] = phaseHibernated
 	return sb
 }
 

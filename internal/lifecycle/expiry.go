@@ -30,13 +30,25 @@ func FinishedCondition(conditions []metav1.Condition, conditionType string) *met
 	return condition
 }
 
-// NeedsCleanup reports whether ttl-after-finished cleanup applies.
-func NeedsCleanup(ttlSecondsAfterFinished *int32, finishedCondition *metav1.Condition) bool {
+// TimeLeft reports whether the resource has expired and, if not, how long remains.
+func TimeLeft(now time.Time, shutdownTime *metav1.Time, ttlSecondsAfterFinished *int32, finishedCondition *metav1.Condition) (bool, time.Duration) {
+	expireAt := expireAtFor(shutdownTime, ttlSecondsAfterFinished, finishedCondition)
+	if expireAt == nil {
+		return false, 0
+	}
+	if !now.Before(*expireAt) {
+		return true, 0
+	}
+	return false, expireAt.Sub(now)
+}
+
+// needsCleanup reports whether ttl-after-finished cleanup applies.
+func needsCleanup(ttlSecondsAfterFinished *int32, finishedCondition *metav1.Condition) bool {
 	return ttlSecondsAfterFinished != nil && finishedCondition != nil
 }
 
-// FinishedTime returns the finish timestamp encoded in the terminal condition.
-func FinishedTime(finishedCondition *metav1.Condition) *time.Time {
+// finishedTime returns the finish timestamp encoded in the terminal condition.
+func finishedTime(finishedCondition *metav1.Condition) *time.Time {
 	if finishedCondition == nil || finishedCondition.LastTransitionTime.IsZero() {
 		return nil
 	}
@@ -44,19 +56,19 @@ func FinishedTime(finishedCondition *metav1.Condition) *time.Time {
 	return &finishedAt
 }
 
-// ExpireAt returns the earliest configured expiry time.
-func ExpireAt(shutdownTime *metav1.Time, ttlSecondsAfterFinished *int32, finishedCondition *metav1.Condition) *time.Time {
+// expireAtFor returns the earliest configured expiry time.
+func expireAtFor(shutdownTime *metav1.Time, ttlSecondsAfterFinished *int32, finishedCondition *metav1.Condition) *time.Time {
 	var expireAt *time.Time
 	if shutdownTime != nil {
 		shutdownAt := shutdownTime.Time
 		expireAt = &shutdownAt
 	}
 
-	if !NeedsCleanup(ttlSecondsAfterFinished, finishedCondition) {
+	if !needsCleanup(ttlSecondsAfterFinished, finishedCondition) {
 		return expireAt
 	}
 
-	finishedAt := FinishedTime(finishedCondition)
+	finishedAt := finishedTime(finishedCondition)
 	if finishedAt == nil {
 		return expireAt
 	}
@@ -67,16 +79,4 @@ func ExpireAt(shutdownTime *metav1.Time, ttlSecondsAfterFinished *int32, finishe
 	}
 
 	return expireAt
-}
-
-// TimeLeft reports whether the resource has expired and, if not, how long remains.
-func TimeLeft(now time.Time, shutdownTime *metav1.Time, ttlSecondsAfterFinished *int32, finishedCondition *metav1.Condition) (bool, time.Duration) {
-	expireAt := ExpireAt(shutdownTime, ttlSecondsAfterFinished, finishedCondition)
-	if expireAt == nil {
-		return false, 0
-	}
-	if !now.Before(*expireAt) {
-		return true, 0
-	}
-	return false, expireAt.Sub(now)
 }

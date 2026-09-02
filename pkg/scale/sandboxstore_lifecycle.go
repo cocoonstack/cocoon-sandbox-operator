@@ -100,41 +100,6 @@ func (s *scatterGatherStore) DeleteSnapshot(ctx context.Context, node, snapshotI
 	return nil
 }
 
-// ClaimSnapshot delivers a fresh sandbox branched from a checkpoint.
-func (s *scatterGatherStore) ClaimSnapshot(ctx context.Context, node, snapshotID string, ttlSeconds int) (Assignment, error) {
-	cl, err := s.nodeClient(ctx, node, "claim snapshot", snapshotID)
-	if err != nil {
-		return Assignment{}, err
-	}
-	res, err := cl.ClaimCheckpoint(ctx, snapshotID, sandboxd.CheckpointClaimSpec{TTLSeconds: ttlSeconds})
-	if err != nil {
-		return Assignment{}, fmt.Errorf("scale: sandboxd claim snapshot %q on node %q: %w", snapshotID, node, err)
-	}
-	return Assignment{
-		SandboxName: res.ID,
-		Node:        node,
-		Address:     res.OwnerAddr,
-		Token:       res.Token,
-		Deadline:    res.Deadline,
-	}, nil
-}
-
-// Promote publishes a sandbox as a node-local template.
-func (s *scatterGatherStore) Promote(ctx context.Context, node, id, template string) (PoolKey, error) {
-	if template == "" {
-		return PoolKey{}, fmt.Errorf("scale: promote requires a template name")
-	}
-	cl, err := s.nodeClient(ctx, node, "promote", id)
-	if err != nil {
-		return PoolKey{}, err
-	}
-	key, err := cl.Promote(ctx, id, sandboxd.PromoteSpec{Template: template})
-	if err != nil {
-		return PoolKey{}, fmt.Errorf("scale: sandboxd promote of %q on node %q: %w", id, node, err)
-	}
-	return PoolKey{Template: key.Template, Net: key.Net, Size: key.Size}, nil
-}
-
 // Stats reports a sandbox's resource usage from its owning node.
 func (s *scatterGatherStore) Stats(ctx context.Context, node, id string) (SandboxStats, error) {
 	cl, err := s.nodeClient(ctx, node, "stats", id)
@@ -165,14 +130,14 @@ func (s *scatterGatherStore) nodeClient(ctx context.Context, node, verb, id stri
 	if node == "" {
 		return nil, fmt.Errorf("scale: %s requires an owning node", verb)
 	}
-	inv, err := s.src.NodeInventory(ctx, node)
+	addr, _, err := s.src.NodeCapacity(ctx, node)
 	if err != nil {
 		return nil, fmt.Errorf("scale: resolve node %q for %s of %q: %w", node, verb, id, err)
 	}
-	if inv.Address == "" {
+	if addr == "" {
 		return nil, fmt.Errorf("scale: node %q advertises no sandboxd address for %s of %q", node, verb, id)
 	}
-	return s.sandboxdFactory(inv.Address, s.sandboxdToken), nil
+	return s.sandboxdFactory(addr, s.sandboxdToken), nil
 }
 
 // snapshotFrom converts a node's checkpoint record to the store's shape.

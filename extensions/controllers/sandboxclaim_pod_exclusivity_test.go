@@ -32,9 +32,9 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
-	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
 	"github.com/cocoonstack/sandbox-operator/internal/hash"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
+	"github.com/cocoonstack/sandbox-operator/internal/queue"
 )
 
 // TestWarmPoolPodExclusivity is a regression test for the 1:1 sandbox-to-pod
@@ -93,7 +93,6 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 		}
 	}
 
-	// 2 warm pool sandboxes, 3 claims — at least 1 claim must cold-start
 	poolSb0 := createPoolSandbox("pool-sb-0")
 	poolSb1 := createPoolSandbox("pool-sb-1")
 
@@ -134,7 +133,6 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 		Tracer:           asmetrics.NewNoOp(), MaxConcurrentReconciles: 1,
 	}
 
-	// Reconcile all 3 claims sequentially
 	for _, cl := range claims {
 		_, err := reconciler.Reconcile(ctx, reconcile.Request{
 			Name: cl.Name, Namespace: "default",
@@ -146,7 +144,7 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 	var allSandboxes sandboxv1beta1.SandboxList
 	require.NoError(t, fc.List(ctx, &allSandboxes, client.InNamespace("default")))
 
-	sandboxToOwners := make(map[string][]string) // sandbox name → [claim names]
+	sandboxToOwners := make(map[string][]string)
 	for _, sb := range allSandboxes.Items {
 		ref := metav1.GetControllerOf(&sb)
 		if ref != nil && ref.Kind == "SandboxClaim" {
@@ -154,7 +152,6 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 		}
 	}
 
-	// Each sandbox must be owned by at most one claim
 	warmPoolNames := map[string]bool{"pool-sb-0": true, "pool-sb-1": true}
 	warmAdoptions := 0
 	for sbName, owners := range sandboxToOwners {
@@ -166,8 +163,7 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 		}
 	}
 
-	// Each claim must own exactly one sandbox
-	claimToSandbox := make(map[string][]string) // claim name → [sandbox names]
+	claimToSandbox := make(map[string][]string)
 	for sbName, owners := range sandboxToOwners {
 		for _, owner := range owners {
 			claimToSandbox[owner] = append(claimToSandbox[owner], sbName)

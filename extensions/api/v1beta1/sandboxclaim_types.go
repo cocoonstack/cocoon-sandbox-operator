@@ -46,9 +46,6 @@ const (
 	ShutdownPolicyRetain ShutdownPolicy = "Retain"
 )
 
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-// Important: Run "make" to regenerate code after modifying this file
-
 // ShutdownPolicy describes the policy for shutting down the underlying Sandbox when the SandboxClaim expires.
 // +kubebuilder:validation:Enum=Delete;DeleteForeground;Retain
 type ShutdownPolicy string

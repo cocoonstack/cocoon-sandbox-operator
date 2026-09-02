@@ -17,6 +17,7 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -48,34 +49,6 @@ type AgentSandboxesMetricKey struct {
 	CreatedBy      string
 }
 
-// NewAgentSandboxesConstMetric creates a new Prometheus ConstMetric for the agent_sandboxes gauge.
-func NewAgentSandboxesConstMetric(count int, key AgentSandboxesMetricKey) prometheus.Metric {
-	return prometheus.MustNewConstMetric(
-		AgentSandboxesDesc,
-		prometheus.GaugeValue,
-		float64(count),
-		key.Namespace,
-		key.ReadyCondition,
-		key.Expired,
-		key.LaunchType,
-		key.Template,
-		key.OwnedBy,
-		key.CreatedBy,
-	)
-}
-
-// RegisterSandboxCollector registers the custom Prometheus collector for sandbox counts.
-func RegisterSandboxCollector(ctx context.Context, c client.Client, logger logr.Logger) {
-	collector := NewSandboxCollector(ctx, c, logger)
-	if err := metrics.Registry.Register(collector); err != nil {
-		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
-			logger.Error(err, "Failed to register SandboxCollector")
-		} else {
-			logger.Info("SandboxCollector already registered, ignoring")
-		}
-	}
-}
-
 // SandboxCollector is a custom Prometheus collector that dynamically fetches sandbox counts.
 type SandboxCollector struct {
 	// baseCtx is the process lifetime context; Collect derives its scrape
@@ -96,28 +69,25 @@ func NewSandboxCollector(ctx context.Context, c client.Client, logger logr.Logge
 	}
 }
 
-// Describe sends the metric descriptor to the channel.
 func (c *SandboxCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.agentSandboxesDesc
 }
 
-// Collect fetches sandboxes, calculates labels, and sends metrics to the channel.
-// UnsafeDisableDeepCopy avoids O(N) deep-copy overhead on every scrape; safe here because
-// Collect only reads fields for label aggregation and never mutates or retains the objects.
-// A GaugeVec updated in the Reconcile loop would be more performant (O(1) per scrape),
-// but this is a known trade-off to keep the Reconcile loop simpler.
 func (c *SandboxCollector) Collect(ch chan<- prometheus.Metric) {
 	var sandboxList sandboxv1beta1.SandboxList
 	ctx, cancel := context.WithTimeout(c.baseCtx, metricsCollectTimeout)
 	defer cancel()
 
+	// Copy-free cache read: the loop below only reads label inputs, and neither
+	// mutates nor retains an item.
 	if err := c.client.List(ctx, &sandboxList, client.UnsafeDisableDeepCopy); err != nil {
 		c.logger.Error(err, "Failed to list sandboxes for metrics collection")
 		return
 	}
 
 	counts := make(map[AgentSandboxesMetricKey]int)
-	for _, sandbox := range sandboxList.Items {
+	for i := range sandboxList.Items {
+		sandbox := &sandboxList.Items[i]
 		readyConditionStr := "false"
 		expiredStr := "false"
 		readyCond := meta.FindStatusCondition(sandbox.Status.Conditions, string(sandboxv1beta1.SandboxConditionReady))
@@ -136,15 +106,13 @@ func (c *SandboxCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 
 		sandboxTemplateStr := "unknown"
-		// If a user manually creates a Sandbox without a SandboxClaim, it won't have the
-		// SandboxTemplateRefAnnotation. The collector correctly handles this by defaulting to "unknown".
 		if template, ok := sandbox.Annotations[sandboxv1beta1.SandboxTemplateRefAnnotation]; ok && template != "" {
 			sandboxTemplateStr = template
 		}
 
 		apiVersion := extensionsv1beta1.GroupVersion.String()
 		ownedByStr := "None"
-		if controllerRef := metav1.GetControllerOf(&sandbox); controllerRef != nil {
+		if controllerRef := metav1.GetControllerOf(sandbox); controllerRef != nil {
 			if controllerRef.APIVersion == apiVersion {
 				switch controllerRef.Kind {
 				case kindSandboxClaim:
@@ -174,5 +142,33 @@ func (c *SandboxCollector) Collect(ch chan<- prometheus.Metric) {
 
 	for key, count := range counts {
 		ch <- NewAgentSandboxesConstMetric(count, key)
+	}
+}
+
+// NewAgentSandboxesConstMetric creates a new Prometheus ConstMetric for the agent_sandboxes gauge.
+func NewAgentSandboxesConstMetric(count int, key AgentSandboxesMetricKey) prometheus.Metric {
+	return prometheus.MustNewConstMetric(
+		AgentSandboxesDesc,
+		prometheus.GaugeValue,
+		float64(count),
+		key.Namespace,
+		key.ReadyCondition,
+		key.Expired,
+		key.LaunchType,
+		key.Template,
+		key.OwnedBy,
+		key.CreatedBy,
+	)
+}
+
+// RegisterSandboxCollector registers the custom Prometheus collector for sandbox counts.
+func RegisterSandboxCollector(ctx context.Context, c client.Client, logger logr.Logger) {
+	collector := NewSandboxCollector(ctx, c, logger)
+	if err := metrics.Registry.Register(collector); err != nil {
+		if _, ok := errors.AsType[prometheus.AlreadyRegisteredError](err); ok {
+			logger.Info("SandboxCollector already registered, ignoring")
+			return
+		}
+		logger.Error(err, "Failed to register SandboxCollector")
 	}
 }
