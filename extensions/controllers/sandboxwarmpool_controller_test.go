@@ -24,8 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cocoonstack/sandbox-operator/internal/hash"
-
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -39,6 +37,7 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
 )
 
 func TestReconcilePool(t *testing.T) {
