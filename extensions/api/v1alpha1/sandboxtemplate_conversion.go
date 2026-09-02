@@ -46,7 +46,8 @@ func (s *SandboxTemplate) ConvertTo(dstRaw conversion.Hub) error {
 		}
 	}
 
-	return stashV1alpha1State(dst, v1alpha1SandboxTemplateStateAnnotation, "SandboxTemplate", s.DeepCopy())
+	delete(dst.Annotations, v1alpha1SandboxTemplateStateAnnotation)
+	return nil
 }
 
 // ConvertFrom converts from the Hub version (v1beta1) to this SandboxTemplate.

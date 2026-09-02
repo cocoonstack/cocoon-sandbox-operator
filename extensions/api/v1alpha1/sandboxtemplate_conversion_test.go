@@ -15,7 +15,6 @@
 package v1alpha1
 
 import (
-	"encoding/json"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -86,14 +85,8 @@ func TestSandboxTemplateConversion(t *testing.T) {
 		t.Errorf("expected 1 label in src, got %d", len(src.Labels))
 	}
 
-	// Verify the marshaled state in dst does not contain the state annotation itself (no nesting)
-	marshaledState := dst.Annotations[v1alpha1SandboxTemplateStateAnnotation]
-	var stateObj SandboxTemplate
-	if err := json.Unmarshal([]byte(marshaledState), &stateObj); err != nil {
-		t.Fatalf("failed to unmarshal state from dst: %v", err)
-	}
-	if _, ok := stateObj.Annotations[v1alpha1SandboxTemplateStateAnnotation]; ok {
-		t.Errorf("dst.Annotations state nestedly contains the state annotation! causing exponential growth")
+	if _, ok := dst.Annotations[v1alpha1SandboxTemplateStateAnnotation]; ok {
+		t.Errorf("dst.Annotations carries the v1alpha1 state stash; the conversion is lossless and must not persist a second copy")
 	}
 
 	// Verify v1beta1 fields

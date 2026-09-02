@@ -354,8 +354,8 @@ func (s *Server) writeLookupError(w http.ResponseWriter, err error, id, op strin
 }
 
 // detailFor renders a live Sandbox as the e2b detail shape. Fields e2b requires
-// but cocoon does not track per sandbox (disk size, end-of-life) are reported as
-// zero/derived values rather than omitted, so the SDK's decoder stays happy.
+// but cocoon does not track per sandbox (disk size) are reported as zero values
+// rather than omitted, so the SDK's decoder stays happy.
 func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	started := sb.CreationTimestamp.Time
 	if started.IsZero() {
@@ -365,12 +365,16 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	if sb.Labels[scale.PhaseLabel] == phaseHibernated {
 		state = StatePaused
 	}
+	endAt := started.Add(DefaultTimeoutSeconds * time.Second)
+	if deadline, err := time.Parse(time.RFC3339, sb.Annotations[scale.DeadlineAnnotation]); err == nil {
+		endAt = deadline
+	}
 	return SandboxDetail{
 		TemplateID:      templateOf(sb),
 		SandboxID:       publicID(sb.Annotations[scale.ClaimIDAnnotation]),
 		ClientID:        sb.Status.NodeName,
 		StartedAt:       started.UTC().Format(time.RFC3339),
-		EndAt:           started.Add(DefaultTimeoutSeconds * time.Second).UTC().Format(time.RFC3339),
+		EndAt:           endAt.UTC().Format(time.RFC3339),
 		State:           state,
 		EnvdVersion:     s.opts.EnvdVersion,
 		EnvdAccessToken: sb.Annotations[tokenAnnotation],

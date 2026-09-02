@@ -26,7 +26,6 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -139,7 +138,6 @@ type SandboxClaimReconciler struct {
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch;update
 //+kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
-//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;delete
 //+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -157,13 +155,6 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("failed to get sandbox claim %q: %w", req.NamespacedName, err)
-	}
-
-	// Unconditionally clean up legacy per-claim NetworkPolicies.
-	// We log the error but do not block the main reconcile flow so
-	// transient API issues don't prevent Sandbox adoption/creation.
-	if err := r.cleanupLegacyNetworkPolicy(ctx, claim); err != nil {
-		logger.Error(err, "Non-fatal error cleaning up legacy per-claim NetworkPolicy")
 	}
 
 	// Start Tracing Span
@@ -1501,40 +1492,6 @@ func (r *SandboxClaimReconciler) mapWarmPoolToClaims(ctx context.Context, obj cl
 		requests = append(requests, ctrl.Request{Namespace: claim.Namespace, Name: claim.Name})
 	}
 	return requests
-}
-
-// cleanupLegacyNetworkPolicy cleans up any deprecated per-claim NetworkPolicies.
-func (r *SandboxClaimReconciler) cleanupLegacyNetworkPolicy(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) error {
-	logger := log.FromContext(ctx)
-	npKey := types.NamespacedName{Name: claim.Name + "-network-policy", Namespace: claim.Namespace}
-
-	existingNP := &networkingv1.NetworkPolicy{}
-	if err := r.Get(ctx, npKey, existingNP); err == nil {
-
-		// Verify this policy was actually created by this controller
-		// before deleting it. We check if the SandboxClaim is the controller.
-		controllerRef := metav1.GetControllerOf(existingNP)
-		isControlledByClaim := controllerRef != nil && controllerRef.UID == claim.UID && controllerRef.Kind == claimKind
-
-		if !isControlledByClaim {
-			// A user manually created a policy with our reserved name. We should not delete it, but log a warning so it can be resolved.
-			logger.V(1).Info("Found NetworkPolicy with reserved name, but it is not controlled by this claim. Skipping deletion.", "name", existingNP.Name)
-			return nil
-		}
-
-		// Use client.IgnoreNotFound to prevent benign race conditions
-		// if the object is deleted between our Get and Delete calls.
-		if deleteErr := r.Delete(ctx, existingNP); client.IgnoreNotFound(deleteErr) != nil {
-			logger.Error(deleteErr, "Failed to clean up deprecated per-claim NetworkPolicy")
-			return deleteErr
-		}
-		logger.Info("Cleaned up deprecated per-claim NetworkPolicy in favor of shared Template policy", "name", existingNP.Name)
-	} else if !k8errors.IsNotFound(err) {
-		logger.Error(err, "Failed to check cache for deprecated per-claim NetworkPolicy")
-		return err
-	}
-
-	return nil
 }
 
 // recordClaimStartupLatency records the startup latency based on webhook annotation.
