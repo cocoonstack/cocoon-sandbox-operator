@@ -12,11 +12,6 @@ import (
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
-// TestRunIssuesExactlyTotal encodes the safety property that caused the
-// 2026-07-21 incident when it was absent: a run must issue EXACTLY --total
-// creates across all workers — never more — and with cleanup on, every created
-// sandbox must be released (leaked == 0). If this test fails, the loadgen can
-// again run away and drain the fleet's warm pools.
 func TestRunIssuesExactlyTotal(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -57,8 +52,6 @@ func TestRunIssuesExactlyTotal(t *testing.T) {
 	}
 }
 
-// TestConcurrencyClampedToTotal guards the small-run path: asking for 2 creates
-// with 10 workers must still issue exactly 2.
 func TestConcurrencyClampedToTotal(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))

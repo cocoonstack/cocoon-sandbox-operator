@@ -7,11 +7,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
+
+// maxNodeConcurrency bounds a fleet-wide fan-out so a handful of wedged nodes
+// cannot serialize a handler into the minutes.
+const maxNodeConcurrency = 16
 
 // pauseSandbox hibernates the sandbox: its memory is written out and the VM
 // stops, so the cost is proportional to guest RAM. e2b's contract is specific
@@ -76,13 +84,14 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 		}
 		status = http.StatusCreated
 	}
+	// envdAccessToken is left empty: the token is handed out once at claim time
+	// and node inventory carries no per-sandbox secret to re-derive it from.
 	writeJSON(w, status, Sandbox{
-		TemplateID:      templateOf(sb),
-		SandboxID:       publicID(claimIDOf(sb)),
-		ClientID:        sb.Status.NodeName,
-		EnvdVersion:     s.opts.EnvdVersion,
-		EnvdAccessToken: sb.Annotations[tokenAnnotation],
-		Domain:          s.opts.Domain,
+		TemplateID:  templateOf(sb),
+		SandboxID:   publicID(claimIDOf(sb)),
+		ClientID:    sb.Status.NodeName,
+		EnvdVersion: s.opts.EnvdVersion,
+		Domain:      s.opts.Domain,
 	})
 }
 
@@ -129,8 +138,7 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 	}
 	template := templateOf(sb)
 	out := make([]SandboxForkResult, 0, len(children))
-	for i := range children {
-		child := children[i]
+	for _, child := range children {
 		out = append(out, SandboxForkResult{Sandbox: &Sandbox{
 			TemplateID:      template,
 			SandboxID:       publicID(child.SandboxName),
@@ -174,17 +182,27 @@ func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list snapshots")
 		return
 	}
-	out := []SnapshotInfo{}
-	for _, node := range nodes {
-		snaps, err := s.store.Snapshots(r.Context(), node)
-		if err != nil {
-			// One unreachable node must not blank the whole listing.
-			s.opts.Log.Error(err, "e2b list snapshots: node failed", "node", node)
-			continue
-		}
-		for _, snap := range snaps {
-			out = append(out, snapshotInfo(snap))
-		}
+	perNode := make([][]SnapshotInfo, len(nodes))
+	var g errgroup.Group
+	g.SetLimit(maxNodeConcurrency)
+	for i, node := range nodes {
+		g.Go(func() error {
+			snaps, err := s.store.Snapshots(r.Context(), node)
+			if err != nil {
+				// One unreachable node must not blank the whole listing.
+				s.opts.Log.Error(err, "e2b list snapshots: node failed", "node", node)
+				return nil
+			}
+			for _, snap := range snaps {
+				perNode[i] = append(perNode[i], snapshotInfo(snap))
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	out := slices.Concat(perNode...)
+	if out == nil {
+		out = []SnapshotInfo{}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -202,10 +220,27 @@ func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	// Checkpoints are node-local and the id does not name its node, so the
 	// delete is offered to each node; a node that does not hold it reports
 	// success (delete is idempotent), which keeps this safe to fan out.
+	var (
+		g  errgroup.Group
+		ok atomic.Bool
+	)
+	g.SetLimit(maxNodeConcurrency)
 	for _, node := range nodes {
-		if err := s.store.DeleteSnapshot(r.Context(), node, snapshotID); err != nil {
-			s.opts.Log.Error(err, "e2b delete snapshot: node failed", "node", node, "snapshotID", snapshotID)
-		}
+		g.Go(func() error {
+			if err := s.store.DeleteSnapshot(r.Context(), node, snapshotID); err != nil {
+				s.opts.Log.Error(err, "e2b delete snapshot: node failed", "node", node, "snapshotID", snapshotID)
+				return nil
+			}
+			ok.Store(true)
+			return nil
+		})
+	}
+	_ = g.Wait()
+	// Every node failing is an outage, not an idempotent delete of something
+	// already gone, so the caller must not read it as success.
+	if len(nodes) > 0 && !ok.Load() {
+		writeError(w, http.StatusInternalServerError, "failed to delete the snapshot on any node")
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

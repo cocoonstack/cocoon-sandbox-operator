@@ -13,12 +13,6 @@ import (
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
-// TestManagedFieldsTypeConverterResolvesSandbox reproduces the create-path crux
-// that produced "[SHOULD NOT HAPPEN] failed to update managedFields" on every
-// write: the managed-fields TypeConverter must map the Sandbox GVK to a model
-// (via the x-kubernetes-group-version-kind marker), else ObjectToTyped returns
-// NoCorrespondingTypeError. With the old empty OpenAPI this failed; with
-// sandboxOpenAPIDefinitions it must succeed for both Sandbox and SandboxList.
 func TestManagedFieldsTypeConverterResolvesSandbox(t *testing.T) {
 	cfg := NewOpenAPIV3Config()
 	models, err := builder3.BuildOpenAPIDefinitionsForResources(cfg,
@@ -48,17 +42,6 @@ func TestManagedFieldsTypeConverterResolvesSandbox(t *testing.T) {
 	}
 }
 
-// TestEveryServedTypeHasAnOpenAPIModel reproduces a real deployment failure:
-// the action subresources were registered in the Scheme but had no OpenAPI
-// model, and InstallAPIGroup then refused to start the server outright with
-//
-//	unable to get openapi models: cannot find model definition for
-//	io.k8s.apimachinery.pkg.apis.meta.v1.TypeMeta
-//
-// because the subresource bodies embed metav1.TypeMeta and openapinamer
-// resolves them through this map, not the Scheme. A missing model is not a
-// degraded feature — it is a crash loop on rollout, so every served kind must
-// be present here.
 func TestEveryServedTypeHasAnOpenAPIModel(t *testing.T) {
 	defs := sandboxOpenAPIDefinitions(func(path string) spec.Ref { return spec.Ref{} })
 
@@ -95,10 +78,6 @@ func TestEveryServedTypeHasAnOpenAPIModel(t *testing.T) {
 	}
 }
 
-// TestInstallSandboxAPISucceeds is the production startup path: main.go builds
-// a GenericAPIServer and calls InstallSandboxAPI. An incomplete OpenAPI model
-// graph fails HERE, and the binary then crash-loops on rollout — so this must
-// be exercised locally, not discovered in the cluster.
 func TestInstallSandboxAPISucceeds(t *testing.T) {
 	cfg := genericapiserver.NewConfig(Codecs)
 	cfg.EffectiveVersion = apiservercompatibility.DefaultBuildEffectiveVersion()

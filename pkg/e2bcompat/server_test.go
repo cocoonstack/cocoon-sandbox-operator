@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 
@@ -20,9 +20,6 @@ import (
 
 const testKey = "e2b_testkey"
 
-// TestCreateClaimsFromTemplatePool is the core contract: an e2b create is the
-// same node-local claim, keyed on the template the caller asked for, and the
-// response carries the fields the SDK requires.
 func TestCreateClaimsFromTemplatePool(t *testing.T) {
 	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_abc123", Node: "node-a", Token: "tok-1"}}
 	h := newTestServer(t, store, func(o *Options) { o.Domain = "sandbox.example.com" })
@@ -35,9 +32,7 @@ func TestCreateClaimsFromTemplatePool(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	// The published id is the DNS-label-safe rendering of the node's claim id,
-	// not the raw one: the SDK builds "{port}-{sandboxID}.{domain}", and the
-	// claim id's underscore would make that host unresolvable.
+
 	if got.SandboxID != "sb-abc123" {
 		t.Errorf("sandboxID = %q, want the DNS-safe rendering of the claim id", got.SandboxID)
 	}
@@ -50,8 +45,7 @@ func TestCreateClaimsFromTemplatePool(t *testing.T) {
 	if got.Domain != "sandbox.example.com" {
 		t.Errorf("domain = %q, want the configured domain", got.Domain)
 	}
-	// The SDK version-compares envdVersion and kills the sandbox if it cannot
-	// parse it or it is below 0.1.0, so it must always be a real version.
+
 	if got.EnvdVersion == "" {
 		t.Error("envdVersion is empty; the e2b SDK kills the sandbox and throws when it cannot parse this")
 	}
@@ -69,7 +63,6 @@ func TestCreateClaimsFromTemplatePool(t *testing.T) {
 	}
 }
 
-// TestCreateNetworkLane checks e2b's internet flag selects the pool's net axis.
 func TestCreateNetworkLane(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -93,8 +86,6 @@ func TestCreateNetworkLane(t *testing.T) {
 	}
 }
 
-// TestCreateNoWarmCapacityIsRetryable keeps the retryable signal retryable: a
-// drained pool refills asynchronously, so it must not surface as a 500.
 func TestCreateNoWarmCapacityIsRetryable(t *testing.T) {
 	store := &fakeStore{claimErr: scale.ErrNoWarmCapacity}
 	h := newTestServer(t, store)
@@ -120,8 +111,6 @@ func TestCreateRejectsNegativeTimeout(t *testing.T) {
 	}
 }
 
-// TestAuthRequiresAPIKey proves the claim endpoint is closed without the key
-// the SDK presents.
 func TestAuthRequiresAPIKey(t *testing.T) {
 	store := &fakeStore{assign: scale.Assignment{SandboxName: "sb_1", Node: "n"}}
 	h := newTestServer(t, store)
@@ -142,8 +131,6 @@ func TestAuthRequiresAPIKey(t *testing.T) {
 	}
 }
 
-// TestNewServerRefusesOpenByDefault: forgetting to configure a key must fail
-// loud at startup, not silently serve an open claim endpoint.
 func TestNewServerRefusesOpenByDefault(t *testing.T) {
 	if _, err := NewServer(&fakeStore{}, Options{Namespace: "x"}); err == nil {
 		t.Fatal("NewServer accepted no API key without explicit anonymous access")
@@ -160,12 +147,10 @@ func TestHealthNeedsNoKey(t *testing.T) {
 	}
 }
 
-// TestDeleteReleasesTheClaimedID checks release targets the node-local claim id
-// rather than the Kubernetes name — releasing by name would free the wrong VM.
 func TestDeleteReleasesTheClaimedID(t *testing.T) {
 	store := &fakeStore{items: []sandboxv1beta1.Sandbox{
-		liveSandbox("e2b-aaa", "sb_one", "node-a", "img:1", "tok"),
-		liveSandbox("e2b-bbb", "sb_two", "node-b", "img:1", "tok"),
+		liveSandbox("e2b-aaa", "sb_one", "node-a", "img:1"),
+		liveSandbox("e2b-bbb", "sb_two", "node-b", "img:1"),
 	}}
 	h := newTestServer(t, store)
 
@@ -178,7 +163,7 @@ func TestDeleteReleasesTheClaimedID(t *testing.T) {
 }
 
 func TestDeleteUnknownSandboxIs404(t *testing.T) {
-	store := &fakeStore{items: []sandboxv1beta1.Sandbox{liveSandbox("a", "sb_one", "node-a", "i", "t")}}
+	store := &fakeStore{items: []sandboxv1beta1.Sandbox{liveSandbox("a", "sb_one", "node-a", "i")}}
 	h := newTestServer(t, store)
 
 	if w := do(t, h, http.MethodDelete, "/sandboxes/sb_missing", "", testKey); w.Code != http.StatusNotFound {
@@ -189,23 +174,22 @@ func TestDeleteUnknownSandboxIs404(t *testing.T) {
 	}
 }
 
-// TestGetReportsDetail checks the detail shape the SDK decodes on getInfo.
 func TestGetReportsDetail(t *testing.T) {
-	got := getDetail(t, liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04", "tok-9"))
+	got := getDetail(t, liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04"))
 	if got.SandboxID != "sb-one" || got.TemplateID != "registry/rt:24.04" || got.ClientID != "node-a" {
 		t.Errorf("detail = %+v, want the live sandbox's id/template/node", got)
 	}
 	if got.State != StateRunning {
 		t.Errorf("state = %q, want %q", got.State, StateRunning)
 	}
-	// The SDK parses these as dates; empty strings make it produce Invalid Date.
+
 	if got.StartedAt == "" || got.EndAt == "" {
 		t.Errorf("startedAt/endAt = %q/%q, want RFC3339 timestamps", got.StartedAt, got.EndAt)
 	}
 }
 
 func TestGetReportsTheGrantedDeadlineAsEndAt(t *testing.T) {
-	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04", "tok-9")
+	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04")
 	sb.Annotations[scale.DeadlineAnnotation] = "2030-01-02T03:04:05Z"
 	if got := getDetail(t, sb); got.EndAt != "2030-01-02T03:04:05Z" {
 		t.Errorf("endAt = %q, want the granted deadline", got.EndAt)
@@ -213,18 +197,17 @@ func TestGetReportsTheGrantedDeadlineAsEndAt(t *testing.T) {
 }
 
 func TestGetReportsTheDefaultEndAtWithoutADeadline(t *testing.T) {
-	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04", "tok-9")
+	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04")
 	sb.CreationTimestamp = metav1.NewTime(time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC))
 	if got := getDetail(t, sb); got.EndAt != "2030-01-02T03:04:20Z" {
 		t.Errorf("endAt = %q, want startedAt + %ds", got.EndAt, DefaultTimeoutSeconds)
 	}
 }
 
-// TestListReturnsArray: the SDK decodes a bare JSON array, not an object.
 func TestListReturnsArray(t *testing.T) {
 	store := &fakeStore{items: []sandboxv1beta1.Sandbox{
-		liveSandbox("a", "sb_one", "node-a", "i:1", "t"),
-		liveSandbox("b", "sb_two", "node-b", "i:2", "t"),
+		liveSandbox("a", "sb_one", "node-a", "i:1"),
+		liveSandbox("b", "sb_two", "node-b", "i:2"),
 	}}
 	h := newTestServer(t, store)
 
@@ -245,8 +228,6 @@ func TestListReturnsArray(t *testing.T) {
 	}
 }
 
-// TestListEmptyIsArrayNotNull: an empty pool must encode as [], since `null`
-// breaks callers that iterate the result directly.
 func TestListEmptyIsArrayNotNull(t *testing.T) {
 	h := newTestServer(t, &fakeStore{})
 	w := do(t, h, http.MethodGet, "/sandboxes", "", testKey)
@@ -255,10 +236,8 @@ func TestListEmptyIsArrayNotNull(t *testing.T) {
 	}
 }
 
-// TestTimeoutAndRefreshAckLiveSandbox: both verbs confirm the sandbox exists
-// before acknowledging, so a caller never gets an OK for a dead sandbox.
 func TestTimeoutAndRefreshAckLiveSandbox(t *testing.T) {
-	store := &fakeStore{items: []sandboxv1beta1.Sandbox{liveSandbox("a", "sb_one", "node-a", "i", "t")}}
+	store := &fakeStore{items: []sandboxv1beta1.Sandbox{liveSandbox("a", "sb_one", "node-a", "i")}}
 	h := newTestServer(t, store)
 
 	for _, tc := range []struct{ name, path, body string }{
@@ -279,7 +258,6 @@ func TestTimeoutAndRefreshAckLiveSandbox(t *testing.T) {
 	})
 }
 
-// TestErrorBodyCarriesMessage: the SDK surfaces `message` from the envelope.
 func TestErrorBodyCarriesMessage(t *testing.T) {
 	h := newTestServer(t, &fakeStore{})
 	w := do(t, h, http.MethodPost, "/sandboxes", `{}`, testKey)
@@ -292,9 +270,6 @@ func TestErrorBodyCarriesMessage(t *testing.T) {
 	}
 }
 
-// TestLookupUsesClaimIDResolver pins the id-keyed fast path over the real
-// scatter-gather store: both id spellings resolve without a fleet List, other
-// namespaces stay invisible, and a miss is a plain not-found.
 func TestLookupUsesClaimIDResolver(t *testing.T) {
 	src := scale.NewStaticInventorySource()
 	src.Put(&scale.NodeInventory{
@@ -329,14 +304,12 @@ func TestLookupUsesClaimIDResolver(t *testing.T) {
 	}
 }
 
-// TestDetailStateFollowsThePhaseLabel pins the e2b state mapping: a Hibernated
-// phase reports paused, anything else running.
 func TestDetailStateFollowsThePhaseLabel(t *testing.T) {
 	s, err := NewServer(&fakeStore{}, Options{AllowAnonymous: true})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	sb := liveSandbox("sb-1", "sb_0123abcd", "node-a", "img", "tok")
+	sb := liveSandbox("sb-1", "sb_0123abcd", "node-a", "img")
 	if got := s.detailFor(&sb).State; got != StateRunning {
 		t.Fatalf("running sandbox state = %q, want %q", got, StateRunning)
 	}
@@ -346,8 +319,20 @@ func TestDetailStateFollowsThePhaseLabel(t *testing.T) {
 	}
 }
 
-// fakeStore records what the compat layer asked of the store and replays canned
-// answers, so the tests assert the translation rather than the node behavior.
+func TestDeleteWithoutAnOwningNodeIs500(t *testing.T) {
+	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "img:1")
+	sb.Status.NodeName = ""
+	store := &fakeStore{items: []sandboxv1beta1.Sandbox{sb}}
+	h := newTestServer(t, store)
+
+	if w := do(t, h, http.MethodDelete, "/sandboxes/sb_one", "", testKey); w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: a 204 would report an unreleased sandbox as freed", w.Code)
+	}
+	if store.releasedID != "" {
+		t.Errorf("released %q with no owning node", store.releasedID)
+	}
+}
+
 type fakeStore struct {
 	claimPool scale.PoolKey
 	claimNS   string
@@ -375,6 +360,18 @@ func (f *fakeStore) Get(context.Context, string, string) (*sandboxv1beta1.Sandbo
 	return nil, nil
 }
 
+func (f *fakeStore) GetByClaimID(_ context.Context, _, _ string, match func(string) bool) (*sandboxv1beta1.Sandbox, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	for i := range f.items {
+		if match(f.items[i].Annotations[scale.ClaimIDAnnotation]) {
+			return &f.items[i], nil
+		}
+	}
+	return nil, k8serrors.NewNotFound(sandboxv1beta1.Resource("sandboxes"), "")
+}
+
 func (f *fakeStore) Watch(context.Context, scale.ListOptions) (watch.Interface, error) {
 	return nil, nil
 }
@@ -392,8 +389,6 @@ func (f *fakeStore) Release(_ context.Context, node, id string) error {
 	return f.releaseErr
 }
 
-// The lifecycle verbs are not exercised by these tests; they satisfy the
-// SandboxStore contract so the fake stays a drop-in.
 func (f *fakeStore) Pause(context.Context, string, string) error { return nil }
 
 func (f *fakeStore) Resume(context.Context, string, string) error { return nil }
@@ -409,14 +404,6 @@ func (f *fakeStore) Snapshot(context.Context, string, string, string) (scale.Sna
 func (f *fakeStore) Snapshots(context.Context, string) ([]scale.Snapshot, error) { return nil, nil }
 
 func (f *fakeStore) DeleteSnapshot(context.Context, string, string) error { return nil }
-
-func (f *fakeStore) ClaimSnapshot(context.Context, string, string, int) (scale.Assignment, error) {
-	return scale.Assignment{}, nil
-}
-
-func (f *fakeStore) Promote(context.Context, string, string, string) (scale.PoolKey, error) {
-	return scale.PoolKey{}, nil
-}
 
 func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
 	return scale.SandboxStats{}, nil
@@ -465,18 +452,14 @@ func do(t *testing.T, h http.Handler, method, path, body, key string) *httptest.
 	return w
 }
 
-// liveSandbox builds a sandbox as the store's scatter-gather read reports it.
-func liveSandbox(name, claimID, node, image, token string) sandboxv1beta1.Sandbox {
+func liveSandbox(name, claimID, node, template string) sandboxv1beta1.Sandbox {
 	sb := sandboxv1beta1.Sandbox{
 		Name:              name,
 		Namespace:         "sandboxes",
 		CreationTimestamp: metav1.Now(),
-		Annotations: map[string]string{
-			scale.ClaimIDAnnotation: claimID,
-			tokenAnnotation:         token,
-		},
+		Labels:            map[string]string{scale.NodeLabel: node, scale.TemplateLabel: template},
+		Annotations:       map[string]string{scale.ClaimIDAnnotation: claimID},
 	}
-	sb.Spec.PodTemplate.Spec.Containers = []corev1.Container{{Name: "c", Image: image}}
 	sb.Status.NodeName = node
 	return sb
 }

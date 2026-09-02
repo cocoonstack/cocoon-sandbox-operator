@@ -23,27 +23,20 @@ import (
 
 // ApplySandboxSecureDefaults applies the controller's "Secure by Default" logic to a PodSpec.
 func ApplySandboxSecureDefaults(template *extensionsv1beta1.SandboxTemplate, spec *corev1.PodSpec) {
-	// Enforce a secure-by-default policy by disabling the automatic mounting
-	// of the service account token, adhering to security best practices for
-	// sandboxed environments.
 	if spec.AutomountServiceAccountToken == nil {
-		automount := false
-		spec.AutomountServiceAccountToken = &automount
+		spec.AutomountServiceAccountToken = new(false)
 	}
 
-	// Determine if we are in "Secure By Default" mode
 	management := template.Spec.NetworkPolicyManagement
 	isManaged := management == "" || management == extensionsv1beta1.NetworkPolicyManagementManaged
 	isSecureByDefault := isManaged && template.Spec.NetworkPolicy == nil
 
-	// To prevent internal DNS enumeration while still allowing public domain resolution,
-	// we explicitly override the Pod's DNS config to use external public resolvers.
-	// We only inject this if using the strict "Secure by Default" policy. If the user
-	// provides custom rules or is Unmanaged, we leave DNS alone for air-gapped/proxy compatibility.
+	// Public resolvers block internal DNS enumeration; custom rules or Unmanaged
+	// keep the cluster's own DNS, which air-gapped and proxied clusters need.
 	if isSecureByDefault && spec.DNSPolicy == "" {
 		spec.DNSPolicy = corev1.DNSNone
 		spec.DNSConfig = &corev1.PodDNSConfig{
-			Nameservers: []string{"8.8.8.8", "1.1.1.1"}, // Google & Cloudflare public DNS
+			Nameservers: []string{"8.8.8.8", "1.1.1.1"},
 		}
 	}
 }

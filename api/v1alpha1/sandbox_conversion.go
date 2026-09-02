@@ -54,7 +54,7 @@ func (s *Sandbox) ConvertTo(dstRaw conversion.Hub) error {
 	state.Status.Replicas = s.Status.Replicas
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
-		return fmt.Errorf("failed to marshal v1alpha1 Sandbox state: %w", err)
+		return fmt.Errorf("marshal v1alpha1 sandbox state: %w", err)
 	}
 	dst.Annotations[v1alpha1SandboxStateAnnotation] = string(stateJSON)
 
@@ -84,7 +84,7 @@ func (s *Sandbox) ConvertFrom(srcRaw conversion.Hub) error {
 
 		var original v1alpha1State
 		if err := json.Unmarshal([]byte(stateJSON), &original); err != nil {
-			return fmt.Errorf("failed to unmarshal v1alpha1 Sandbox state: %w", err)
+			return fmt.Errorf("unmarshal v1alpha1 sandbox state: %w", err)
 		}
 
 		// Restore replicas field from original if OperatingMode matches original intent
@@ -119,7 +119,6 @@ func ConvertSpecTo(src *SandboxSpec, dst *v1beta1.SandboxSpec) {
 
 	ConvertLifecycleTo(&src.Lifecycle, &dst.Lifecycle)
 
-	// Replicas -> OperatingMode
 	if src.Replicas != nil && *src.Replicas == 0 {
 		dst.OperatingMode = v1beta1.SandboxOperatingModeSuspended
 	} else {
@@ -143,7 +142,6 @@ func ConvertSpecFrom(src *v1beta1.SandboxSpec, dst *SandboxSpec) {
 
 	ConvertLifecycleFrom(&src.Lifecycle, &dst.Lifecycle)
 
-	// OperatingMode -> Replicas
 	if src.OperatingMode == v1beta1.SandboxOperatingModeSuspended {
 		dst.Replicas = new(int32(0))
 	} else {

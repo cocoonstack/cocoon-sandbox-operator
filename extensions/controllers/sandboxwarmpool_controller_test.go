@@ -144,7 +144,6 @@ func TestReconcilePool(t *testing.T) {
 			_, err = r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
-			// Verify final state - count sandboxes with correct warm pool label
 			list := &sandboxv1beta1.SandboxList{}
 			err = r.List(ctx, list, &client.ListOptions{Namespace: poolNamespace})
 			require.NoError(t, err)
@@ -373,11 +372,9 @@ func TestPoolLabelValueInIntegration(t *testing.T) {
 			require.Equal(t, sandboxv1beta1.SandboxLaunchTypeWarm, sb.Labels[sandboxv1beta1.SandboxLaunchTypeLabel],
 				"sandbox %s should have warm launch type label", sb.Name)
 
-			// Verify pod template labels are propagated into the sandbox's pod template
 			require.Equal(t, "2.0", sb.Spec.PodTemplate.ObjectMeta.Labels["version"])
 			require.Equal(t, "from-podtemplate", sb.Spec.PodTemplate.ObjectMeta.Labels["pod-label"])
 
-			// Verify pod template annotations
 			require.Equal(t, "from-podtemplate", sb.Spec.PodTemplate.ObjectMeta.Annotations["pod-annotation"])
 			require.Equal(t, "true", sb.Spec.PodTemplate.ObjectMeta.Annotations[warmPoolEvictionAnnotation])
 		}
@@ -747,12 +744,10 @@ func TestReconcilePoolGCStuckSandboxes(t *testing.T) {
 		_, err := r.reconcilePool(ctx, warmPool)
 		require.NoError(t, err)
 
-		// The stuck sandbox should be deleted and replaced
 		list := &sandboxv1beta1.SandboxList{}
 		err = r.List(ctx, list, &client.ListOptions{Namespace: poolNamespace})
 		require.NoError(t, err)
 
-		// Should have: 1 healthy (kept) + 1 newly created replacement = 2
 		poolCount := int32(0)
 		for _, sb := range list.Items {
 			if sb.Labels[warmPoolSandboxLabel] == poolNameHash {
@@ -777,7 +772,6 @@ func TestReconcilePoolGCStuckSandboxes(t *testing.T) {
 		_, err := r.reconcilePool(ctx, warmPool)
 		require.NoError(t, err)
 
-		// Both should be kept (one healthy, one still within grace period)
 		list := &sandboxv1beta1.SandboxList{}
 		err = r.List(ctx, list, &client.ListOptions{Namespace: poolNamespace})
 		require.NoError(t, err)
@@ -823,7 +817,6 @@ func TestReconcilePool_TemplateUpdateRollout(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create initial SandboxTemplate
 			template := &extensionsv1beta1.SandboxTemplate{
 				APIVersion: extensionsv1beta1.GroupVersion.String(),
 				Kind:       "SandboxTemplate",
@@ -867,15 +860,12 @@ func TestReconcilePool_TemplateUpdateRollout(t *testing.T) {
 
 			ctx := t.Context()
 
-			// Initial reconciliation to create the sandboxes
 			_, err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
-			// Get initial hash label
 			template, initialHash, err := r.fetchTemplateAndHash(ctx, warmPool)
 			require.NoError(t, err)
 
-			// Verify sandboxes exist with initial image and hash
 			sandboxes := &sandboxv1beta1.SandboxList{}
 			err = r.List(ctx, sandboxes, client.InNamespace(poolNamespace))
 			require.NoError(t, err)
@@ -885,51 +875,44 @@ func TestReconcilePool_TemplateUpdateRollout(t *testing.T) {
 				require.Equal(t, initialHash, sb.Labels[sandboxv1beta1.SandboxTemplateHashLabel], "Sandbox should have initial sandbox blueprint hash label")
 			}
 
-			// Update the SandboxTemplate content
 			updatedTemplate := template.DeepCopy()
 			updatedTemplate.Spec.PodTemplate.Spec.Containers[0].Image = "image-v2"
 			err = r.Update(ctx, updatedTemplate)
 			require.NoError(t, err)
 
-			// Get new expected hash label
 			_, updatedHash, err := r.fetchTemplateAndHash(ctx, warmPool)
 			require.NoError(t, err)
 			require.NotEqual(t, initialHash, updatedHash, "Hashes should differ after template update")
 
-			// Reconcile again to trigger rollout (or lack thereof)
 			_, err = r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
-			// Verify state after update
 			err = r.List(ctx, sandboxes, client.InNamespace(poolNamespace))
 			require.NoError(t, err)
 			require.Len(t, sandboxes.Items, int(replicas))
 
 			if tc.expectedUpdatedImage {
-				// For Recreate strategy, all should be updated
+
 				for _, sb := range sandboxes.Items {
 					require.Equal(t, "image-v2", sb.Spec.PodTemplate.Spec.Containers[0].Image, "Sandbox should have updated image")
 					require.Equal(t, updatedHash, sb.Labels[sandboxv1beta1.SandboxTemplateHashLabel], "Sandbox should have updated sandbox blueprint hash label")
 				}
 				t.Log("Verified: All sandboxes updated immediately with Recreate strategy")
 			} else {
-				// For OnReplenish (default), all should still be v1
+
 				for _, sb := range sandboxes.Items {
 					require.Equal(t, "image-v1", sb.Spec.PodTemplate.Spec.Containers[0].Image, "Sandbox should retain original image")
 					require.Equal(t, initialHash, sb.Labels[sandboxv1beta1.SandboxTemplateHashLabel], "Sandbox should retain original sandbox blueprint hash label")
 				}
 				t.Log("Verified: Sandboxes retained original image after update with OnReplenish strategy")
 
-				// Now manually delete one sandbox to test replenishment
 				sbToDelete := &sandboxes.Items[0]
 				err = r.Delete(ctx, sbToDelete)
 				require.NoError(t, err)
 
-				// Reconcile to trigger replenishment
 				_, err = r.reconcilePool(ctx, warmPool)
 				require.NoError(t, err)
 
-				// Verify that we have 2 sandboxes: one old (v1) and one new (v2)
 				err = r.List(ctx, sandboxes, client.InNamespace(poolNamespace))
 				require.NoError(t, err)
 				require.Len(t, sandboxes.Items, int(replicas))
@@ -960,7 +943,6 @@ func TestReconcilePool_TemplateRefUpdate_SameSpec(t *testing.T) {
 	templateName2 := "test-template-2"
 	replicas := int32(2)
 
-	// Create initial SandboxTemplate
 	template1 := &extensionsv1beta1.SandboxTemplate{
 		APIVersion: extensionsv1beta1.GroupVersion.String(),
 		Kind:       "SandboxTemplate",
@@ -1004,7 +986,6 @@ func TestReconcilePool_TemplateRefUpdate_SameSpec(t *testing.T) {
 
 	ctx := t.Context()
 
-	// Initial reconcile
 	_, err := r.reconcilePool(ctx, warmPool)
 	require.NoError(t, err)
 
@@ -1018,7 +999,6 @@ func TestReconcilePool_TemplateRefUpdate_SameSpec(t *testing.T) {
 		initialSandboxNames[sb.Name] = true
 	}
 
-	// Create new SandboxTemplate with SAME spec
 	template2 := &extensionsv1beta1.SandboxTemplate{
 		APIVersion: extensionsv1beta1.GroupVersion.String(),
 		Kind:       "SandboxTemplate",
@@ -1029,25 +1009,22 @@ func TestReconcilePool_TemplateRefUpdate_SameSpec(t *testing.T) {
 	err = r.Create(ctx, template2)
 	require.NoError(t, err)
 
-	// Update WarmPool to point to template2
 	warmPool.Spec.TemplateRef.Name = templateName2
 	err = r.Update(ctx, warmPool)
 	require.NoError(t, err)
 
-	// Reconcile again to trigger rollout
 	_, err = r.reconcilePool(ctx, warmPool)
 	require.NoError(t, err)
 
-	// Verify state after update
 	err = r.List(ctx, sandboxes, client.InNamespace(poolNamespace))
 	require.NoError(t, err)
 	require.Len(t, sandboxes.Items, int(replicas))
 
 	for _, sb := range sandboxes.Items {
-		// Sandboxes should be recreated (new names) because TemplateRef changed
+
 		require.False(t, initialSandboxNames[sb.Name], "Sandbox should have been recreated with new name")
 		require.Equal(t, hash.Name(templateName2), sb.Labels[sandboxTemplateRefHash], "Sandbox should have updated template ref hash label")
-		// The pod spec is identical, so the image remains image-v1
+
 		require.Equal(t, "image-v1", sb.Spec.PodTemplate.Spec.Containers[0].Image, "Sandbox should retain original image since spec is identical")
 	}
 }
@@ -1103,7 +1080,7 @@ func TestComparePodSpecsNormalization(t *testing.T) {
 		templateSpec   corev1.PodSpec
 		actualSpec     corev1.PodSpec
 		secureByDef    bool
-		expectedResult bool // true if they should be considered equal
+		expectedResult bool
 	}{
 		{
 			name: "Identical specs should match",
@@ -1182,10 +1159,8 @@ func TestComparePodSpecsNormalization(t *testing.T) {
 				template.Spec.NetworkPolicyManagement = extensionsv1beta1.NetworkPolicyManagementUnmanaged
 			}
 
-			// We need to apply the SAME defaults to the 'actual' spec in the test
-			// if we want to simulate a sandbox that was created with those defaults.
 			actualSpecCopy := tt.actualSpec.DeepCopy()
-			// Only apply if it's NOT a drift test case where we WANT them to be different
+
 			if tt.expectedResult {
 				ApplySandboxSecureDefaults(template, actualSpecCopy)
 			}
@@ -1207,7 +1182,6 @@ func TestReconcilePool_TemplateUpdate_DNSPolicy(t *testing.T) {
 	ctx := t.Context()
 	scheme := newTestScheme()
 
-	// Create initial SandboxTemplate with default DNS
 	template := &extensionsv1beta1.SandboxTemplate{
 		Name:      templateName,
 		Namespace: poolNamespace,
@@ -1244,11 +1218,9 @@ func TestReconcilePool_TemplateUpdate_DNSPolicy(t *testing.T) {
 		MaxBatchSize: sandboxCreateDeleteMaxBatchSize,
 	}
 
-	// Initial reconcile to create sandboxes
 	_, err := r.reconcilePool(ctx, warmPool)
 	require.NoError(t, err)
 
-	// Verify initial state
 	sandboxes := &sandboxv1beta1.SandboxList{}
 	err = r.List(ctx, sandboxes, client.InNamespace(poolNamespace))
 	require.NoError(t, err)
@@ -1257,17 +1229,14 @@ func TestReconcilePool_TemplateUpdate_DNSPolicy(t *testing.T) {
 		require.Equal(t, corev1.DNSDefault, sb.Spec.PodTemplate.Spec.DNSPolicy)
 	}
 
-	// Update SandboxTemplate to change DNSPolicy
 	updatedTemplate := template.DeepCopy()
 	updatedTemplate.Spec.PodTemplate.Spec.DNSPolicy = corev1.DNSClusterFirst
 	err = r.Update(ctx, updatedTemplate)
 	require.NoError(t, err)
 
-	// Reconcile again, should trigger rollout (deletion and recreation)
 	_, err = r.reconcilePool(ctx, warmPool)
 	require.NoError(t, err)
 
-	// Verify that sandboxes now have the updated DNSPolicy
 	err = r.List(ctx, sandboxes, client.InNamespace(poolNamespace))
 	require.NoError(t, err)
 	require.Len(t, sandboxes.Items, int(replicas))
@@ -1304,8 +1273,6 @@ func TestIsSandboxStale_OrphanedSandboxVetting(t *testing.T) {
 	r := &SandboxWarmPoolReconciler{Scheme: scheme}
 	vettedHashes := make(map[string]bool)
 
-	// Case 1: Orphaned sandbox with matching hash label but modified PodSpec (Spoofed).
-	// Should be detected as stale because unowned sandboxes must undergo full vetting.
 	spoofedSpec := template.Spec.PodTemplate.Spec.DeepCopy()
 	spoofedSpec.Containers[0].Image = "malicious-image"
 
@@ -1323,8 +1290,6 @@ func TestIsSandboxStale_OrphanedSandboxVetting(t *testing.T) {
 	isStaleSpoofed := r.isSandboxStale(ctx, spoofedOrphan, template, SandboxTemplateRefHash(template.Name), currentSandboxBlueprintHash, vettedHashes)
 	require.True(t, isStaleSpoofed, "Orphaned sandbox with spoofed hash but modified PodSpec should be stale")
 
-	// Case 2: Orphaned sandbox with matching hash label and genuine/fully vetted PodSpec.
-	// Should be evaluated as fresh (not stale) after passing full semantic comparison.
 	genuineSpec := template.Spec.PodTemplate.Spec.DeepCopy()
 	ApplySandboxSecureDefaults(template, genuineSpec)
 
@@ -1374,17 +1339,17 @@ func TestSlowStartBatch(t *testing.T) {
 			count:             14,
 			initialBatchSize:  1,
 			failAtIndices:     new(5),
-			expectedSuccess:   6, // index 0, 1, 2, 3, 4, and 6 succeeds, 5 fails - 6 successful calls
+			expectedSuccess:   6,
 			expectError:       true,
-			expectedCallCount: 7, // 1 + 2 + 4 = 7 calls in total.
+			expectedCallCount: 7,
 			expectedErrMsgs:   []string{"injected error at idx 5"},
 		},
 		{
 			name:               "context canceled in middle of batch",
 			count:              14,
 			initialBatchSize:   1,
-			cancelContextAtIdx: new(2), // cancels during batch 2 (indices 1, 2)
-			expectedSuccess:    3,      // indices 0, 1, 2 complete successfully before cancellation aborts batch 3
+			cancelContextAtIdx: new(2),
+			expectedSuccess:    3,
 			expectError:        true,
 			expectedCallCount:  3,
 			expectedErrMsgs:    []string{"context canceled"},
@@ -1706,7 +1671,6 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 
 			ctx := t.Context()
 
-			// Initial reconcile
 			_, err := r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
@@ -1715,14 +1679,11 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, sandboxes.Items, int(replicas), "expected warm sandbox after initial reconcile")
 
-			// Capture initial sandboxblueprint hash
 			_, initialHash, err := r.fetchTemplateAndHash(ctx, warmPool)
 			require.NoError(t, err)
 
-			// Capture initial sandbox names to verify recreation later
 			initialName := sandboxes.Items[0].Name
 
-			// Apply the template drift
 			if tt.updateFn != nil {
 				updatedTemplate := template.DeepCopy()
 				tt.updateFn(updatedTemplate)
@@ -1730,14 +1691,12 @@ func TestReconcilePool_TemplateUpdateRecreate(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			// Capture updated sandbox blueprint hash after template update
 			_, updatedHash, err := r.fetchTemplateAndHash(ctx, warmPool)
 			require.NoError(t, err)
 			if tt.expectRecreation {
 				require.NotEqual(t, initialHash, updatedHash, "sandbox blueprint hash should change after template update")
 			}
 
-			// Recreate strategy should delete stale sandbox and create a fresh one
 			_, err = r.reconcilePool(ctx, warmPool)
 			require.NoError(t, err)
 
@@ -2026,10 +1985,6 @@ func TestCompareSandboxBlueprint(t *testing.T) {
 	}
 }
 
-// TestSandboxBlueprintFieldsAreCompared verifies that compareSandboxBlueprint()
-// accounts for all fields in the SandboxBlueprint struct. A field missing from the
-// comparison logic is not tracked for drift, so a warm sandbox will not be detected
-// as stale when that field changes.
 func TestSandboxBlueprintFieldsAreCompared(t *testing.T) {
 	expectedFields := []string{"PodTemplate", "VolumeClaimTemplates", "Service"}
 
@@ -2049,8 +2004,6 @@ func TestSandboxBlueprintFieldsAreCompared(t *testing.T) {
 }
 
 func TestNewPoolSandboxesCarryOnlyTheRenamedHashLabel(t *testing.T) {
-	// The write path for the pre-rename label is retired; only objects created
-	// before the rename may still carry it, and they drain as the pool recycles.
 	r := &SandboxWarmPoolReconciler{Scheme: newScheme(t)}
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
 		Name: "p", Namespace: "default",
@@ -2073,7 +2026,6 @@ func TestNewPoolSandboxesCarryOnlyTheRenamedHashLabel(t *testing.T) {
 	}
 }
 
-// Create a test scheme with extensions types registered.
 func newTestScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -2101,7 +2053,7 @@ func createPoolSandbox(poolName, namespace, poolNameHash string, template *exten
 		templateRefHash = hash.Name(template.Name)
 		podSpec = *template.Spec.PodTemplate.Spec.DeepCopy()
 		ApplySandboxSecureDefaults(template, &podSpec)
-		// If template has a version label, we could use it as part of the hash placeholder
+
 		if v, ok := template.Spec.PodTemplate.ObjectMeta.Labels["version"]; ok {
 			podTemplateHash = "pod-hash-" + v
 			sandboxBlueprintHash = "blueprint-hash-" + v
@@ -2113,7 +2065,7 @@ func createPoolSandbox(poolName, namespace, poolNameHash string, template *exten
 			sandboxBlueprintHash = hash.Name(string(sandboxBlueprintJSON))
 		}
 	} else {
-		// Fallback for tests that don't provide a template
+
 		podSpec = corev1.PodSpec{
 			Containers: []corev1.Container{
 				{

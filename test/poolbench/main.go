@@ -96,7 +96,6 @@ func main() {
 	ensureNS(ctx)
 	ensureTemplate(ctx)
 
-	// ---- Phase A: pool fill throughput ----
 	fill := fillPool(ctx, *poolSize)
 	result["fill"] = fill
 	fmt.Printf("[fill] target=%d reachedReady=%d in %.1fs -> %.2f ready/s; createToReady p50=%.0fms p95=%.0fms\n",
@@ -112,7 +111,6 @@ func main() {
 	// Gate: the pool must be fully warm and steady, else claims race replenishment.
 	waitPoolStable(ctx, *poolSize, 120)
 
-	// ---- Phase B: warm-claim latency ----
 	claimRes := claimLatency(ctx, *claims, *claimConc)
 	result["claim"] = claimRes
 	fmt.Printf("[claim] n=%d conc=%d warmHits=%d succ=%.1f%% latency p50=%.0fms p95=%.0fms p99=%.0fms max=%.0fms\n",

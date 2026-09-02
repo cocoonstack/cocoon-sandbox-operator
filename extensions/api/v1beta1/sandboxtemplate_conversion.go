@@ -14,5 +14,4 @@
 
 package v1beta1
 
-// Hub marks SandboxTemplate as a conversion Hub.
 func (*SandboxTemplate) Hub() {}

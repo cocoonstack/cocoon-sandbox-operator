@@ -20,11 +20,6 @@ import (
 
 const testImage = "ghcr.io/cocoonstack/sandbox/rt@sha256:deadbeef"
 
-// TestReconcileDistributesAndMatchesPoolKey pins the two load-bearing invariants:
-// (1) a SandboxWarmPool's replicas are spread across all nodes summing to EXACTLY
-// replicas, and (2) the pool key the driver sets is byte-identical to what the
-// aggregated apiserver derives for a Sandbox with the same image — so a Create
-// always finds the warm capacity (the G5 fix). A drift here means perpetual 503s.
 func TestReconcileDistributesAndMatchesPoolKey(t *testing.T) {
 	d, setter, inv, kube := newTestDriver(t, warmPool("p", 100), template())
 	putNodes(inv, 26)
@@ -33,7 +28,6 @@ func TestReconcileDistributesAndMatchesPoolKey(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	// Exactly 26 nodes were PUT, summing to exactly 100, spread evenly.
 	if len(setter.byAddr) != 26 {
 		t.Fatalf("PUT %d nodes, want 26", len(setter.byAddr))
 	}
@@ -63,8 +57,6 @@ func TestReconcileDistributesAndMatchesPoolKey(t *testing.T) {
 		t.Fatalf("uneven spread: min=%d max=%d", minWarm, maxWarm)
 	}
 
-	// Status is written back from the warm each node reported (0 here — targets
-	// accepted, nothing refilled yet).
 	var got extv1beta1.SandboxWarmPool
 	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: "ns", Name: "p"}, &got); err != nil {
 		t.Fatalf("get pool: %v", err)
@@ -74,12 +66,10 @@ func TestReconcileDistributesAndMatchesPoolKey(t *testing.T) {
 	}
 }
 
-// TestReconcileWritesWarmStatus verifies status reflects the live warm each node
-// reports in its PUT response.
 func TestReconcileWritesWarmStatus(t *testing.T) {
 	d, setter, inv, kube := newTestDriver(t, warmPool("p", 8), template())
 	key := scale.PoolKeyFor([]corev1.Container{{Image: testImage}}, "")
-	// Two nodes each already reporting 4 warm of the pool's key → status 8.
+
 	for _, name := range []string{"a", "b"} {
 		inv.Put(&scale.NodeInventory{
 			Name:    name,
@@ -101,24 +91,19 @@ func TestReconcileWritesWarmStatus(t *testing.T) {
 	}
 }
 
-// TestStatusPrefersPutResponseOverStaleInventory pins WHY status is sourced from
-// the PUT response: NodeInventory is published on its own cadence (30s by
-// default) and is read before this tick's apply, so a fill in progress reads
-// low. Sampling the response instead makes the reported total as fresh as the
-// resync interval — that equality is what the 5s sampling period rests on.
 func TestStatusPrefersPutResponseOverStaleInventory(t *testing.T) {
 	d, setter, inv, kube := newTestDriver(t, warmPool("p", 20), template())
 	key := scale.PoolKeyFor([]corev1.Container{{Image: testImage}}, "")
 	for _, name := range []string{"a", "b"} {
 		addr := "10.0.0." + name + ":7777"
-		// Inventory still carries the pre-fill snapshot: 4 warm per node.
+
 		inv.Put(&scale.NodeInventory{
 			Name:    name,
 			Node:    name,
 			Address: addr,
 			Pools:   []extv1beta1.PoolCapacity{{Template: key.Template, Net: key.Net, Size: key.Size, Warm: 4, Target: 10}},
 		})
-		// The node itself now reports 7 — the truth as of this tick.
+
 		setter.reportWarm(addr, 7)
 	}
 	if err := d.reconcileOnce(t.Context()); err != nil {
@@ -133,9 +118,6 @@ func TestStatusPrefersPutResponseOverStaleInventory(t *testing.T) {
 	}
 }
 
-// TestStatusFallsBackToInventoryWhenPutFails pins that a node the driver could
-// not reach keeps contributing its last known inventory warm, so one unreachable
-// node cannot make the fleet total collapse toward zero.
 func TestStatusFallsBackToInventoryWhenPutFails(t *testing.T) {
 	d, setter, inv, kube := newTestDriver(t, warmPool("p", 20), template())
 	key := scale.PoolKeyFor([]corev1.Container{{Image: testImage}}, "")
@@ -162,11 +144,7 @@ func TestStatusFallsBackToInventoryWhenPutFails(t *testing.T) {
 	}
 }
 
-// TestTwoPoolsSameKeyAggregate pins that two SandboxWarmPools resolving to the
-// same pool key produce ONE spec per node with SUMMED warm — sandboxd rejects a
-// PUT that repeats a key ("duplicate pool"), which silently stalled every node.
 func TestTwoPoolsSameKeyAggregate(t *testing.T) {
-	// Both pools reference the same template "tpl" → identical key.
 	d, setter, inv, _ := newTestDriver(t, warmPool("p1", 3), warmPool("p2", 5), template())
 	putNodes(inv, 2)
 	if err := d.reconcileOnce(t.Context()); err != nil {
@@ -174,8 +152,7 @@ func TestTwoPoolsSameKeyAggregate(t *testing.T) {
 	}
 	sum := 0
 	for addr, specs := range setter.byAddr {
-		// The load-bearing invariant: ONE spec per node (keys aggregated, no
-		// duplicate the PUT would reject), and every spec carries the shared key.
+
 		if len(specs) != 1 {
 			t.Fatalf("node %s got %d specs, want 1 aggregated (no duplicate key): %+v", addr, len(specs), specs)
 		}
@@ -184,14 +161,12 @@ func TestTwoPoolsSameKeyAggregate(t *testing.T) {
 		}
 		sum += specs[0].Warm
 	}
-	// p1(3) + p2(5) summed across the fleet = 8, regardless of per-node rounding.
+
 	if sum != 8 {
 		t.Fatalf("fleet warm total = %d, want 8 (3+5 summed)", sum)
 	}
 }
 
-// TestDrainOnZeroReplicas: replicas=0 sets every node's target to 0 (the
-// control-plane drain — kubectl scale to 0 or delete recycles the pool).
 func TestDrainOnZeroReplicas(t *testing.T) {
 	d, setter, inv, _ := newTestDriver(t, warmPool("p", 0), template())
 	putNodes(inv, 3)
@@ -216,8 +191,6 @@ func TestApplyBoundsEachNodeCall(t *testing.T) {
 	}
 }
 
-// BenchmarkReconcileOnce measures one global driver pass — the cost of every
-// wake-up, spurious or not — at the deployed fleet shape (26 nodes, 4 pools).
 func BenchmarkReconcileOnce(b *testing.B) {
 	objs := []client.Object{template()}
 	for i := range 4 {
@@ -234,20 +207,16 @@ func BenchmarkReconcileOnce(b *testing.B) {
 	}
 }
 
-// fakeSetter records the last pools set per node address and plays back the warm
-// counts a node reports in its PUT response — the driver's status source.
 type fakeSetter struct {
 	mu     sync.Mutex
 	byAddr map[string][]sandboxd.PoolSpec
-	// warm is the warm count each node echoes per pool; absent means 0 (target
-	// accepted, nothing filled yet).
+
 	warm map[string]int
-	// failAddr, when set, makes that node's PUT fail.
+
 	failAddr    string
 	sawDeadline bool
 }
 
-// reportWarm makes addr answer every PUT reporting n warm for each pool it holds.
 func (f *fakeSetter) reportWarm(addr string, n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -274,14 +243,13 @@ func (n *fakeNode) SetPools(ctx context.Context, pools []sandboxd.PoolSpec) (*sa
 		return nil, errors.New("node unreachable")
 	}
 	n.parent.byAddr[n.addr] = pools
-	// Mirror real sandboxd: the response echoes every pool the node now holds,
-	// each with its live warm count.
+
 	info := &sandboxd.NodeInfo{}
 	for _, p := range pools {
 		info.Pools = append(info.Pools, sandboxd.NodePool{
 			Key:  sandboxd.PoolKey{Template: p.Template, Net: p.Net, Size: p.Size},
 			Warm: n.parent.warm[n.addr],
-			// Target echoes the requested warm watermark.
+
 			Target: p.Warm,
 		})
 	}

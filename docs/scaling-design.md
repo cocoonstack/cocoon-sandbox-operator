@@ -181,7 +181,7 @@ type NodeInventory struct {
     metav1.TypeMeta   `json:",inline"`
     metav1.ObjectMeta `json:"metadata,omitempty"`
     Node    string           `json:"node"`
-    Entries []InventoryEntry `json:"entries"` // {name, id, phase, claimRef, addr, deadline}
+    Entries []InventoryEntry `json:"entries"` // {name, id, phase, template, claimRef, addr, deadline}
 }
 ```
 
@@ -213,10 +213,12 @@ keeps the bias toward warm capacity while spreading a burst across the fleet,
 and a stale pick still costs at most one gossip redirect inside sandboxd, so
 correctness is unchanged.
 
-The watch path makes the same trade in the other direction. Re-deriving the
-fleet view is `O(nodes × sandboxes)` — 40 ms at 200 nodes and 50k sandboxes —
-so a watch with nothing to report stretches its poll up to 8× the base interval
-and snaps back to it on the first observed change.
+The watch path makes the opposite trade. Re-deriving the fleet view is
+`O(nodes × sandboxes)` — measured at 124 ms for the list and 173 ms for a full
+poll tick at 200 nodes and 50k sandboxes — yet the poll cadence is fixed on
+purpose: a widened interval would let a sandbox created and deleted inside the
+gap produce neither an Added nor a Deleted event. One watcher per fleet is the
+supported shape.
 
 ### L3 remaining follow-up: read after write without published inventory
 
@@ -235,21 +237,21 @@ lifecycle verb issued inside that window answers `404`. Callers work around it
 by polling until visible — which is what `examples/lifecycle` does — so
 "create, then immediately pause" costs half a minute of polling.
 
-**It is still `O(total inventory entries)` CPU on a miss.** The fast path avoids
-materializing unrelated `Sandbox` objects, but finding the owner without an
-index still compares entries across the fleet. That scan, rather than heap
-growth from full-list synthesis, is the remaining scale constraint.
+**A first lookup is still `O(total inventory entries)` CPU.** An owning-node
+index now answers a repeat lookup from one node's inventory: measured at 200
+nodes × 2000 sandboxes, `Get` fell from 2.49 ms / 36 MB to 39 µs / 217 KB per
+call. A first lookup, or one whose index entry was evicted, still compares
+entries across the fleet.
 
 Both fall out of the same omission: `Claim` already returns the node and the
 claim id — the e2b create response even hands the node back to the client as
 `clientID` — and a lifecycle verb needs nothing else. The plan keeps that
 routing information instead of re-deriving it:
 
-- **A. Claim-time index.** Record `sandboxID → (node, claimID)` when the claim
-  is made, consulted before the read view. Bound it with an LRU so memory is a
-  fixed budget rather than a function of load: measured 206 B/entry, so a
-  200 k-entry cap is ~31 MB. Steady-state occupancy is `claim rate × TTL`, far
-  below the cap — 1 M sandboxes averaging a 5-minute life is ~117 k entries.
+- **A. Claim-time index.** Implemented: the store records the owning node when
+  a claim is made and when a sweep resolves one, and consults it before fanning
+  out. It is bounded by generation swap rather than per-entry recency
+  bookkeeping, so memory is a fixed budget rather than a function of load.
 - **B. Authoritative fan-out on a miss.** A different replica, or an evicted
   entry, falls back to asking the nodes directly — the authoritative route the
   risk table already prescribes. Bounded by node count, off the read path for

@@ -14,7 +14,6 @@ import (
 
 func TestClaimSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// assert (not require) inside a handler goroutine: t.Errorf is goroutine-safe.
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/v1/claim", r.URL.Path)
 		assert.Equal(t, "Bearer root-token", r.Header.Get("Authorization"))
@@ -38,8 +37,6 @@ func TestClaimSuccess(t *testing.T) {
 	require.Equal(t, "10.0.0.5:7777", res.OwnerAddr)
 }
 
-// TestSandboxdClaimFallbackOn429 asserts a 429 maps to ErrNodeAtCapacity, the
-// signal the gateway turns into an L1 fallback.
 func TestSandboxdClaimFallbackOn429(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -52,8 +49,6 @@ func TestSandboxdClaimFallbackOn429(t *testing.T) {
 	require.ErrorIs(t, err, ErrNodeAtCapacity)
 }
 
-// TestSandboxdClaimRedirectIsCapacityMiss asserts a 200 that carries only a peer
-// redirect (no delivered id) is treated as a capacity miss, not a bogus success.
 func TestSandboxdClaimRedirectIsCapacityMiss(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -89,16 +84,16 @@ func TestReleaseSuccessAndAlreadyGone(t *testing.T) {
 		assert.Equal(t, "Bearer sbtok", r.Header.Get("Authorization"), "release authenticates with the sandbox's own token")
 		assert.Equal(t, "/v1/sandboxes/sb_abc/release", r.URL.Path)
 		if n == 1 {
-			w.WriteHeader(http.StatusNoContent) // first: destroyed
+			w.WriteHeader(http.StatusNoContent)
 		} else {
-			w.WriteHeader(http.StatusNotFound) // second: already gone
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer srv.Close()
 
 	c := New(srv.URL, "root-token")
 	require.NoError(t, c.Release(t.Context(), "sb_abc", "sbtok"))
-	// 404 (already gone) is treated as success.
+
 	require.NoError(t, c.Release(t.Context(), "sb_abc", "sbtok"))
 	require.Equal(t, int64(2), releases.Load())
 }

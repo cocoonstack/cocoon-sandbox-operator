@@ -10,7 +10,6 @@ import (
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
 
-// A pool mid-operation: most claims already bound, a tail still waiting.
 const (
 	benchClaimTotal   = 2500
 	benchClaimUnbound = 50

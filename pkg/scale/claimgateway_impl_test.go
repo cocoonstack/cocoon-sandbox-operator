@@ -25,10 +25,6 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
-// TestClaimGatewayHappyPath: a warm sandbox is delivered and the Assignment is
-// returned immediately; the SandboxClaim is recorded Bound asynchronously (the
-// node acts first, the apiserver records after). No VM is destroyed on the claim
-// path.
 func TestClaimGatewayHappyPath(t *testing.T) {
 	fs := newFakeSandboxd(t)
 	fc := newClaimClient(t, "c1")
@@ -49,7 +45,6 @@ func TestClaimGatewayHappyPath(t *testing.T) {
 	require.Equal(t, "node-a", a.Node)
 	require.Equal(t, "10.0.0.5:7777", a.Address)
 
-	// The record follows the action: wait for the async job, then assert Bound.
 	gw.Wait()
 	cur := getClaim(t, fc, "c1")
 	require.Equal(t, a.SandboxName, cur.Status.SandboxStatus.Name, "async RecordBound should have set status.sandbox.name")
@@ -60,15 +55,10 @@ func TestClaimGatewayHappyPath(t *testing.T) {
 	require.Equal(t, int64(0), fs.releases.Load(), "claim path must never destroy a VM")
 }
 
-// TestClaimGatewayOrphanBindingConverges: the async Bound record is lost (gateway
-// crash), leaving an orphan binding. The OrphanReconciler adopts it — records the
-// missing Bound and converges the orphan count to 0 — and crucially destroys NO
-// VM (the sandboxd release endpoint is never hit).
 func TestClaimGatewayOrphanBindingConverges(t *testing.T) {
 	fs := newFakeSandboxd(t)
 	fc := newClaimClient(t, "c-orphan")
 
-	// Gateway whose async record always fails → the delivery is never recorded.
 	gw := NewGateway(GatewayConfig{
 		Node: "node-a", Client: fs.client(), Authorizer: allowAuthorizer{},
 		Recorder: failingRecorder{}, BaseContext: t.Context(), Logger: testr.New(t),
@@ -77,7 +67,6 @@ func TestClaimGatewayOrphanBindingConverges(t *testing.T) {
 	require.NoError(t, err)
 	gw.Wait()
 
-	// Orphan confirmed: delivered, but the claim carries no Bound record.
 	require.Empty(t, getClaim(t, fc, "c-orphan").Status.SandboxStatus.Name)
 
 	inv := sliceInventory{{SandboxName: a.SandboxName, Node: a.Node, Address: a.Address, ClaimNS: "default", ClaimName: "c-orphan"}}
@@ -88,7 +77,6 @@ func TestClaimGatewayOrphanBindingConverges(t *testing.T) {
 	require.Equal(t, 1, n, "the single orphan binding should be reconciled")
 	require.Equal(t, a.SandboxName, getClaim(t, fc, "c-orphan").Status.SandboxStatus.Name, "orphan binding converged to Bound")
 
-	// Idempotent: a second pass finds no orphans.
 	n, err = orc.Reconcile(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 0, n, "orphan count must converge to 0")
@@ -96,9 +84,6 @@ func TestClaimGatewayOrphanBindingConverges(t *testing.T) {
 	require.Equal(t, int64(0), fs.releases.Load(), "orphan GC must NEVER destroy a VM")
 }
 
-// TestClaimGatewayFallbackOnNoCapacity: when sandboxd reports no warm capacity
-// (429), Claim returns an error for which IsFallback is true, so the caller drops
-// to the L1 Kubernetes path.
 func TestClaimGatewayFallbackOnNoCapacity(t *testing.T) {
 	fs := newFakeSandboxd(t)
 	fs.forceStatus.Store(http.StatusTooManyRequests)
@@ -117,12 +102,6 @@ func TestClaimGatewayFallbackOnNoCapacity(t *testing.T) {
 	require.Equal(t, int64(0), fs.releases.Load())
 }
 
-// TestClaimGatewayReleaseOwnerTeardownOnly: Release destroys the VM ONLY for a
-// sandbox the gateway actually delivered (owner-authorized teardown holds the
-// sandbox's own token, which the gateway keeps). An Assignment the gateway never
-// handed out — e.g. one synthesized from stale pod state — is refused with NO
-// sandboxd call, so pod-level state can never drive a destroy. This encodes the
-// G-0131 delete-authorization contract.
 func TestClaimGatewayReleaseOwnerTeardownOnly(t *testing.T) {
 	fs := newFakeSandboxd(t)
 
@@ -135,23 +114,18 @@ func TestClaimGatewayReleaseOwnerTeardownOnly(t *testing.T) {
 	require.NoError(t, err)
 	gw.Wait()
 
-	// Owner-authorized teardown of a delivered sandbox destroys exactly that VM.
 	require.NoError(t, gw.Release(t.Context(), a))
 	require.Equal(t, int64(1), fs.releases.Load(), "owner teardown must destroy the delivered VM")
 
-	// An Assignment the gateway never delivered (pod-derived / stale) must NOT
-	// reach sandboxd — no code path from pod state to a VM destroy.
 	err = gw.Release(t.Context(), Assignment{SandboxName: "sb_never_delivered", Node: "node-a"})
 	require.Error(t, err)
 	require.Equal(t, int64(1), fs.releases.Load(), "an undelivered Assignment must not trigger any destroy")
 
-	// A second release of the same sandbox is likewise refused (already handed back).
 	err = gw.Release(t.Context(), a)
 	require.Error(t, err)
 	require.Equal(t, int64(1), fs.releases.Load())
 }
 
-// TestClaimGatewayAuthorizationRejectsInline verifies SAR denials precede delivery.
 func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
 	t.Run("deny", func(t *testing.T) {
 		fs := newFakeSandboxd(t)
@@ -203,15 +177,12 @@ func TestClaimGatewayAuthorizationRejectsInline(t *testing.T) {
 	})
 }
 
-// fakeSandboxd is an httptest-backed sandboxd. It serves POST /v1/claim (200 with
-// a fresh id, unless forceStatus overrides) and POST /v1/sandboxes/{id}/release
-// (204), counting both so tests can assert the VM-destroy path.
 type fakeSandboxd struct {
 	srv         *httptest.Server
 	claims      atomic.Int64
 	releases    atomic.Int64
 	nextID      atomic.Int64
-	forceStatus atomic.Int64 // when non-zero, claim returns this status (e.g. 429)
+	forceStatus atomic.Int64
 }
 
 func newFakeSandboxd(t *testing.T) *fakeSandboxd {
@@ -256,16 +227,12 @@ type noopRecorder struct{}
 
 func (noopRecorder) RecordBound(context.Context, string, string, Assignment) error { return nil }
 
-// failingRecorder always fails — modeling the async Bound record lost to a gateway
-// crash, which leaves an orphan binding for the OrphanReconciler to heal.
 type failingRecorder struct{}
 
 func (failingRecorder) RecordBound(context.Context, string, string, Assignment) error {
 	return fmt.Errorf("simulated record failure (gateway crashed before recording Bound)")
 }
 
-// sliceInventory is a NodeInventorySource backed by a fixed slice (as if read from
-// sandboxd's own inventory after a crash).
 type sliceInventory []Delivery
 
 func (s sliceInventory) LiveDeliveries(context.Context) ([]Delivery, error) {

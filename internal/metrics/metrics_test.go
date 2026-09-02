@@ -118,8 +118,6 @@ func TestBuildInfo(t *testing.T) {
 }
 
 func TestStartSpanEndFuncEndsSpan(t *testing.T) {
-	// StartSpan returns an end func; if the caller never invokes it, span.End is never called and
-	// the span is never exported, a span resource leak. This mini test just proves the func closes the span.
 	exp := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
 	t.Cleanup(func() { _ = tp.Shutdown(t.Context()) })

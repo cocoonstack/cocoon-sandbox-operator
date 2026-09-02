@@ -10,14 +10,10 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
-// TestPauseAlreadyPausedIs409 is load-bearing for the SDK, not cosmetic:
-// e2b's pause() returns a boolean, and it derives false ("was already paused")
-// from a 409. Reporting anything else turns an idempotent no-op into an error
-// the caller has to interpret.
 func TestPauseAlreadyPausedIs409(t *testing.T) {
 	store := &lifecycleStore{}
 	nodeReportsPaused(store)
-	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/pause", ``, testKey)
@@ -29,11 +25,9 @@ func TestPauseAlreadyPausedIs409(t *testing.T) {
 	}
 }
 
-// TestPauseRoutesToOwningNode: the verb must address the node-local claim id on
-// the owning node, never the public id the client spelled.
 func TestPauseRoutesToOwningNode(t *testing.T) {
 	store := &lifecycleStore{}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/pause", ``, testKey)
@@ -46,13 +40,9 @@ func TestPauseRoutesToOwningNode(t *testing.T) {
 	}
 }
 
-// TestPauseFilesystemOnlyIsRejected: e2b's memory=false asks for a
-// filesystem-only snapshot whose resume cold-boots. The node always captures
-// memory, so honoring the flag would hand back a different sandbox than the
-// caller asked for — say so instead of silently doing the other thing.
 func TestPauseFilesystemOnlyIsRejected(t *testing.T) {
 	store := &lifecycleStore{}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/pause", `{"memory":false}`, testKey)
@@ -64,13 +54,9 @@ func TestPauseFilesystemOnlyIsRejected(t *testing.T) {
 	}
 }
 
-// TestConnectRunningIs200 / TestConnectPausedIs201: e2b's connect IS the SDK's
-// resume. 200 means it was already running, 201 that a restore actually
-// happened — the SDK accepts either, and the distinction is what tells an
-// operator whether the mmap restore path ran.
 func TestConnectRunningIs200(t *testing.T) {
 	store := &lifecycleStore{}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/connect", `{"timeout":30}`, testKey)
@@ -92,7 +78,7 @@ func TestConnectRunningIs200(t *testing.T) {
 func TestConnectPausedIs201AndResumes(t *testing.T) {
 	store := &lifecycleStore{}
 	nodeReportsPaused(store)
-	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/connect", `{"timeout":30}`, testKey)
@@ -104,12 +90,10 @@ func TestConnectPausedIs201AndResumes(t *testing.T) {
 	}
 }
 
-// TestForkPausedIs409 mirrors e2b: a paused source cannot be forked, and the
-// message must say to resume it first rather than failing opaquely.
 func TestForkPausedIs409(t *testing.T) {
 	store := &lifecycleStore{}
 	nodeReportsPaused(store)
-	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{pausedSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/fork", `{"count":2}`, testKey)
@@ -121,9 +105,6 @@ func TestForkPausedIs409(t *testing.T) {
 	}
 }
 
-// TestForkReturnsPerChildResults: e2b's fork reply is one entry per child, each
-// carrying its own new sandbox id — children are fresh sandboxes, not replicas
-// of the parent's identity.
 func TestForkReturnsPerChildResults(t *testing.T) {
 	store := &lifecycleStore{
 		forkChildren: []scale.Assignment{
@@ -131,7 +112,7 @@ func TestForkReturnsPerChildResults(t *testing.T) {
 			{SandboxName: "sb_c2", Node: "node-a", Token: "t2"},
 		},
 	}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/fork", `{"count":2}`, testKey)
@@ -155,10 +136,9 @@ func TestForkReturnsPerChildResults(t *testing.T) {
 	}
 }
 
-// TestForkDefaultsToOneChild: count is optional in e2b's schema.
 func TestForkDefaultsToOneChild(t *testing.T) {
 	store := &lifecycleStore{forkChildren: []scale.Assignment{{SandboxName: "sb_c1", Node: "node-a"}}}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	if w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/fork", ``, testKey); w.Code != http.StatusCreated {
@@ -169,11 +149,9 @@ func TestForkDefaultsToOneChild(t *testing.T) {
 	}
 }
 
-// TestSnapshotReturns201WithID: the source keeps running; the reply carries the
-// checkpoint id a later branch is taken from.
 func TestSnapshotReturns201WithID(t *testing.T) {
 	store := &lifecycleStore{snapshot: scale.Snapshot{ID: "ck_1234", Name: "before-migration", Node: "node-a"}}
-	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img", "tok")}
+	store.items = []sandboxv1beta1.Sandbox{liveSandbox("s1", "sb_abc", "node-a", "img")}
 	h := newTestServer(t, store)
 
 	w := do(t, h, http.MethodPost, "/sandboxes/sb-abc/snapshots", `{"name":"before-migration"}`, testKey)
@@ -195,8 +173,6 @@ func TestSnapshotReturns201WithID(t *testing.T) {
 	}
 }
 
-// TestLifecycleVerbsOnUnknownSandboxAre404 keeps the SDK's not-found branches
-// working: it raises SandboxNotFound on 404 rather than a generic error.
 func TestLifecycleVerbsOnUnknownSandboxAre404(t *testing.T) {
 	for _, path := range []string{
 		"/sandboxes/sb-missing/pause",
@@ -213,18 +189,11 @@ func TestLifecycleVerbsOnUnknownSandboxAre404(t *testing.T) {
 	}
 }
 
-// TestPauseTrustsTheNodeNotTheStaleView reproduces a bug found in the cluster:
-// the read view is synthesized from NodeInventory, which the node republishes
-// on a ~30 s cadence, so for up to half a minute after a pause the listed
-// sandbox still carries phase=Running. Deciding "already paused" from that
-// label let a second pause through with 204, telling the caller it had paused a
-// sandbox that was already down — and the e2b SDK turns that 204 into "yes, I
-// paused it". The owning node is authoritative and must win.
 func TestPauseTrustsTheNodeNotTheStaleView(t *testing.T) {
 	store := &lifecycleStore{}
-	store.nodePaused = true // the node has it hibernated ...
-	sb := liveSandbox("s1", "sb_abc", "node-a", "img", "tok")
-	sb.Labels = map[string]string{scale.PhaseLabel: "Running"} // ... but the view still says Running
+	store.nodePaused = true
+	sb := liveSandbox("s1", "sb_abc", "node-a", "img")
+	sb.Labels = map[string]string{scale.PhaseLabel: "Running"}
 	store.items = []sandboxv1beta1.Sandbox{sb}
 	h := newTestServer(t, store)
 
@@ -237,13 +206,10 @@ func TestPauseTrustsTheNodeNotTheStaleView(t *testing.T) {
 	}
 }
 
-// TestConnectTrustsTheNodeNotTheStaleView is the same hazard on resume: a stale
-// Running label would return 200 without restoring, handing the caller
-// connection details for a VM that is not running.
 func TestConnectTrustsTheNodeNotTheStaleView(t *testing.T) {
 	store := &lifecycleStore{}
 	store.nodePaused = true
-	sb := liveSandbox("s1", "sb_abc", "node-a", "img", "tok")
+	sb := liveSandbox("s1", "sb_abc", "node-a", "img")
 	sb.Labels = map[string]string{scale.PhaseLabel: "Running"}
 	store.items = []sandboxv1beta1.Sandbox{sb}
 	h := newTestServer(t, store)
@@ -257,8 +223,6 @@ func TestConnectTrustsTheNodeNotTheStaleView(t *testing.T) {
 	}
 }
 
-// lifecycleStore records which verb the compat layer routed where, so the tests
-// assert the translation rather than any node behavior.
 type lifecycleStore struct {
 	fakeStore
 
@@ -271,8 +235,6 @@ type lifecycleStore struct {
 	snapshot               scale.Snapshot
 	err                    error
 
-	// nodePaused is what the owning node reports for Stats().Paused — the
-	// authoritative answer isPaused now consults instead of the cached label.
 	nodePaused bool
 }
 
@@ -300,13 +262,10 @@ func (f *lifecycleStore) Snapshot(_ context.Context, _, _, name string) (scale.S
 	return f.snapshot, f.err
 }
 
-// pausedSandbox is a sandbox as the node publishes it while hibernated.
-func pausedSandbox(name, claimID, node, image, token string) sandboxv1beta1.Sandbox {
-	sb := liveSandbox(name, claimID, node, image, token)
-	sb.Labels = map[string]string{scale.PhaseLabel: phaseHibernated}
+func pausedSandbox(name, claimID, node, template string) sandboxv1beta1.Sandbox {
+	sb := liveSandbox(name, claimID, node, template)
+	sb.Labels[scale.PhaseLabel] = phaseHibernated
 	return sb
 }
 
-// nodeReportsPaused makes the fake's owning node report the sandbox hibernated,
-// which is what isPaused actually consults.
 func nodeReportsPaused(s *lifecycleStore) { s.nodePaused = true }

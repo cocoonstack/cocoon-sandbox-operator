@@ -281,7 +281,7 @@ func TestReconcile(t *testing.T) {
 	}{
 		{
 			name: "minimal sandbox spec creates Pod but not Service by default",
-			// Input sandbox spec
+
 			sandboxSpec: sandboxv1beta1.SandboxSpec{
 				SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 					Spec: corev1.PodSpec{
@@ -293,7 +293,7 @@ func TestReconcile(t *testing.T) {
 					},
 				}},
 			},
-			// Verify Sandbox status
+
 			wantStatus: sandboxv1beta1.SandboxStatus{
 				LabelSelector: "agents.x-k8s.io/sandbox-name-hash=" + nameHash,
 				Conditions: []metav1.Condition{
@@ -307,7 +307,6 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 			wantObjs: []client.Object{
-				// Verify Pod
 				&corev1.Pod{
 					Name:            sandboxName,
 					Namespace:       sandboxNs,
@@ -328,7 +327,7 @@ func TestReconcile(t *testing.T) {
 		},
 		{
 			name: "minimal sandbox spec with Pod and Service",
-			// Input sandbox spec
+
 			sandboxSpec: sandboxv1beta1.SandboxSpec{
 				SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
 					Service: new(true),
@@ -343,7 +342,7 @@ func TestReconcile(t *testing.T) {
 					},
 				},
 			},
-			// Verify Sandbox status
+
 			wantStatus: sandboxv1beta1.SandboxStatus{
 				Service:       sandboxName,
 				ServiceFQDN:   "sandbox-name.sandbox-ns.svc.cluster.local",
@@ -359,7 +358,6 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 			wantObjs: []client.Object{
-				// Verify Pod
 				&corev1.Pod{
 					Name:            sandboxName,
 					Namespace:       sandboxNs,
@@ -376,7 +374,7 @@ func TestReconcile(t *testing.T) {
 						},
 					},
 				},
-				// Verify Service
+
 				&corev1.Service{
 					Name:            sandboxName,
 					Namespace:       sandboxNs,
@@ -396,7 +394,7 @@ func TestReconcile(t *testing.T) {
 		},
 		{
 			name: "sandbox spec with PVC, Pod, and Service",
-			// Input sandbox spec
+
 			sandboxSpec: sandboxv1beta1.SandboxSpec{
 				SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{
 					Service: new(true),
@@ -434,7 +432,7 @@ func TestReconcile(t *testing.T) {
 					},
 				},
 			},
-			// Verify Sandbox status
+
 			wantStatus: sandboxv1beta1.SandboxStatus{
 				Service:       sandboxName,
 				ServiceFQDN:   "sandbox-name.sandbox-ns.svc.cluster.local",
@@ -450,7 +448,6 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 			wantObjs: []client.Object{
-				// Verify Pod
 				&corev1.Pod{
 					Name:            sandboxName,
 					Namespace:       sandboxNs,
@@ -482,7 +479,7 @@ func TestReconcile(t *testing.T) {
 						},
 					},
 				},
-				// Verify Service
+
 				&corev1.Service{
 					Name:            sandboxName,
 					Namespace:       sandboxNs,
@@ -498,7 +495,7 @@ func TestReconcile(t *testing.T) {
 						ClusterIP: "None",
 					},
 				},
-				// Verify PVC
+
 				&corev1.PersistentVolumeClaim{
 					Name:      "my-pvc-sandbox-name",
 					Namespace: sandboxNs,
@@ -570,7 +567,6 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 			wantObjs: []client.Object{
-				// Verifying Service exists (Pod was verified indirectly via state, and owner reference is added in reconcilePod test suite)
 				&corev1.Service{
 					Name:            sandboxName,
 					Namespace:       sandboxNs,
@@ -871,7 +867,7 @@ func TestReconcile(t *testing.T) {
 					},
 				},
 			},
-			// Pod should NOT be deleted (owned by other), Service SHOULD be deleted (owned by sandbox)
+
 			wantDeletedObjs: []client.Object{
 				&corev1.Service{Name: sandboxName, Namespace: sandboxNs},
 			},
@@ -884,11 +880,8 @@ func TestReconcile(t *testing.T) {
 			reconcileCount: 2,
 			initialObjs: []runtime.Object{
 				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      sandboxName,
-						Namespace: sandboxNs,
-						// No owner references
-					},
+					Name:      sandboxName,
+					Namespace: sandboxNs,
 				},
 				&corev1.Service{
 					Name:            sandboxName,
@@ -984,7 +977,7 @@ func TestReconcile(t *testing.T) {
 				})
 				require.NoError(t, err)
 			}
-			// Validate Sandbox status or deletion
+
 			liveSandbox := &sandboxv1beta1.Sandbox{}
 			err = r.Get(t.Context(), types.NamespacedName{Name: sandboxName, Namespace: sandboxNs}, liveSandbox)
 			if tc.expectSandboxDeleted {
@@ -998,7 +991,7 @@ func TestReconcile(t *testing.T) {
 					t.Fatalf("unexpected sandbox status (-want,+got):\n%s", diff)
 				}
 			}
-			// Validate the other objects from the "cluster" (fake client)
+
 			for _, obj := range tc.wantObjs {
 				liveObj := obj.DeepCopyObject().(client.Object)
 				err = r.Get(t.Context(), types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, liveObj)
@@ -1055,7 +1048,7 @@ func TestReconcilePod(t *testing.T) {
 		wantPod                *corev1.Pod
 		expectErr              bool
 		wantSandboxAnnotations map[string]string
-		wantPodSurvives        string // if set, verify this pod still exists after reconcile
+		wantPodSurvives        string
 	}{
 		{
 			name: "updates label and owner reference if Pod already exists",
@@ -1108,22 +1101,18 @@ func TestReconcilePod(t *testing.T) {
 			name: "persists owner reference when adopting unowned pod whose labels are already correct",
 			initialObjs: []runtime.Object{
 				&corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:            sandboxName,
-						Namespace:       sandboxNs,
-						ResourceVersion: "1",
-						Labels: map[string]string{
-							"agents.x-k8s.io/sandbox-name-hash":  nameHash,
-							"custom-label":                       "label-val",
-							sandboxv1beta1.SandboxAdoptableLabel: "true",
-						},
-						Annotations: map[string]string{
-							"custom-annotation":                      "anno-val",
-							"agents.x-k8s.io/propagated-labels":      "custom-label",
-							"agents.x-k8s.io/propagated-annotations": "custom-annotation",
-						},
-						// No OwnerReferences : simulates a pre-created pod whose
-						// labels/annotations already match the sandbox spec exactly.
+					Name:            sandboxName,
+					Namespace:       sandboxNs,
+					ResourceVersion: "1",
+					Labels: map[string]string{
+						"agents.x-k8s.io/sandbox-name-hash":  nameHash,
+						"custom-label":                       "label-val",
+						sandboxv1beta1.SandboxAdoptableLabel: "true",
+					},
+					Annotations: map[string]string{
+						"custom-annotation":                      "anno-val",
+						"agents.x-k8s.io/propagated-labels":      "custom-label",
+						"agents.x-k8s.io/propagated-annotations": "custom-annotation",
 					},
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{{Name: "test-container"}},
@@ -1240,8 +1229,6 @@ func TestReconcilePod(t *testing.T) {
 						},
 						ObjectMeta: sandboxv1beta1.PodMetadata{
 							Labels: map[string]string{
-								// Attacker attempts to hijack another Sandbox's routing label
-								// and to spoof an extensions-prefixed system label.
 								"agents.x-k8s.io/sandbox-name-hash":          "malicious-hijacked-hash",
 								"extensions.agents.x-k8s.io/warm-pool-spoof": "evil",
 								"custom-label": "label-val",
@@ -1260,7 +1247,6 @@ func TestReconcilePod(t *testing.T) {
 				Namespace:       sandboxNs,
 				ResourceVersion: "1",
 				Labels: map[string]string{
-					// System label is set by the controller, not the attacker's value.
 					"agents.x-k8s.io/sandbox-name-hash": nameHash,
 					"custom-label":                      "label-val",
 				},
@@ -1288,12 +1274,12 @@ func TestReconcilePod(t *testing.T) {
 					Labels: map[string]string{
 						"agents.x-k8s.io/sandbox-name-hash": nameHash,
 						"custom-label":                      "label-val",
-						// A system label an older controller propagated and recorded.
+
 						"agents.x-k8s.io/evil": "x",
 					},
 					Annotations: map[string]string{
 						"custom-annotation": "anno-val",
-						// Older controller recorded system keys in the propagated lists.
+
 						"agents.x-k8s.io/propagated-labels":      "custom-label,agents.x-k8s.io/evil",
 						"agents.x-k8s.io/propagated-annotations": "custom-annotation,agents.x-k8s.io/pod-name,opentelemetry.io/trace-context",
 						"agents.x-k8s.io/pod-name":               "leftover",
@@ -1877,7 +1863,7 @@ func TestReconcilePod(t *testing.T) {
 					Name:            sandboxName,
 					Namespace:       sandboxNs,
 					ResourceVersion: "1",
-					// Add a controller reference to a different controller
+
 					OwnerReferences: []metav1.OwnerReference{
 						{
 							APIVersion:         "apps/v1",
@@ -2345,7 +2331,7 @@ func TestReconcilePod(t *testing.T) {
 			pod, err := r.reconcilePod(t.Context(), sandbox, nameHash)
 			if tc.expectErr {
 				require.Error(t, err)
-				// Verify that any initially unowned Pod remains unowned (never adopted)
+
 				for _, obj := range tc.initialObjs {
 					if initialPod, ok := obj.(*corev1.Pod); ok {
 						if len(initialPod.OwnerReferences) == 0 {
@@ -2361,7 +2347,6 @@ func TestReconcilePod(t *testing.T) {
 			}
 			require.Equal(t, tc.wantPod, pod)
 
-			// Validate the Pod from the "cluster" (fake client)
 			if tc.wantPod != nil {
 				livePod := &corev1.Pod{}
 				err = r.Get(t.Context(), types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, livePod)
@@ -2369,12 +2354,12 @@ func TestReconcilePod(t *testing.T) {
 				require.Equal(t, tc.wantPod, livePod)
 			} else if !tc.expectErr {
 				if tc.wantPodSurvives != "" {
-					// Pod should still exist (ownership check blocked deletion)
+
 					livePod := &corev1.Pod{}
 					err = r.Get(t.Context(), types.NamespacedName{Name: tc.wantPodSurvives, Namespace: sandboxNs}, livePod)
 					require.NoError(t, err, "expected pod %q to survive but it was deleted", tc.wantPodSurvives)
 				} else {
-					// When wantPod is nil and no error expected, verify pod doesn't exist
+
 					livePod := &corev1.Pod{}
 					podName := sandboxName
 					if annotatedPod, exists := tc.sandbox.Annotations[sandboxv1beta1.SandboxPodNameAnnotation]; exists && annotatedPod != "" {
@@ -2416,7 +2401,7 @@ func TestReconcileService(t *testing.T) {
 		sandbox               *sandboxv1beta1.Sandbox
 		wantService           *corev1.Service
 		expectErr             bool
-		errContains           string // substring that must appear in the error
+		errContains           string
 		wantNilService        bool
 		wantServiceDeleted    bool
 		wantStatusService     string
@@ -2787,7 +2772,7 @@ func TestReconcileService(t *testing.T) {
 				if tc.errContains != "" {
 					require.Contains(t, err.Error(), tc.errContains)
 				}
-				// Verify that any initially unowned Service remains unowned (never adopted)
+
 				for _, obj := range tc.initialObjs {
 					if initialSvc, ok := obj.(*corev1.Service); ok {
 						if len(initialSvc.OwnerReferences) == 0 {
@@ -2807,13 +2792,11 @@ func TestReconcileService(t *testing.T) {
 				}
 			}
 
-			// Verify status was set correctly
 			if !tc.expectErr {
 				require.Equal(t, tc.wantStatusService, tc.sandbox.Status.Service)
 				require.Equal(t, tc.wantStatusServiceFQDN, tc.sandbox.Status.ServiceFQDN)
 			}
 
-			// Verify the live service in the fake client matches expected state
 			if tc.wantService != nil {
 				liveSvc := &corev1.Service{}
 				err = r.Get(t.Context(), types.NamespacedName{
@@ -2936,7 +2919,7 @@ func TestReconcilePVCs(t *testing.T) {
 	localSandboxUID := types.UID("sandbox-uid-123")
 	otherUID := types.UID("other-uid-456")
 	pvcTemplateName := "data"
-	pvcName := pvcTemplateName + "-" + sandboxName // "data-test-sandbox"
+	pvcName := pvcTemplateName + "-" + sandboxName
 	nameHash := hash.Name(sandboxName)
 
 	sandbox := &sandboxv1beta1.Sandbox{
@@ -3063,7 +3046,7 @@ func TestReconcilePVCs(t *testing.T) {
 				if tc.errContains != "" {
 					require.Contains(t, err.Error(), tc.errContains)
 				}
-				// Verify that any initially unowned PVC remains unowned (never adopted)
+
 				for _, obj := range tc.initialObjs {
 					if initialPVC, ok := obj.(*corev1.PersistentVolumeClaim); ok {
 						if len(initialPVC.OwnerReferences) == 0 {
@@ -3079,7 +3062,6 @@ func TestReconcilePVCs(t *testing.T) {
 
 			require.NoError(t, err)
 
-			// Verify PVC exists and is owned by the sandbox.
 			livePVC := &corev1.PersistentVolumeClaim{}
 			err = r.Get(t.Context(), types.NamespacedName{Name: pvcName, Namespace: sandboxNs}, livePVC)
 			require.NoError(t, err)
@@ -3323,10 +3305,10 @@ func TestMergeVolumeClaimVolumes(t *testing.T) {
 		result := MergeVolumeClaimVolumes(existing, []corev1.Volume{pvcVol})
 
 		require.Len(t, result, 2)
-		// config preserved
+
 		require.Equal(t, "config", result[0].Name)
 		require.NotNil(t, result[0].ConfigMap)
-		// data replaced by PVC
+
 		require.Equal(t, "data", result[1].Name)
 		require.NotNil(t, result[1].PersistentVolumeClaim)
 	})
@@ -3356,10 +3338,6 @@ func TestMergeVolumeClaimVolumes(t *testing.T) {
 	})
 }
 
-// TestSandboxReconcile_ConditionsDoNotAccumulate verifies that reconciling a
-// ready sandbox many times does not grow the conditions slice. A bug
-// that appends instead of upserts the Ready condition will cause unbounded
-// status growth.
 func TestSandboxReconcile_ConditionsDoNotAccumulate(t *testing.T) {
 	sbName := "no-grow-sandbox"
 	sbNs := "default"

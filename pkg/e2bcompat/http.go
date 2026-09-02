@@ -11,10 +11,6 @@ const (
 	// maxBodyBytes caps a request body. The e2b bodies are small objects; the
 	// cap keeps an unbounded upload off the claim path.
 	maxBodyBytes = 1 << 20
-	// tokenAnnotation carries the per-sandbox ownership credential the claim
-	// returned. It mirrors the aggregated apiserver's annotation of the same
-	// name, and is surfaced to the SDK as envdAccessToken.
-	tokenAnnotation = "sandbox.cocoonstack.io/token"
 	// namePrefix prefixes the Kubernetes object name of a compat claim, so a
 	// sandbox created through this surface is recognizable in `kubectl get
 	// sandboxes` and in node inventory.

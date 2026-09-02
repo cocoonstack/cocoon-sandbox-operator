@@ -15,6 +15,7 @@
 package controllers
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -48,9 +49,9 @@ import (
 
 	v1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
-	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
 	"github.com/cocoonstack/sandbox-operator/internal/lifecycle"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
+	"github.com/cocoonstack/sandbox-operator/internal/queue"
 )
 
 const (
@@ -109,6 +110,11 @@ type observedTimeEntry struct {
 type triggeredAdoptionEntry struct {
 	uid     types.UID
 	sandbox string
+}
+
+type nodeSpread struct {
+	count int
+	first int
 }
 
 // failure is the reason/message pair behind a not-Ready claim.
@@ -282,7 +288,7 @@ func (r *SandboxClaimReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWo
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&extensionsv1beta1.SandboxClaim{}, builder.WithPredicates(r.getTimingPredicate())).
-		Owns(&v1beta1.Sandbox{}).
+		Owns(&v1beta1.Sandbox{}, builder.WithPredicates(claimSandboxChangePredicate())).
 		Watches(&v1beta1.Sandbox{}, &sandboxEventHandler{sandboxQueue: r.WarmSandboxQueue}).
 		Watches(&extensionsv1beta1.SandboxWarmPool{}, &warmPoolEventHandler{sandboxQueue: r.WarmSandboxQueue}).
 		Watches(
@@ -409,7 +415,6 @@ func (r *SandboxClaimReconciler) syncAdoptedSandboxMetadata(ctx context.Context,
 		return nil
 	}
 
-	patch := client.MergeFrom(sandbox.DeepCopy())
 	var mergedMeta v1beta1.PodMetadata
 	template.Spec.PodTemplate.ObjectMeta.DeepCopyInto(&mergedMeta)
 	if mergedMeta.Labels == nil {
@@ -427,15 +432,20 @@ func (r *SandboxClaimReconciler) syncAdoptedSandboxMetadata(ctx context.Context,
 		return err
 	}
 
-	needsUpdate := !equality.Semantic.DeepEqual(&mergedMeta, &sandbox.Spec.PodTemplate.ObjectMeta)
-	if sandbox.Labels == nil {
-		sandbox.Labels = make(map[string]string)
-	}
-	needsUpdate = setOrDeleteLabel(sandbox.Labels, sandboxTemplateRefHash, templateHash) || needsUpdate
-	needsUpdate = setOrDeleteLabel(sandbox.Labels, v1beta1.CreatedByLabel, createdBy) || needsUpdate
+	// Compared before any mutation so the steady state costs no deep copy.
+	needsUpdate := !equality.Semantic.DeepEqual(&mergedMeta, &sandbox.Spec.PodTemplate.ObjectMeta) ||
+		sandbox.Labels[sandboxTemplateRefHash] != templateHash ||
+		sandbox.Labels[v1beta1.CreatedByLabel] != createdBy
 	if !needsUpdate {
 		return nil
 	}
+
+	patch := client.MergeFrom(sandbox.DeepCopy())
+	if sandbox.Labels == nil {
+		sandbox.Labels = make(map[string]string)
+	}
+	setOrDeleteLabel(sandbox.Labels, sandboxTemplateRefHash, templateHash)
+	setOrDeleteLabel(sandbox.Labels, v1beta1.CreatedByLabel, createdBy)
 
 	logger.V(1).Info("Updating sandbox metadata to match claim", "claim", claim.Name, "sandbox", sandbox.Name)
 	sandbox.Spec.PodTemplate.ObjectMeta = mergedMeta
@@ -460,7 +470,6 @@ func (r *SandboxClaimReconciler) reconcileActive(ctx context.Context, claim *ext
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("Reconciling active claim", "claim", claim.Name)
 
-	// Upfront validation of additional metadata to skip unnecessary processing
 	if err := r.validateAdditionalPodMetadata(&claim.Spec.AdditionalPodMetadata); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidMetadata, err)
 	}
@@ -523,18 +532,8 @@ func (r *SandboxClaimReconciler) reconcileExpired(ctx context.Context, claim *ex
 func (r *SandboxClaimReconciler) updateStatus(ctx context.Context, oldStatus *extensionsv1beta1.SandboxClaimStatus, claim *extensionsv1beta1.SandboxClaim) error {
 	logger := log.FromContext(ctx)
 
-	slices.SortFunc(oldStatus.Conditions, func(a, b metav1.Condition) int {
-		if a.Type < b.Type {
-			return -1
-		}
-		return 1
-	})
-	slices.SortFunc(claim.Status.Conditions, func(a, b metav1.Condition) int {
-		if a.Type < b.Type {
-			return -1
-		}
-		return 1
-	})
+	slices.SortFunc(oldStatus.Conditions, func(a, b metav1.Condition) int { return cmp.Compare(a.Type, b.Type) })
+	slices.SortFunc(claim.Status.Conditions, func(a, b metav1.Condition) int { return cmp.Compare(a.Type, b.Type) })
 
 	if equality.Semantic.DeepEqual(oldStatus, &claim.Status) {
 		return nil
@@ -652,56 +651,8 @@ func (r *SandboxClaimReconciler) getCandidate(ctx context.Context, claim *extens
 		}
 	}()
 
-	pickSmart := func(keys []queue.SandboxKey) (queue.SandboxKey, bool) {
-		namespaceKeys := keys
-
-		if len(namespaceKeys) == 0 {
-			return queue.SandboxKey{}, false
-		}
-		if len(namespaceKeys) == 1 {
-			return namespaceKeys[0], true
-		}
-
-		var scheduledKeys []queue.SandboxKey
-		var unscheduledKeys []queue.SandboxKey
-		for _, key := range namespaceKeys {
-			if key.NodeName != "" {
-				scheduledKeys = append(scheduledKeys, key)
-			} else {
-				unscheduledKeys = append(unscheduledKeys, key)
-			}
-		}
-
-		// NodeSpread: the node with the most remaining warm sandboxes has been
-		// picked the least, so drain it first.
-		if len(scheduledKeys) > 0 {
-			nodeCounts := make(map[string]int)
-			for _, key := range scheduledKeys {
-				nodeCounts[key.NodeName]++
-			}
-
-			maxCount := 0
-			for _, count := range nodeCounts {
-				if count > maxCount {
-					maxCount = count
-				}
-			}
-
-			var bestCandidates []queue.SandboxKey
-			for _, key := range scheduledKeys {
-				if nodeCounts[key.NodeName] == maxCount {
-					bestCandidates = append(bestCandidates, key)
-				}
-			}
-
-			return bestCandidates[0], true
-		}
-
-		return unscheduledKeys[0], true
-	}
-
 	for {
-		adoptedKey, ok := r.WarmSandboxQueue.GetWithStrategy(namespacedWarmPoolName, pickSmart)
+		adoptedKey, ok := r.WarmSandboxQueue.GetWithStrategy(namespacedWarmPoolName, pickNodeSpread)
 		if !ok {
 			if fallbackSandbox != nil {
 				adoptingFallback = true
@@ -744,7 +695,6 @@ func (r *SandboxClaimReconciler) adoptSandboxFromCandidates(ctx context.Context,
 	logger := log.FromContext(ctx)
 	namespacedWarmPoolNameForQueue := queue.GetNamespacedWarmPoolName(claim.Namespace, claim.Spec.WarmPoolRef.Name)
 
-	// Keep trying until we successfully adopt a sandbox, or run out of candidates
 	for range 3 {
 		adopted, adoptedKey, err := r.getCandidate(ctx, claim)
 		if err != nil {
@@ -825,17 +775,15 @@ func (r *SandboxClaimReconciler) tryAdopt(ctx context.Context, claim *extensions
 }
 
 func (r *SandboxClaimReconciler) completeAdoption(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, adopted *v1beta1.Sandbox) error {
-	// Take a snapshot of the sandbox BEFORE we mutate it to generate a clean JSON Patch.
 	originalAdopted := adopted.DeepCopy()
 
 	templateHash := adopted.Labels[sandboxTemplateRefHash]
 
-	// Remove warm pool labels so the sandbox no longer appears in warm pool queries
-	delete(adopted.Labels, warmPoolSandboxLabel)
-	delete(adopted.Labels, v1beta1.SandboxTemplateHashLabel)
 	if adopted.Labels == nil {
 		adopted.Labels = make(map[string]string)
 	}
+	delete(adopted.Labels, warmPoolSandboxLabel)
+	delete(adopted.Labels, v1beta1.SandboxTemplateHashLabel)
 	adopted.Labels[v1beta1.SandboxLaunchTypeLabel] = v1beta1.SandboxLaunchTypeWarm
 	// Remove the warm pool's default eviction annotation so the adopted sandbox
 	// is protected from autoscaler scale-downs now that it hosts active state.
@@ -1086,7 +1034,6 @@ func (r *SandboxClaimReconciler) createSandbox(ctx context.Context, claim *exten
 			}
 		}
 	} else {
-		// Validate the VolumeClaimTemplates from the SandboxTemplate.
 		if err := validateVolumeClaimTemplates(template.Spec.VolumeClaimTemplates); err != nil {
 			return nil, fmt.Errorf("invalid volume claim templates in template: %w", err)
 		}
@@ -1111,7 +1058,6 @@ func (r *SandboxClaimReconciler) createSandbox(ctx context.Context, claim *exten
 		return nil, err
 	}
 
-	// Apply secure defaults to the sandbox pod spec
 	ApplySandboxSecureDefaults(template, &sandbox.Spec.PodTemplate.Spec)
 
 	if err := controllerutil.SetControllerReference(claim, sandbox, r.Scheme); err != nil {
@@ -1424,23 +1370,19 @@ func (r *SandboxClaimReconciler) resolveTemplateName(sandbox *v1beta1.Sandbox) s
 func (r *SandboxClaimReconciler) getOrRecordObservedTime(obj client.Object) time.Time {
 	key := types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}
 
-	// Fast path: Entry already exists and UID matches
 	if entry, ok := r.observedTimes.Load(key); ok {
 		if entry.uid == obj.GetUID() {
 			return entry.timestamp
 		}
 	}
 
-	// Slow path: Entry missing or UID mismatched
 	newEntry := observedTimeEntry{timestamp: time.Now(), uid: obj.GetUID()}
 	actual, loaded := r.observedTimes.LoadOrStore(key, newEntry)
 	if loaded {
-		// Handle concurrent insertion: check if we need to overwrite due to UID mismatch
 		if actual.uid != obj.GetUID() {
 			r.observedTimes.Store(key, newEntry)
 			return newEntry.timestamp
 		}
-		// UID matches, return the loaded timestamp
 		return actual.timestamp
 	}
 	return newEntry.timestamp
@@ -1589,16 +1531,6 @@ func (r *SandboxClaimReconciler) recordCreationLatencyMetric(
 	r.recordSandboxCreationLatency(sandbox, launchType, templateName)
 }
 
-func hasSandboxExpiredCondition(conditions []metav1.Condition) bool {
-	readyCondition := meta.FindStatusCondition(conditions, string(v1beta1.SandboxConditionReady))
-	return readyCondition != nil && readyCondition.Reason == v1beta1.SandboxReasonExpired
-}
-
-func hasClaimExpiredCondition(conditions []metav1.Condition) bool {
-	readyCondition := meta.FindStatusCondition(conditions, string(v1beta1.SandboxConditionReady))
-	return readyCondition != nil && readyCondition.Reason == extensionsv1beta1.ClaimExpiredReason
-}
-
 // sandboxEventHandler implements handler.EventHandler for the SandboxClaimReconciler.
 type sandboxEventHandler struct {
 	sandboxQueue *queue.SimpleSandboxQueue
@@ -1630,7 +1562,6 @@ func (h *sandboxEventHandler) Update(ctx context.Context, e event.UpdateEvent, _
 	nodeScheduled := oldSandbox.Status.NodeName != newSandbox.Status.NodeName
 
 	if (!oldAdoptable && newAdoptable) || (newAdoptable && poolChanged) || (newAdoptable && nodeScheduled) {
-		// Add/update sandbox in the queue
 		key := queue.SandboxKey{
 			Namespace: newSandbox.Namespace,
 			Name:      newSandbox.Name,
@@ -1663,48 +1594,10 @@ func (h *sandboxEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _
 
 		namespacedWarmPoolName := queue.GetNamespacedWarmPoolName(sandbox.Namespace, warmPoolName)
 
-		// Actively delete the Ghost Pod from the memory queue
 		logger := log.FromContext(ctx)
 		logger.V(1).Info("Removing deleted sandbox from warm pool queue", "namespace", sandbox.Namespace, "sandbox", key)
 		h.sandboxQueue.RemoveItem(namespacedWarmPoolName, key)
 	}
-}
-
-func verifySandboxCandidate(candidate *v1beta1.Sandbox, claim *extensionsv1beta1.SandboxClaim) error {
-	if candidate.Namespace != claim.Namespace {
-		return fmt.Errorf("%w: sandbox is in %q, claim is in %q", ErrCrossNamespaceAdoption, candidate.Namespace, claim.Namespace)
-	}
-
-	if err := isAdoptable(candidate); err != nil {
-		return err
-	}
-
-	warmPoolName := getWarmPoolName(candidate)
-	if warmPoolName == "" || warmPoolName != claim.Spec.WarmPoolRef.Name {
-		return fmt.Errorf("incorrect warm pool, expected %v", claim.Spec.WarmPoolRef.Name)
-	}
-	return nil
-}
-
-func isAdoptable(candidate *v1beta1.Sandbox) error {
-	if !candidate.DeletionTimestamp.IsZero() {
-		return fmt.Errorf("sandbox is deleted")
-	}
-	if _, ok := candidate.Labels[warmPoolSandboxLabel]; !ok {
-		return fmt.Errorf("sandbox is missing the warm pool sandbox label")
-	}
-	if _, ok := candidate.Labels[sandboxTemplateRefHash]; !ok {
-		return fmt.Errorf("sandbox is missing the sandbox template ref hash label")
-	}
-
-	controllerRef := metav1.GetControllerOf(candidate)
-	if controllerRef == nil {
-		return fmt.Errorf("sandbox %s/%s is unowned and cannot be safely adopted", candidate.Namespace, candidate.Name)
-	}
-	if controllerRef.APIVersion != extensionsv1beta1.GroupVersion.String() || controllerRef.Kind != warmPoolKind {
-		return fmt.Errorf("sandbox %s/%s is not managed by warm pool. Controller: %v", candidate.Namespace, candidate.Name, controllerRef)
-	}
-	return nil
 }
 
 type warmPoolEventHandler struct {
@@ -1730,29 +1623,7 @@ func (h *warmPoolEventHandler) Delete(ctx context.Context, e event.DeleteEvent, 
 	logger := log.FromContext(ctx)
 	logger.Info("SandboxWarmPool deleted, cleaning up memory queue", "namespace", warmPool.Namespace, "warmPool", warmPool.Name)
 
-	// Actively drop the entire queue from memory
 	h.sandboxQueue.RemoveQueue(namespacedWarmPoolName)
-}
-
-func getWarmPoolName(obj metav1.Object) string {
-	if ctrl := metav1.GetControllerOf(obj); ctrl != nil && ctrl.Kind == warmPoolKind {
-		return ctrl.Name
-	}
-	for _, ref := range obj.GetOwnerReferences() {
-		if ref.Kind == warmPoolKind {
-			return ref.Name
-		}
-	}
-	return ""
-}
-
-func shouldSuppressError(err error) bool {
-	for _, target := range suppressErrors {
-		if errors.Is(err, target) {
-			return true
-		}
-	}
-	return false
 }
 
 // observedTimeMap is a type-safe wrapper around sync.Map that only stores observedTimeEntry values.
@@ -1803,6 +1674,74 @@ func (m *triggeredAdoptionMap) Delete(key types.NamespacedName) {
 	m.inner.Delete(key)
 }
 
+func hasSandboxExpiredCondition(conditions []metav1.Condition) bool {
+	readyCondition := meta.FindStatusCondition(conditions, string(v1beta1.SandboxConditionReady))
+	return readyCondition != nil && readyCondition.Reason == v1beta1.SandboxReasonExpired
+}
+
+func hasClaimExpiredCondition(conditions []metav1.Condition) bool {
+	readyCondition := meta.FindStatusCondition(conditions, string(v1beta1.SandboxConditionReady))
+	return readyCondition != nil && readyCondition.Reason == extensionsv1beta1.ClaimExpiredReason
+}
+
+func verifySandboxCandidate(candidate *v1beta1.Sandbox, claim *extensionsv1beta1.SandboxClaim) error {
+	if candidate.Namespace != claim.Namespace {
+		return fmt.Errorf("%w: sandbox is in %q, claim is in %q", ErrCrossNamespaceAdoption, candidate.Namespace, claim.Namespace)
+	}
+
+	if err := isAdoptable(candidate); err != nil {
+		return err
+	}
+
+	warmPoolName := getWarmPoolName(candidate)
+	if warmPoolName == "" || warmPoolName != claim.Spec.WarmPoolRef.Name {
+		return fmt.Errorf("incorrect warm pool, expected %v", claim.Spec.WarmPoolRef.Name)
+	}
+	return nil
+}
+
+func isAdoptable(candidate *v1beta1.Sandbox) error {
+	if !candidate.DeletionTimestamp.IsZero() {
+		return fmt.Errorf("sandbox is deleted")
+	}
+	if _, ok := candidate.Labels[warmPoolSandboxLabel]; !ok {
+		return fmt.Errorf("sandbox is missing the warm pool sandbox label")
+	}
+	if _, ok := candidate.Labels[sandboxTemplateRefHash]; !ok {
+		return fmt.Errorf("sandbox is missing the sandbox template ref hash label")
+	}
+
+	controllerRef := metav1.GetControllerOf(candidate)
+	if controllerRef == nil {
+		return fmt.Errorf("sandbox %s/%s is unowned and cannot be safely adopted", candidate.Namespace, candidate.Name)
+	}
+	if controllerRef.APIVersion != extensionsv1beta1.GroupVersion.String() || controllerRef.Kind != warmPoolKind {
+		return fmt.Errorf("sandbox %s/%s is not managed by warm pool. Controller: %v", candidate.Namespace, candidate.Name, controllerRef)
+	}
+	return nil
+}
+
+func getWarmPoolName(obj metav1.Object) string {
+	if ctrl := metav1.GetControllerOf(obj); ctrl != nil && ctrl.Kind == warmPoolKind {
+		return ctrl.Name
+	}
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.Kind == warmPoolKind {
+			return ref.Name
+		}
+	}
+	return ""
+}
+
+func shouldSuppressError(err error) bool {
+	for _, target := range suppressErrors {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+	return false
+}
+
 // soonerRequeue returns the earlier of a pending requeue and a proposed delay,
 // treating a zero pending requeue as "none scheduled".
 func soonerRequeue(pending, proposed time.Duration) time.Duration {
@@ -1823,19 +1762,40 @@ func stagedAnnotationsSurvived(claim *extensionsv1beta1.SandboxClaim, staged map
 	return true
 }
 
-// setOrDeleteLabel forces labels[key] to want, removing the entry when want is
-// empty. It reports whether labels changed.
-func setOrDeleteLabel(labels map[string]string, key, want string) bool {
-	if want == "" {
-		_, existed := labels[key]
-		delete(labels, key)
-		return existed
+func pickNodeSpread(keys []queue.SandboxKey) (queue.SandboxKey, bool) {
+	if len(keys) == 0 {
+		return queue.SandboxKey{}, false
 	}
-	if labels[key] == want {
-		return false
+	nodes := make(map[string]nodeSpread, len(keys))
+	best := nodeSpread{first: -1}
+	for i, key := range keys {
+		if key.NodeName == "" {
+			continue
+		}
+		seen := nodes[key.NodeName]
+		if seen.count == 0 {
+			seen.first = i
+		}
+		seen.count++
+		nodes[key.NodeName] = seen
+		if seen.count > best.count || (seen.count == best.count && seen.first < best.first) {
+			best = seen
+		}
+	}
+	if best.count == 0 {
+		return keys[0], true
+	}
+	return keys[best.first], true
+}
+
+// setOrDeleteLabel forces labels[key] to want, removing the entry when want is
+// empty.
+func setOrDeleteLabel(labels map[string]string, key, want string) {
+	if want == "" {
+		delete(labels, key)
+		return
 	}
 	labels[key] = want
-	return true
 }
 
 // notReady builds the Ready=False condition for f.
@@ -1894,6 +1854,37 @@ func ensureClaimIdentityLabels(labels map[string]string, claim *extensionsv1beta
 	return labels
 }
 
+// claimSandboxChangePredicate passes the owned-Sandbox transitions a claim
+// mirrors: pod IPs, the Ready and Finished conditions, deletion, and the spec or
+// label edits the metadata sync repairs. Other status writes (node name, service,
+// label selector) would re-reconcile the claim for nothing.
+func claimSandboxChangePredicate() predicate.Funcs {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldSb, okOld := e.ObjectOld.(*v1beta1.Sandbox)
+			newSb, okNew := e.ObjectNew.(*v1beta1.Sandbox)
+			if !okOld || !okNew {
+				return true
+			}
+			return oldSb.Generation != newSb.Generation ||
+				oldSb.DeletionTimestamp.IsZero() != newSb.DeletionTimestamp.IsZero() ||
+				!maps.Equal(oldSb.Labels, newSb.Labels) ||
+				!slices.Equal(oldSb.Status.PodIPs, newSb.Status.PodIPs) ||
+				sandboxConditionChanged(oldSb, newSb, string(v1beta1.SandboxConditionReady)) ||
+				sandboxConditionChanged(oldSb, newSb, string(v1beta1.SandboxConditionFinished))
+		},
+	}
+}
+
+func sandboxConditionChanged(oldSb, newSb *v1beta1.Sandbox, conditionType string) bool {
+	oldCond := meta.FindStatusCondition(oldSb.Status.Conditions, conditionType)
+	newCond := meta.FindStatusCondition(newSb.Status.Conditions, conditionType)
+	if oldCond == nil || newCond == nil {
+		return oldCond != newCond
+	}
+	return *oldCond != *newCond
+}
+
 // isSandboxReady checks if a sandbox has Ready=True condition.
 func isSandboxReady(sb *v1beta1.Sandbox) bool {
 	for _, cond := range sb.Status.Conditions {
@@ -1936,7 +1927,6 @@ func mergeVolumeClaimTemplates(
 		return nil, ErrVolumeClaimTemplatesDisallowed
 
 	case extensionsv1beta1.VolumeClaimTemplatesPolicyAllowed:
-		// Check for any overrides (name match)
 		templateMap := make(map[string]struct{}, len(templateVCTs))
 		for _, vct := range templateVCTs {
 			templateMap[vct.Name] = struct{}{}
@@ -1949,14 +1939,12 @@ func mergeVolumeClaimTemplates(
 		return slices.Concat(templateVCTs, claimVCTs), nil
 
 	case extensionsv1beta1.VolumeClaimTemplatesPolicyOverrides:
-		// Merge by Name: claim VCT replaces template VCT by name if they match, and new ones are appended.
 		merged := make([]v1beta1.PersistentVolumeClaimTemplate, 0, len(templateVCTs)+len(claimVCTs))
 		claimMap := make(map[string]v1beta1.PersistentVolumeClaimTemplate, len(claimVCTs))
 		for _, vct := range claimVCTs {
 			claimMap[vct.Name] = vct
 		}
 
-		// Keep template VCTs unless overridden by name
 		for _, vct := range templateVCTs {
 			if override, ok := claimMap[vct.Name]; ok {
 				merged = append(merged, override)
@@ -1966,7 +1954,6 @@ func mergeVolumeClaimTemplates(
 			}
 		}
 
-		// Append any new volume templates introduced by the claim
 		for _, vct := range claimVCTs {
 			if _, exists := claimMap[vct.Name]; exists {
 				merged = append(merged, vct)

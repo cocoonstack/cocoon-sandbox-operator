@@ -14,5 +14,4 @@
 
 package v1beta1
 
-// Hub marks SandboxClaim as a conversion Hub.
 func (*SandboxClaim) Hub() {}

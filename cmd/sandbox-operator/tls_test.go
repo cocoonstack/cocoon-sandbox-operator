@@ -51,13 +51,11 @@ func TestGenerateWebhookCerts(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, caPEM)
 
-		// 1. Verify files are written locally
 		certPath := filepath.Join(tempDir, "tls.crt")
 		keyPath := filepath.Join(tempDir, "tls.key")
 		assert.FileExists(t, certPath)
 		assert.FileExists(t, keyPath)
 
-		// 2. Verify server certificate has correct DNS SANs
 		certBytes, err := os.ReadFile(certPath)
 		require.NoError(t, err)
 		certBlock, _ := pem.Decode(certBytes)
@@ -73,7 +71,6 @@ func TestGenerateWebhookCerts(t *testing.T) {
 		}
 		assert.ElementsMatch(t, expectedDNSNames, cert.DNSNames)
 
-		// 3. Verify the Secret was created in the cluster
 		secret := &corev1.Secret{}
 		err = fakeClient.Get(t.Context(), types.NamespacedName{Name: secretName, Namespace: namespace}, secret)
 		require.NoError(t, err)
@@ -87,7 +84,6 @@ func TestGenerateWebhookCerts(t *testing.T) {
 		require.NoError(t, err)
 		defer os.RemoveAll(tempDir)
 
-		// Pre-populate Secret with dummy data
 		existingCA := []byte("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----")
 		existingCert := []byte("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----")
 		existingKey := []byte("-----BEGIN EC PRIVATE KEY-----\nMIIB\n-----END EC PRIVATE KEY-----")
@@ -108,7 +104,6 @@ func TestGenerateWebhookCerts(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, existingCA, caPEM)
 
-		// Verify files are written locally with the pre-populated values
 		certPath := filepath.Join(tempDir, "tls.crt")
 		keyPath := filepath.Join(tempDir, "tls.key")
 
@@ -126,7 +121,6 @@ func TestGenerateWebhookCerts(t *testing.T) {
 		require.NoError(t, err)
 		defer os.RemoveAll(tempDir)
 
-		// Pre-populate Secret with invalid PEM data
 		secret := &corev1.Secret{
 			Name:      secretName,
 			Namespace: namespace,
@@ -151,7 +145,6 @@ func TestPatchCRDs(t *testing.T) {
 	err := apiextensionsv1.AddToScheme(scheme)
 	require.NoError(t, err)
 
-	// Create a helper function to build a fake CRD
 	makeCRD := func(name string, hasWebhook bool) *apiextensionsv1.CustomResourceDefinition {
 		crd := &apiextensionsv1.CustomResourceDefinition{
 			Name: name,
@@ -200,8 +193,8 @@ func TestPatchCRDs(t *testing.T) {
 	t.Run("successfully patches CRDs with Webhook strategy", func(t *testing.T) {
 		crd1 := makeCRD("sandboxes.agents.x-k8s.io", true)
 		crd2 := makeCRD("sandboxclaims.extensions.agents.x-k8s.io", true)
-		// crd3 is not installed (simulating extensions disabled)
-		crd4 := makeCRD("sandboxwarmpools.extensions.agents.x-k8s.io", false) // has None strategy
+
+		crd4 := makeCRD("sandboxwarmpools.extensions.agents.x-k8s.io", false)
 
 		fakeClient := fake.NewClientBuilder().
 			WithScheme(scheme).
@@ -215,7 +208,6 @@ func TestPatchCRDs(t *testing.T) {
 		err := patchCRDs(t.Context(), fakeClient, caPEM, serviceName, namespace, true)
 		require.NoError(t, err)
 
-		// Verify crd1 was patched
 		patchedCRD1 := &apiextensionsv1.CustomResourceDefinition{}
 		err = fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandboxes.agents.x-k8s.io"}, patchedCRD1)
 		require.NoError(t, err)
@@ -226,14 +218,12 @@ func TestPatchCRDs(t *testing.T) {
 		assert.Equal(t, "/convert", *patchedCRD1.Spec.Conversion.Webhook.ClientConfig.Service.Path)
 		assert.Equal(t, caPEM, patchedCRD1.Spec.Conversion.Webhook.ClientConfig.CABundle)
 
-		// Verify crd2 was patched
 		patchedCRD2 := &apiextensionsv1.CustomResourceDefinition{}
 		err = fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandboxclaims.extensions.agents.x-k8s.io"}, patchedCRD2)
 		require.NoError(t, err)
 		assert.Equal(t, serviceName, patchedCRD2.Spec.Conversion.Webhook.ClientConfig.Service.Name)
 		assert.Equal(t, caPEM, patchedCRD2.Spec.Conversion.Webhook.ClientConfig.CABundle)
 
-		// Verify crd4 was NOT patched (strategy remains None)
 		patchedCRD4 := &apiextensionsv1.CustomResourceDefinition{}
 		err = fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandboxwarmpools.extensions.agents.x-k8s.io"}, patchedCRD4)
 		require.NoError(t, err)
@@ -242,9 +232,6 @@ func TestPatchCRDs(t *testing.T) {
 	})
 
 	t.Run("skips extension CRDs when extensions disabled", func(t *testing.T) {
-		// With --extensions=false the extension conversion webhooks are never
-		// registered, so their CRD caBundles must not be patched — otherwise the
-		// apiserver routes conversion to an endpoint this process does not serve.
 		crd1 := makeCRD("sandboxes.agents.x-k8s.io", true)
 		crd2 := makeCRD("sandboxclaims.extensions.agents.x-k8s.io", true)
 
@@ -256,14 +243,11 @@ func TestPatchCRDs(t *testing.T) {
 		err := patchCRDs(t.Context(), fakeClient, []byte("ca"), "svc", "ns", false)
 		require.NoError(t, err)
 
-		// The core Sandbox CRD is still patched.
 		patchedCRD1 := &apiextensionsv1.CustomResourceDefinition{}
 		require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandboxes.agents.x-k8s.io"}, patchedCRD1))
 		require.NotNil(t, patchedCRD1.Spec.Conversion.Webhook)
 		assert.Equal(t, "svc", patchedCRD1.Spec.Conversion.Webhook.ClientConfig.Service.Name)
 
-		// The extension CRD is left untouched: its original caBundle and service
-		// are unchanged (not overwritten with the new values).
 		untouchedCRD2 := &apiextensionsv1.CustomResourceDefinition{}
 		require.NoError(t, fakeClient.Get(t.Context(), types.NamespacedName{Name: "sandboxclaims.extensions.agents.x-k8s.io"}, untouchedCRD2))
 		assert.Equal(t, []byte("old-ca"), untouchedCRD2.Spec.Conversion.Webhook.ClientConfig.CABundle)

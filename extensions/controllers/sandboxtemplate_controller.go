@@ -34,6 +34,10 @@ import (
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
 )
 
+// defaultRouterNamespace is used when RouterNamespace is unset, matching the
+// operator's default install namespace.
+const defaultRouterNamespace = "sandbox-system"
+
 // SandboxTemplateReconciler reconciles a SandboxTemplate object.
 type SandboxTemplateReconciler struct {
 	client.Client
@@ -45,10 +49,6 @@ type SandboxTemplateReconciler struct {
 	// namespace rather than a hardcoded default.
 	RouterNamespace string
 }
-
-// defaultRouterNamespace is used when RouterNamespace is unset, matching the
-// operator's default install namespace.
-const defaultRouterNamespace = "sandbox-system"
 
 //+kubebuilder:rbac:groups=extensions.agents.x-k8s.io,resources=sandboxtemplates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=extensions.agents.x-k8s.io,resources=sandboxtemplates/finalizers,verbs=get;update;patch

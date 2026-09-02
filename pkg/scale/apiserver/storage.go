@@ -38,9 +38,9 @@ const (
 	AddressAnnotation = "sandbox.cocoonstack.io/address"
 	// TokenAnnotation carries the per-sandbox ownership token so a caller can
 	// exec/agent into the sandbox it claimed via the L3 apiserver.
-	TokenAnnotation = "sandbox.cocoonstack.io/token"
+	TokenAnnotation = scale.TokenAnnotation
 	// NetAnnotation selects the pool network mode on Create (default "none").
-	NetAnnotation = "sandbox.cocoonstack.io/net"
+	NetAnnotation = scale.NetAnnotation
 	// TTLSecondsAnnotation bounds the claim lease in whole seconds on Create for
 	// clients that cannot set spec.shutdownTime (0 = the owning node's default).
 	TTLSecondsAnnotation = "sandbox.cocoonstack.io/ttl-seconds"
@@ -169,8 +169,11 @@ func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation 
 
 	node := sb.Status.NodeName
 	if node == "" {
-		// No owning node resolved: nothing to release against. Report it deleted.
-		return sb, true, nil
+		// The inventory entry exists but names no node, so the release cannot be
+		// routed. Reporting success here would leak the microVM to its TTL.
+		return nil, false, apierrors.NewInternalError(fmt.Errorf(
+			"cannot delete sandbox %s/%s: inventory entry names no owning node; refusing to report it released",
+			namespace, name))
 	}
 	claimID := sb.Annotations[ClaimIDAnnotation]
 	if claimID == "" {
@@ -209,10 +212,12 @@ func toScaleListOptions(ctx context.Context, options *metainternalversion.ListOp
 
 // poolKeyForSandbox derives the warm-pool key from a Sandbox: the template is the
 // first container's image, the size is a t-shirt class mapped from that container's
-// resources, and the net comes from the NetAnnotation (default "none"). It defers
-// to scale.PoolKeyFor so the SandboxWarmPool driver derives an identical key.
+// resources, and the net comes from the NetAnnotation on the object or its pod
+// template (default "none"). It defers to scale.PoolKeyFor and
+// scale.NetForAnnotations so the SandboxWarmPool driver derives an identical key.
 func poolKeyForSandbox(sb *sandboxv1beta1.Sandbox) scale.PoolKey {
-	return scale.PoolKeyFor(sb.Spec.PodTemplate.Spec.Containers, sb.Annotations[NetAnnotation])
+	net := scale.NetForAnnotations(sb.Annotations, sb.Spec.PodTemplate.ObjectMeta.Annotations)
+	return scale.PoolKeyFor(sb.Spec.PodTemplate.Spec.Containers, net)
 }
 
 // ttlSecondsForSandbox derives the claim lease: spec.shutdownTime wins, the

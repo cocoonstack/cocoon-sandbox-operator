@@ -11,12 +11,14 @@ import (
 	"time"
 )
 
-// The lifecycle verbs below all authenticate with the node's root api_token
-// (the fleet token this client already holds) and take sandboxd's operator
-// path, which resolves the sandbox by id without a per-sandbox token. That is
-// deliberate: keeping one secret per sandbox in the control plane would turn
-// its O(nodes) storage into O(sandboxes), the property the whole design rests
-// on. sandboxd authorizes these by the root token exactly as it does release.
+// maxReplyBytes caps a sandboxd reply body. At the measured 213 bytes per
+// listed sandbox it clears 78k sandboxes on one node, well past the 2000 the
+// design projects.
+const maxReplyBytes = 16 << 20
+
+// The lifecycle verbs take sandboxd's operator path under the fleet root token:
+// a per-sandbox secret would turn the control plane's O(nodes) storage into
+// O(sandboxes).
 
 // ForkSpec is the POST /v1/sandboxes/{id}/fork body. Token stays empty on the
 // operator path; Count must be within the node's max_fork_count.
@@ -193,17 +195,6 @@ func (c *Client) Promote(ctx context.Context, id string, spec PromoteSpec) (Pool
 	return out.Key, err
 }
 
-// Sandbox performs GET /v1/sandboxes/{id}, the single-sandbox read that avoids
-// scanning the whole-node listing.
-func (c *Client) Sandbox(ctx context.Context, id string) (SandboxSummary, error) {
-	var out SandboxSummary
-	if id == "" {
-		return out, fmt.Errorf("sandboxd: sandbox read requires an id")
-	}
-	err := c.getJSON(ctx, "/v1/sandboxes/"+url.PathEscape(id), &out)
-	return out, err
-}
-
 // Stats performs GET /v1/sandboxes/{id}/stats.
 func (c *Client) Stats(ctx context.Context, id string) (SandboxStats, error) {
 	var out SandboxStats
@@ -301,11 +292,17 @@ func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	return decodeInto(resp, out, path)
 }
 
-// decodeInto reads a bounded reply body into out.
+// decodeInto reads a bounded reply body into out. Reading one byte past the cap
+// distinguishes an over-cap reply from malformed JSON: silently truncating a
+// node's sandbox or checkpoint listing would surface as "unexpected end of JSON
+// input" and make that node's sandboxes vanish from the aggregated view.
 func decodeInto(resp *http.Response, out any, path string) error {
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxReplyBytes+1))
 	if err != nil {
 		return fmt.Errorf("sandboxd: read %s reply: %w", path, err)
+	}
+	if len(b) > maxReplyBytes {
+		return fmt.Errorf("sandboxd: %s reply exceeds %d bytes", path, maxReplyBytes)
 	}
 	if err := json.Unmarshal(b, out); err != nil {
 		return fmt.Errorf("sandboxd: decode %s reply: %w", path, err)

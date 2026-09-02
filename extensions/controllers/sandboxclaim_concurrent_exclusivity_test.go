@@ -18,27 +18,18 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
-	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
 	"github.com/cocoonstack/sandbox-operator/internal/hash"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
+	"github.com/cocoonstack/sandbox-operator/internal/queue"
 )
 
-// TestWarmPoolConcurrentClaimExclusivity is the L1 fast-path intent test: under
-// many claims racing a shared warm pool concurrently, the pod-exclusivity
-// invariant (#127) must hold — each warm Sandbox is adopted by at most one claim,
-// each claim owns at most one Sandbox, and every warm Sandbox is consumed exactly
-// once. The exclusivity guard is the in-memory WarmSandboxQueue: each candidate
-// key is popped exactly once under its mutex, so two concurrent claims can never
-// select the same warm Sandbox. This complements the sequential
-// TestWarmPoolPodExclusivity by exercising the guard under real goroutine
-// contention, the condition the decentralized claim fast-path is built for.
 func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 	scheme := newScheme(t)
 	ctx := t.Context()
 
 	const (
 		warmCount  = 12
-		claimCount = 24 // more claims than warm sandboxes: the surplus must cold-start, never double-adopt
+		claimCount = 24
 	)
 
 	poolHash := hash.Name("pool")
@@ -118,8 +109,6 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 		MaxConcurrentReconciles: claimCount,
 	}
 
-	// Fire every claim concurrently; each goroutine drives its own claim to Bound
-	// (bounded requeue passes) so the race is on adoption, not on scheduling.
 	var wg sync.WaitGroup
 	for _, cl := range claims {
 		wg.Add(1)
@@ -128,7 +117,7 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 			req := reconcile.Request{Name: name, Namespace: "default"}
 			for range 10 {
 				if _, err := reconciler.Reconcile(ctx, req); err != nil {
-					continue // transient optimistic-concurrency conflict: retry
+					continue
 				}
 				cur := &extensionsv1beta1.SandboxClaim{}
 				if err := fc.Get(ctx, req.NamespacedName, cur); err == nil && cur.Status.SandboxStatus.Name != "" {
@@ -139,7 +128,6 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Build sandbox -> owning claims across every Sandbox in the namespace.
 	var allSandboxes sandboxv1beta1.SandboxList
 	require.NoError(t, fc.List(ctx, &allSandboxes, client.InNamespace("default")))
 
@@ -156,13 +144,11 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 		}
 	}
 
-	// Invariant 1: no Sandbox is controlled by more than one claim.
 	for sbName, owners := range sandboxToOwners {
 		require.LessOrEqual(t, len(owners), 1,
 			"sandbox %s adopted by multiple claims %v — pod-exclusivity violated under concurrency", sbName, owners)
 	}
 
-	// Invariant 2: each claim owns at most one Sandbox.
 	claimToSandbox := make(map[string][]string)
 	for sbName, owners := range sandboxToOwners {
 		for _, owner := range owners {
@@ -174,11 +160,8 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 			"claim %s owns multiple sandboxes %v", cl.Name, claimToSandbox[cl.Name])
 	}
 
-	// Invariant 3: every warm Sandbox was consumed exactly once (the queue is drained,
-	// none left double-adoptable). With claimCount > warmCount, all warm are adopted.
 	require.Len(t, warmAdopted, warmCount,
 		"expected all %d warm sandboxes adopted exactly once, got %d: %v", warmCount, len(warmAdopted), warmAdopted)
 
-	_, ok := testQueue.Get(npn)
-	require.False(t, ok, "warm queue must be fully drained after all warm sandboxes are claimed")
+	require.Zero(t, testQueue.Len(npn), "warm queue must be fully drained after all warm sandboxes are claimed")
 }

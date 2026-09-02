@@ -22,16 +22,6 @@ import (
 	sandboxv1alpha1 "github.com/cocoonstack/sandbox-operator/api/v1alpha1"
 )
 
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-// Important: Run "make" to regenerate code after modifying this file
-
-// NetworkPolicyManagement defines whether the controller automatically generates
-// and manages a shared NetworkPolicy for this template.
-type NetworkPolicyManagement string
-
-// EnvVarsInjectionPolicy defines whether a SandboxClaim is allowed to inject or override environment variables.
-type EnvVarsInjectionPolicy string
-
 const (
 	// SandboxIDLabel is the label key applied to the Pod to identify the owning Claim UID.
 	// The SandboxClaim controller injects this label into the Pod
@@ -56,6 +46,13 @@ const (
 	// EnvVarsInjectionPolicyDisallowed prevents a SandboxClaim from injecting any environment variables.
 	EnvVarsInjectionPolicyDisallowed EnvVarsInjectionPolicy = "Disallowed"
 )
+
+// NetworkPolicyManagement defines whether the controller automatically generates
+// and manages a shared NetworkPolicy for this template.
+type NetworkPolicyManagement string
+
+// EnvVarsInjectionPolicy defines whether a SandboxClaim is allowed to inject or override environment variables.
+type EnvVarsInjectionPolicy string
 
 // NetworkPolicySpec defines the desired state of the NetworkPolicy.
 type NetworkPolicySpec struct {

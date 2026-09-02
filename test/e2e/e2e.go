@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -208,10 +209,10 @@ func isStandardNode(ctx context.Context, nodeName string) (bool, error) {
 		return false, nil
 	}
 	// vk-cocoon nodes carry the provider taint.
-	for _, t := range n.Spec.Taints {
-		if t.Key == "virtual-kubelet.io/provider" {
-			return false, nil
-		}
+	if slices.ContainsFunc(n.Spec.Taints, func(t corev1.Taint) bool {
+		return t.Key == "virtual-kubelet.io/provider"
+	}) {
+		return false, nil
 	}
 	return true, nil
 }
@@ -273,12 +274,9 @@ func scCoreCreateReady(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("backing pod not found: %w", err)
 	}
-	owned := false
-	for _, o := range pod.OwnerReferences {
-		if o.Kind == "Sandbox" && o.Name == name {
-			owned = true
-		}
-	}
+	owned := slices.ContainsFunc(pod.OwnerReferences, func(o metav1.OwnerReference) bool {
+		return o.Kind == "Sandbox" && o.Name == name
+	})
 	if !owned {
 		return "", fmt.Errorf("pod not owned by Sandbox")
 	}
@@ -327,10 +325,10 @@ func scNoVKInjection(ctx context.Context) (string, error) {
 	if v := pod.Spec.NodeSelector["node.kubernetes.io/instance-type"]; v == "virtual-node" {
 		return "", fmt.Errorf("vk nodeSelector injected")
 	}
-	for _, t := range pod.Spec.Tolerations {
-		if t.Key == "virtual-kubelet.io/provider" {
-			return "", fmt.Errorf("vk toleration injected")
-		}
+	if slices.ContainsFunc(pod.Spec.Tolerations, func(t corev1.Toleration) bool {
+		return t.Key == "virtual-kubelet.io/provider"
+	}) {
+		return "", fmt.Errorf("vk toleration injected")
 	}
 	for k := range pod.Annotations {
 		if strings.HasPrefix(k, "cocoonset.cocoonstack.io/") || strings.HasPrefix(k, "vm.cocoonstack.io/") {
@@ -352,7 +350,6 @@ func scSuspendResume(ctx context.Context) (string, error) {
 	if _, err := waitSandboxReady(ctx, name); err != nil {
 		return "", err
 	}
-	// Suspend
 	s := &sandboxv1beta1.Sandbox{}
 	if err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, s); err != nil {
 		return "", err
@@ -364,7 +361,6 @@ func scSuspendResume(ctx context.Context) (string, error) {
 	if err := waitPodGone(ctx, name, 90*time.Second); err != nil {
 		return "", fmt.Errorf("pod not removed after suspend: %w", err)
 	}
-	// Resume
 	if err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, s); err != nil {
 		return "", err
 	}
@@ -499,7 +495,6 @@ func scTemplateCRUD(ctx context.Context) (string, error) {
 	if err := cl.Create(ctx, t); err != nil {
 		return "", err
 	}
-	// update: add an env injection policy
 	got := &extv1beta1.SandboxTemplate{}
 	if err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, got); err != nil {
 		return "", err
@@ -527,7 +522,6 @@ func scWarmPoolScale(ctx context.Context) (string, error) {
 	if err := cl.Create(ctx, wp); err != nil {
 		return "", err
 	}
-	// wait for warm sandboxes to appear
 	deadline := time.Now().Add(150 * time.Second)
 	for time.Now().Before(deadline) {
 		sl := &sandboxv1beta1.SandboxList{}
@@ -583,7 +577,6 @@ func scClaimWarmHit(ctx context.Context) (string, error) {
 
 func scConversion(ctx context.Context) (string, error) {
 	name := "e2e-conv"
-	// create via v1alpha1
 	_ = cl.Delete(ctx, &sandboxv1alpha1.Sandbox{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: *ns}})
 	time.Sleep(2 * time.Second)
 	a := &sandboxv1alpha1.Sandbox{
@@ -606,7 +599,6 @@ func scConversion(ctx context.Context) (string, error) {
 	if len(b.Spec.PodTemplate.Spec.Containers) == 0 || b.Spec.PodTemplate.Spec.Containers[0].Image != image {
 		return "", fmt.Errorf("conversion lost podTemplate")
 	}
-	// read back as v1alpha1 too
 	a2 := &sandboxv1alpha1.Sandbox{}
 	if err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, a2); err != nil {
 		return "", fmt.Errorf("read as v1alpha1: %w", err)

@@ -56,9 +56,6 @@ const (
 	VolumeClaimTemplatesPolicyOverrides VolumeClaimTemplatesPolicy = "Overrides"
 )
 
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-// Important: Run "make" to regenerate code after modifying this file
-
 // NetworkPolicyManagement defines whether the controller automatically generates
 // and manages a shared NetworkPolicy for this template.
 type NetworkPolicyManagement string

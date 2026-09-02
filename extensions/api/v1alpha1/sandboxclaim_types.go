@@ -52,9 +52,6 @@ const (
 	ShutdownPolicyRetain ShutdownPolicy = "Retain"
 )
 
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-// Important: Run "make" to regenerate code after modifying this file
-
 // WarmPoolPolicy describes the policy for using warm pools.
 // It can be one of the following:
 //   - "none": Do not use any warm pool, always create fresh sandboxes
@@ -194,7 +191,7 @@ type SandboxClaim struct {
 
 // +kubebuilder:object:root=true
 
-// SandboxList contains a list of Sandbox.
+// SandboxClaimList contains a list of SandboxClaim.
 type SandboxClaimList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

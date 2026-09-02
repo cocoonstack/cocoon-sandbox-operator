@@ -85,7 +85,6 @@ func main() {
 	}
 	wantSandboxes := nodes * perNode
 
-	// --- durable etcd stand-in: NodeInventory objects + WarmPool intent ---------
 	// The source is both the publisher's apply target (the O(nodes) write path)
 	// and the store's read source (cache-fed NodeInventory read). No per-sandbox
 	// object is ever created.
@@ -120,11 +119,15 @@ func main() {
 				Address:  fmt.Sprintf("10.%d.%d.%d:7777", k, (i>>8)&0xff, i&0xff),
 			})
 		}
-		pub := scale.NewNodeInventoryPublisher(node, entries, source, logr.Discard())
-		n, err := pub.Publish(ctx)
-		must(err)
-		if n != perNode {
-			fail("publisher summarized %d entries for %s, want %d", n, node, perNode)
+		must(source.Apply(ctx, &scale.NodeInventory{
+			Kind:       scale.NodeInventoryGVK.Kind,
+			APIVersion: scale.NodeInventoryGVK.GroupVersion().String(),
+			Name:       node,
+			Node:       node,
+			Entries:    entries,
+		}))
+		if n := len(entries); n != perNode {
+			fail("published %d entries for %s, want %d", n, node, perNode)
 		}
 	}
 
@@ -140,7 +143,6 @@ func main() {
 		fail("etcd object count %d != nodes+pools (%d+%d)", etcdObjectCount, nodes, pools)
 	}
 
-	// --- stand up the aggregated apiserver in-process ---------------------------
 	store := scale.NewScatterGatherStore(source, scale.WithLogger(logr.Discard()), scale.WithWatchPollInterval(50*time.Millisecond))
 	server, err := sandboxapiserver.NewInProcessServer("l3bench-apiserver", store)
 	must(err)
@@ -149,7 +151,6 @@ func main() {
 
 	rc := newRESTClient(ts.URL)
 
-	// (1) kubectl-equivalent cluster-scoped list: GET /apis/agents.x-k8s.io/v1beta1/sandboxes
 	allList := &sandboxv1beta1.SandboxList{}
 	if err := rc.Get().Resource("sandboxes").Do(ctx).Into(allList); err != nil {
 		fail("client-go cluster-scoped list failed: %v", err)
@@ -158,7 +159,6 @@ func main() {
 		fail("cluster list returned %d sandboxes, want %d", len(allList.Items), wantSandboxes)
 	}
 
-	// (2) kubectl-equivalent namespaced list: GET .../namespaces/<ns>/sandboxes
 	nsList := &sandboxv1beta1.SandboxList{}
 	if err := rc.Get().Namespace(sampleNS).Resource("sandboxes").Do(ctx).Into(nsList); err != nil {
 		fail("client-go namespaced list failed: %v", err)
@@ -169,7 +169,6 @@ func main() {
 		fail("namespaced list returned %d, want %d (>0)", len(nsList.Items), len(wantNS.Items))
 	}
 
-	// (3) per-item Get (owning-node routing): GET .../namespaces/<ns>/sandboxes/<name>
 	got := &sandboxv1beta1.Sandbox{}
 	if err := rc.Get().Namespace(sampleNS).Resource("sandboxes").Name(sampleName).Do(ctx).Into(got); err != nil {
 		fail("client-go get failed: %v", err)
@@ -178,7 +177,6 @@ func main() {
 		fail("get returned %s/%s, want %s/%s", got.Namespace, got.Name, sampleNS, sampleName)
 	}
 
-	// (4) label-selected list proves selector fan-out honoring.
 	labelList := &sandboxv1beta1.SandboxList{}
 	if err := rc.Get().Resource("sandboxes").Param("labelSelector", scale.NodeLabel+"=node-0").Do(ctx).Into(labelList); err != nil {
 		fail("client-go label-selected list failed: %v", err)
@@ -187,7 +185,6 @@ func main() {
 		fail("label-selected list returned %d, want %d", len(labelList.Items), perNode)
 	}
 
-	// (5) watch merge (best-effort): read at least one event off the merged
 	// stream, narrowed to the sample object so the initial sync is a single event.
 	watchEvents, watchOK := exerciseWatch(ctx, rc, sampleNS, sampleName)
 

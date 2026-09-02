@@ -59,7 +59,7 @@ func TestSandboxTemplateConversion(t *testing.T) {
 			},
 			NetworkPolicy: &NetworkPolicySpec{
 				Ingress: []networkingv1.NetworkPolicyIngressRule{
-					{}, // empty ingress rule to verify it gets converted
+					{},
 				},
 			},
 			NetworkPolicyManagement: NetworkPolicyManagementManaged,
@@ -68,13 +68,11 @@ func TestSandboxTemplateConversion(t *testing.T) {
 		},
 	}
 
-	// Convert to Hub (v1beta1)
 	dst := &v1beta1.SandboxTemplate{}
 	if err := src.ConvertTo(dst); err != nil {
 		t.Fatalf("failed to convert to v1beta1: %v", err)
 	}
 
-	// Verify src annotations and labels were not mutated during ConvertTo
 	if val, ok := src.Annotations[v1alpha1SandboxTemplateStateAnnotation]; !ok || val != "some-old-state" {
 		t.Errorf("src.Annotations was mutated during ConvertTo! expected 'some-old-state', got %q", val)
 	}
@@ -89,7 +87,6 @@ func TestSandboxTemplateConversion(t *testing.T) {
 		t.Errorf("dst.Annotations carries the v1alpha1 state stash; the conversion is lossless and must not persist a second copy")
 	}
 
-	// Verify v1beta1 fields
 	if dst.Spec.PodTemplate.Spec.Containers[0].Image != "my-image:latest" {
 		t.Errorf("unexpected image: %s", dst.Spec.PodTemplate.Spec.Containers[0].Image)
 	}
@@ -97,18 +94,15 @@ func TestSandboxTemplateConversion(t *testing.T) {
 		t.Errorf("unexpected EnvVarsInjectionPolicy: %s", dst.Spec.EnvVarsInjectionPolicy)
 	}
 
-	// Convert back to Spoke (v1alpha1)
 	roundTrip := &SandboxTemplate{}
 	if err := roundTrip.ConvertFrom(dst); err != nil {
 		t.Fatalf("failed to convert back to v1alpha1: %v", err)
 	}
 
-	// Verify state annotation was stripped during ConvertFrom
 	if _, ok := roundTrip.Annotations[v1alpha1SandboxTemplateStateAnnotation]; ok {
 		t.Errorf("roundTrip.Annotations still contains the state annotation after ConvertFrom!")
 	}
 
-	// Verify round-trip preserves all fields
 	if roundTrip.Spec.PodTemplate.Spec.Containers[0].Image != src.Spec.PodTemplate.Spec.Containers[0].Image {
 		t.Errorf("roundtrip PodTemplate Image mismatch: expected %q, got %q", src.Spec.PodTemplate.Spec.Containers[0].Image, roundTrip.Spec.PodTemplate.Spec.Containers[0].Image)
 	}
@@ -124,7 +118,6 @@ func TestSandboxTemplateConversion(t *testing.T) {
 }
 
 func TestSandboxTemplateVolumeClaimTemplatesPolicyConversion(t *testing.T) {
-	// 1. Create v1beta1 SandboxTemplate with VolumeClaimTemplatesPolicy: Allowed
 	src := &v1beta1.SandboxTemplate{
 		Name:      "my-template",
 		Namespace: "default",
@@ -133,31 +126,26 @@ func TestSandboxTemplateVolumeClaimTemplatesPolicyConversion(t *testing.T) {
 		},
 	}
 
-	// 2. Convert to Spoke (v1alpha1)
 	spoke := &SandboxTemplate{}
 	if err := spoke.ConvertFrom(src); err != nil {
 		t.Fatalf("failed to convert from v1beta1: %v", err)
 	}
 
-	// Verify v1beta1 policy was preserved in annotations
 	if val, ok := spoke.Annotations["api.agents.x-k8s.io/v1beta1-volume-claim-templates-policy"]; !ok || val != string(v1beta1.VolumeClaimTemplatesPolicyAllowed) {
 		t.Errorf("expected annotation api.agents.x-k8s.io/v1beta1-volume-claim-templates-policy to be 'Allowed', got %q", val)
 	}
 
-	// 3. Convert back to Hub (v1beta1)
 	dst := &v1beta1.SandboxTemplate{}
 	if err := spoke.ConvertTo(dst); err != nil {
 		t.Fatalf("failed to convert to v1beta1: %v", err)
 	}
 
-	// Verify policy was perfectly restored
 	if dst.Spec.VolumeClaimTemplatesPolicy != v1beta1.VolumeClaimTemplatesPolicyAllowed {
 		t.Errorf("roundtrip VolumeClaimTemplatesPolicy mismatch: expected %q, got %q", v1beta1.VolumeClaimTemplatesPolicyAllowed, dst.Spec.VolumeClaimTemplatesPolicy)
 	}
 }
 
 func TestSandboxTemplateVolumeClaimTemplatesPolicyStaleAnnotationClearing(t *testing.T) {
-	// 1. Create v1alpha1 SandboxTemplate with a stale policy annotation
 	spoke := &SandboxTemplate{
 		Name:      "stale-template",
 		Namespace: "default",
@@ -166,38 +154,31 @@ func TestSandboxTemplateVolumeClaimTemplatesPolicyStaleAnnotationClearing(t *tes
 		},
 	}
 
-	// 2. Convert to Hub (v1beta1)
 	dst := &v1beta1.SandboxTemplate{}
 	if err := spoke.ConvertTo(dst); err != nil {
 		t.Fatalf("failed to convert to v1beta1: %v", err)
 	}
 
-	// Verify policy was restored to Allowed
 	if dst.Spec.VolumeClaimTemplatesPolicy != v1beta1.VolumeClaimTemplatesPolicyAllowed {
 		t.Fatalf("expected VolumeClaimTemplatesPolicy Allowed, got %q", dst.Spec.VolumeClaimTemplatesPolicy)
 	}
 
-	// 3. Simulate user clearing the policy in v1beta1
 	dst.Spec.VolumeClaimTemplatesPolicy = ""
 
-	// 4. Convert back to Spoke (v1alpha1)
 	spokeCleared := &SandboxTemplate{}
 	if err := spokeCleared.ConvertFrom(dst); err != nil {
 		t.Fatalf("failed to convert from v1beta1: %v", err)
 	}
 
-	// Verify stale annotation was deleted
 	if val, ok := spokeCleared.Annotations["api.agents.x-k8s.io/v1beta1-volume-claim-templates-policy"]; ok {
 		t.Errorf("expected stale annotation to be deleted, but it remained with value %q", val)
 	}
 
-	// 5. Convert back to Hub (v1beta1) again
 	dstFinal := &v1beta1.SandboxTemplate{}
 	if err := spokeCleared.ConvertTo(dstFinal); err != nil {
 		t.Fatalf("failed to convert to v1beta1 final: %v", err)
 	}
 
-	// Verify policy remains empty (not resurrected)
 	if dstFinal.Spec.VolumeClaimTemplatesPolicy != "" {
 		t.Errorf("expected VolumeClaimTemplatesPolicy to remain empty, got %q", dstFinal.Spec.VolumeClaimTemplatesPolicy)
 	}

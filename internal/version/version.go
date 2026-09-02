@@ -16,7 +16,6 @@
 package version
 
 import (
-	"bytes"
 	"fmt"
 	"runtime"
 	"strings"
@@ -52,6 +51,11 @@ type Info struct {
 	Platform   string `json:"platform"`
 }
 
+// String returns a Go-syntax representation of the Info.
+func (info Info) String() string {
+	return fmt.Sprintf("%#v", info)
+}
+
 // Get returns version information populated with build-time values.
 func Get() Info {
 	return Info{
@@ -64,18 +68,13 @@ func Get() Info {
 	}
 }
 
-// String returns a Go-syntax representation of the Info.
-func (info Info) String() string {
-	return fmt.Sprintf("%#v", info)
-}
-
 // Print returns version information.
 func Print(program string) string {
 	m := Get()
 	m.Program = program
 	t := template.Must(template.New("version").Parse(versionInfoTmpl))
 
-	var buf bytes.Buffer
+	var buf strings.Builder
 	if err := t.ExecuteTemplate(&buf, "version", m); err != nil {
 		panic(err)
 	}

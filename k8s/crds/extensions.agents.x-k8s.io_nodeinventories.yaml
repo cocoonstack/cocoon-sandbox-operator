@@ -45,6 +45,8 @@ spec:
                   type: string
                 phase:
                   type: string
+                template:
+                  type: string
               required:
               - name
               - phase

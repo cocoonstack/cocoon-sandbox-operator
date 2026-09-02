@@ -10,10 +10,6 @@ import (
 	v1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 )
 
-// BenchmarkConvertRoundTrip converts a realistically sized v1alpha1 Sandbox to
-// the hub and back — the per-object cost every v1alpha1 read/write pays in the
-// conversion webhook, N times per LIST. bytes/ann is the round-trip annotation
-// the object carries afterwards.
 func BenchmarkConvertRoundTrip(b *testing.B) {
 	src := benchSandbox()
 	b.ReportAllocs()

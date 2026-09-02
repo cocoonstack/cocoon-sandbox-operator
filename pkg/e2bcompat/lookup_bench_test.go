@@ -8,10 +8,6 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
-// BenchmarkLookupByID resolves one sandbox id living on the last node at the
-// 200x2000 fleet projection — the per-request cost of every single-sandbox e2b
-// verb (get/delete/pause/connect/fork/snapshot/metrics). The requested id uses
-// the published DNS-safe form, the slower of the two accepted spellings.
 func BenchmarkLookupByID(b *testing.B) {
 	const nodes, perNode = 200, 2000
 	src := scale.NewStaticInventorySource()

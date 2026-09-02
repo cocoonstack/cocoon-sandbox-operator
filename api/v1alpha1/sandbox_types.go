@@ -53,8 +53,6 @@ const (
 	SandboxPodNameAnnotation = "agents.x-k8s.io/pod-name"
 	// SandboxTemplateRefAnnotation is the annotation used to track the sandbox template ref.
 	SandboxTemplateRefAnnotation = "agents.x-k8s.io/sandbox-template-ref"
-	// SandboxPodTemplateHashLabel is the label used to track the pod template hash.
-	SandboxPodTemplateHashLabel = "agents.x-k8s.io/sandbox-pod-template-hash"
 	// SandboxPropagatedLabelsAnnotation is the annotation used to track the labels explicitly propagated from sandbox spec to pod.
 	SandboxPropagatedLabelsAnnotation = "agents.x-k8s.io/propagated-labels"
 	// SandboxPropagatedAnnotationsAnnotation is the annotation used to track the annotations explicitly propagated from sandbox spec to pod.

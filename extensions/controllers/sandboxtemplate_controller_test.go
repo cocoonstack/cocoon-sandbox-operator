@@ -72,7 +72,7 @@ func TestSandboxTemplateReconcileNetworkPolicy(t *testing.T) {
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			NetworkPolicyManagement: extensionsv1beta1.NetworkPolicyManagementUnmanaged,
 			NetworkPolicy: &extensionsv1beta1.NetworkPolicySpec{
-				Egress: []networkingv1.NetworkPolicyEgressRule{{}}, // Should be ignored
+				Egress: []networkingv1.NetworkPolicyEgressRule{{}},
 			},
 		},
 	}
@@ -106,7 +106,7 @@ func TestSandboxTemplateReconcileNetworkPolicy(t *testing.T) {
 			},
 		},
 		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"old-label": "outdated"}}, // Will be overwritten
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"old-label": "outdated"}},
 		},
 	}
 	*outdatedNPToUpdate.OwnerReferences[0].Controller = true
@@ -206,7 +206,7 @@ func TestSandboxTemplateReconcileNetworkPolicy(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			scheme := newScheme(t) // Assuming newScheme is in your other test file (it's package level)
+			scheme := newScheme(t)
 			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tc.existingObjects...).Build()
 
 			reconciler := &SandboxTemplateReconciler{
@@ -275,7 +275,6 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 			},
 		}
 
-		// This NetworkPolicy is NOT owned by the template
 		unownedNP := &networkingv1.NetworkPolicy{
 			Name:      "victim-network-policy",
 			Namespace: "default",
@@ -300,7 +299,6 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 			t.Fatalf("reconcile: (%v)", err)
 		}
 
-		// Check if unownedNP still exists
 		var np networkingv1.NetworkPolicy
 		err = client.Get(t.Context(), types.NamespacedName{Name: "victim-network-policy", Namespace: "default"}, &np)
 		if err != nil {
@@ -320,7 +318,6 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 			},
 		}
 
-		// This NetworkPolicy is NOT owned by the template
 		unownedNP := &networkingv1.NetworkPolicy{
 			Name:      "victim-network-policy",
 			Namespace: "default",
@@ -341,12 +338,10 @@ func TestSandboxTemplateReconcile_Vulnerability(t *testing.T) {
 		}
 
 		_, err := reconciler.Reconcile(t.Context(), req)
-		// We expect an error here once fixed, but currently it might succeed and overwrite
 		if err != nil {
 			t.Logf("Reconcile returned error (expected after fix): %v", err)
 		}
 
-		// Check if unownedNP was updated
 		var np networkingv1.NetworkPolicy
 		err = client.Get(t.Context(), types.NamespacedName{Name: "victim-network-policy", Namespace: "default"}, &np)
 		if err != nil {

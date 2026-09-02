@@ -94,14 +94,12 @@ func main() {
 		"path": "admission webhook → SandboxWarmPool(replicas=N) → agents.x-k8s.io Sandbox → vk-cocoon microVM → SandboxClaim adopt(Bound) → owner-authorized delete → reclaim; pure Kubernetes, no proprietary control plane",
 	}
 
-	// (1) prod-desktop baseline on the node — must be unchanged at the end.
 	prodBefore := podCount(ctx, *prodNS, *node)
 	fmt.Printf("[prod] baseline: %d desktop pods on %s\n", prodBefore, *node)
 
 	ensureNS(ctx)
 	ensureTemplate(ctx)
 
-	// (2) Fill the pool: admission admits N Sandbox CRs → N real microVMs.
 	fmt.Printf("[fill] creating pool %s replicas=%d on %s\n", poolName, *poolSize, *node)
 	ensurePool(ctx, int32(*poolSize))
 	admissionPass := true
@@ -111,7 +109,6 @@ func main() {
 		fmt.Printf("[fill] WARN only %d/%d ready before timeout\n", filled, *poolSize)
 	}
 
-	// (3) Four-way cross-check.
 	rr, crc, pods := crossCheck(ctx)
 	cross := map[string]any{
 		"warmpool_ready_replicas": rr, "sandbox_cr_count": crc,
@@ -120,7 +117,6 @@ func main() {
 	res["cross_checks"] = cross
 	fmt.Printf("[cross] readyReplicas=%d sandboxCR=%d pods=%d\n", rr, crc, pods)
 
-	// (4) Fire N claims through admission, wait for Bound.
 	bound, createFails := fireClaims(ctx, *poolSize, *claimConc, *claimWait)
 	res["success"] = bound
 	if createFails > 0 {
@@ -129,13 +125,11 @@ func main() {
 	res["admission_pass"] = admissionPass && bound == *poolSize && rr == *poolSize && crc == *poolSize
 	fmt.Printf("[claim] bound=%d/%d createFails=%d\n", bound, *poolSize, createFails)
 
-	// (5) Release + cleanup: delete claims then pool (owner-authorized), wait 0 leak.
 	releasePass, leaked := releaseAndCleanup(ctx, *cleanupWait)
 	res["release_pass"] = releasePass
 	res["leaked"] = leaked
 	fmt.Printf("[cleanup] releasePass=%v leaked=%d\n", releasePass, leaked)
 
-	// (6) prod-desktops intact.
 	prodAfter := podCount(ctx, *prodNS, *node)
 	res["prod_intact"] = prodAfter
 	res["prod_before"] = prodBefore
@@ -280,7 +274,6 @@ func fireClaims(ctx context.Context, n, conc, timeoutSec int) (bound, createFail
 // and template, and waits until every Sandbox CR and pod this run created on the
 // node reaches 0. Returns whether release completed and the residual leak count.
 func releaseAndCleanup(ctx context.Context, timeoutSec int) (releasePass bool, leaked int) {
-	// Delete claims first (release), then the pool (cascade-delete warm sandboxes).
 	cll := &extv1beta1.SandboxClaimList{}
 	if err := cl.List(ctx, cll, ctrlclient.InNamespace(*ns)); err == nil {
 		for i := range cll.Items {

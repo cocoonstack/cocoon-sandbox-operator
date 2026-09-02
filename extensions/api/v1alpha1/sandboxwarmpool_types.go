@@ -32,9 +32,6 @@ const (
 	OnReplenishSandboxWarmPoolUpdateStrategyType SandboxWarmPoolUpdateStrategyType = "OnReplenish"
 )
 
-// NOTE: json tags are required. Any new fields you add must have json tags for the fields to be serialized.
-// Important: Run "make" to regenerate code after modifying this file
-
 // SandboxWarmPoolSpec defines the desired state of SandboxWarmPool.
 type SandboxWarmPoolSpec struct {
 	// replicas is the desired number of sandboxes in the pool.
