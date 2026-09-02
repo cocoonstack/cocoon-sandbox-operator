@@ -37,6 +37,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -47,7 +49,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	ctrls "github.com/cocoonstack/sandbox-operator/extensions/controllers"
 	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
@@ -124,7 +125,7 @@ func claim(idx int) *extv1beta1.SandboxClaim {
 // warm-pool queue populated with the N sandbox keys (as the event handler would).
 func fixture(n int) (ctrlclient.Client, *queue.SimpleSandboxQueue, []*extv1beta1.SandboxClaim, *runtime.Scheme) {
 	scheme := newScheme()
-	poolHash := sandboxcontrollers.NameHash(poolName)
+	poolHash := hash.Name(poolName)
 	tmplHash := ctrls.SandboxTemplateRefHash(tmplName)
 	poolUID := types.UID("pool-uid")
 

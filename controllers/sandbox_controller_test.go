@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
+
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
@@ -264,7 +266,7 @@ func TestResolvePodName(t *testing.T) {
 func TestReconcile(t *testing.T) {
 	sandboxName := "sandbox-name"
 	sandboxNs := "sandbox-ns"
-	nameHash := NameHash(sandboxName)
+	nameHash := hash.Name(sandboxName)
 	testCases := []struct {
 		name                 string
 		initialObjs          []runtime.Object
@@ -1432,7 +1434,7 @@ func TestReconcilePod(t *testing.T) {
 				Namespace: sandboxNs,
 				UID:       sandboxUID,
 				Labels: map[string]string{
-					sandboxv1beta1.SandboxWarmPoolLabel: NameHash("my-warm-pool"),
+					sandboxv1beta1.SandboxWarmPoolLabel: hash.Name("my-warm-pool"),
 				},
 				OwnerReferences: []metav1.OwnerReference{
 					{
@@ -1456,7 +1458,7 @@ func TestReconcilePod(t *testing.T) {
 				ResourceVersion: "1",
 				Labels: map[string]string{
 					"agents.x-k8s.io/sandbox-name-hash": nameHash,
-					sandboxv1beta1.SandboxWarmPoolLabel: NameHash("my-warm-pool"),
+					sandboxv1beta1.SandboxWarmPoolLabel: hash.Name("my-warm-pool"),
 					"custom-label":                      "label-val",
 				},
 				Annotations: map[string]string{
@@ -1545,7 +1547,7 @@ func TestReconcilePod(t *testing.T) {
 				Namespace: sandboxNs,
 				UID:       sandboxUID,
 				Labels: map[string]string{
-					sandboxv1beta1.SandboxWarmPoolLabel: NameHash("my-warm-pool"),
+					sandboxv1beta1.SandboxWarmPoolLabel: hash.Name("my-warm-pool"),
 				},
 				OwnerReferences: []metav1.OwnerReference{
 					{
@@ -1569,7 +1571,7 @@ func TestReconcilePod(t *testing.T) {
 				ResourceVersion: "2",
 				Labels: map[string]string{
 					"agents.x-k8s.io/sandbox-name-hash":  nameHash,
-					sandboxv1beta1.SandboxWarmPoolLabel:  NameHash("my-warm-pool"),
+					sandboxv1beta1.SandboxWarmPoolLabel:  hash.Name("my-warm-pool"),
 					"custom-label":                       "label-val",
 					sandboxv1beta1.SandboxAdoptableLabel: "true",
 				},
@@ -1693,7 +1695,7 @@ func TestReconcilePod(t *testing.T) {
 				Namespace: sandboxNs,
 				UID:       sandboxUID,
 				Labels: map[string]string{
-					sandboxv1beta1.SandboxWarmPoolLabel:        NameHash("my-warm-pool"),
+					sandboxv1beta1.SandboxWarmPoolLabel:        hash.Name("my-warm-pool"),
 					sandboxv1beta1.SandboxTemplateRefHashLabel: "da1fd924",
 				},
 				OwnerReferences: []metav1.OwnerReference{
@@ -1719,7 +1721,7 @@ func TestReconcilePod(t *testing.T) {
 				Labels: map[string]string{
 					"agents.x-k8s.io/sandbox-name-hash":        nameHash,
 					"custom-label":                             "label-val",
-					sandboxv1beta1.SandboxWarmPoolLabel:        NameHash("my-warm-pool"),
+					sandboxv1beta1.SandboxWarmPoolLabel:        hash.Name("my-warm-pool"),
 					sandboxv1beta1.SandboxTemplateRefHashLabel: "da1fd924",
 				},
 				Annotations: map[string]string{
@@ -2936,7 +2938,7 @@ func TestReconcilePVCs(t *testing.T) {
 	otherUID := types.UID("other-uid-456")
 	pvcTemplateName := "data"
 	pvcName := pvcTemplateName + "-" + sandboxName // "data-test-sandbox"
-	nameHash := NameHash(sandboxName)
+	nameHash := hash.Name(sandboxName)
 
 	sandbox := &sandboxv1beta1.Sandbox{
 		Name:      sandboxName,
@@ -3362,7 +3364,7 @@ func TestMergeVolumeClaimVolumes(t *testing.T) {
 func TestSandboxReconcile_ConditionsDoNotAccumulate(t *testing.T) {
 	sbName := "no-grow-sandbox"
 	sbNs := "default"
-	nameHash := NameHash(sbName)
+	nameHash := hash.Name(sbName)
 
 	sandbox := &sandboxv1beta1.Sandbox{
 		Name: sbName, Namespace: sbNs,

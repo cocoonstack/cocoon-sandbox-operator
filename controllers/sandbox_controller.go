@@ -18,12 +18,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"maps"
 	"reflect"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
 
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -209,7 +210,7 @@ func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers
 }
 
 func (r *SandboxReconciler) reconcileChildResources(ctx context.Context, sandbox *sandboxv1beta1.Sandbox) error {
-	nameHash := NameHash(sandbox.Name)
+	nameHash := hash.Name(sandbox.Name)
 
 	var allErrors error
 
@@ -222,7 +223,7 @@ func (r *SandboxReconciler) reconcileChildResources(ctx context.Context, sandbox
 		sandbox.Status.PodIPs = nil
 		sandbox.Status.NodeName = ""
 	} else {
-		sandbox.Status.LabelSelector = fmt.Sprintf("%s=%s", sandboxLabel, NameHash(sandbox.Name))
+		sandbox.Status.LabelSelector = fmt.Sprintf("%s=%s", sandboxLabel, hash.Name(sandbox.Name))
 		sandbox.Status.PodIPs = podIPsFromStatus(pod.Status.PodIPs)
 		sandbox.Status.NodeName = pod.Spec.NodeName
 	}
@@ -1047,19 +1048,6 @@ func MergeVolumeClaimVolumes(existing []corev1.Volume, pvcVolumes []corev1.Volum
 		}
 	}
 	return append(filtered, pvcVolumes...)
-}
-
-// GetNumericHash generates a raw FNV-1a hash value.
-func GetNumericHash(input string) uint32 {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(input))
-	return h.Sum32()
-}
-
-// NameHash generates an FNV-1a hash from a string and returns
-// it as a fixed-length hexadecimal string.
-func NameHash(objectName string) string {
-	return fmt.Sprintf("%08x", GetNumericHash(objectName))
 }
 
 // checks if the sandbox has expired

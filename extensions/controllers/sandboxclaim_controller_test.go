@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cocoonstack/sandbox-operator/internal/hash"
+
 	"github.com/google/go-cmp/cmp"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
@@ -45,7 +47,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
-	sandboxcontrollers "github.com/cocoonstack/sandbox-operator/controllers"
 	extensionsv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/extensions/controllers/queue"
 	asmetrics "github.com/cocoonstack/sandbox-operator/internal/metrics"
@@ -124,7 +125,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: sandboxv1beta1.PodMetadata{
 					Labels: map[string]string{
-						sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+						sandboxTemplateRefHash: hash.Name("test-template"),
 					},
 				},
 				Spec: template.Spec.PodTemplate.Spec,
@@ -142,7 +143,7 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: sandboxv1beta1.PodMetadata{
 					Labels: map[string]string{
-						sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+						sandboxTemplateRefHash: hash.Name("test-template"),
 					},
 				},
 				Spec: template.Spec.PodTemplate.Spec,
@@ -817,8 +818,8 @@ func TestSandboxClaimReconcile(t *testing.T) {
 					Name:      "adoptable-warm-sandbox",
 					Namespace: "default",
 					Labels: map[string]string{
-						warmPoolSandboxLabel:   sandboxcontrollers.NameHash("test-warmpool-env-override"),
-						sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template-env-override"),
+						warmPoolSandboxLabel:   hash.Name("test-warmpool-env-override"),
+						sandboxTemplateRefHash: hash.Name("test-template-env-override"),
 					},
 					OwnerReferences: []metav1.OwnerReference{{
 						APIVersion: "extensions.agents.x-k8s.io/v1beta1",
@@ -1786,7 +1787,7 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 	}
 
 	warmPoolUID := types.UID("warmpool-uid-123")
-	poolNameHash := sandboxcontrollers.NameHash("test-pool")
+	poolNameHash := hash.Name("test-pool")
 
 	warmPool := &extensionsv1beta1.SandboxWarmPool{
 		Name: "test-pool", Namespace: "default", UID: warmPoolUID,
@@ -1851,7 +1852,7 @@ func TestSandboxClaimSandboxAdoption(t *testing.T) {
 			Namespace: "default",
 			Labels: map[string]string{
 				warmPoolSandboxLabel:   poolNameHash,
-				sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+				sandboxTemplateRefHash: hash.Name("test-template"),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
@@ -2366,7 +2367,7 @@ func TestSandboxClaimNoReAdoption(t *testing.T) {
 		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
 
-	poolNameHash := sandboxcontrollers.NameHash("test-pool")
+	poolNameHash := hash.Name("test-pool")
 
 	// Claim that already adopted a sandbox (name recorded in status)
 	claim := &extensionsv1beta1.SandboxClaim{
@@ -2392,7 +2393,7 @@ func TestSandboxClaimNoReAdoption(t *testing.T) {
 		Name: "pool-sb-extra", Namespace: "default",
 		Labels: map[string]string{
 			warmPoolSandboxLabel:   poolNameHash,
-			sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+			sandboxTemplateRefHash: hash.Name("test-template"),
 		},
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "img"}}}}}, OperatingMode: sandboxv1beta1.SandboxOperatingModeRunning},
 		Status: sandboxv1beta1.SandboxStatus{
@@ -2663,13 +2664,13 @@ func TestSandboxClaimCreationMetric(t *testing.T) {
 		asmetrics.SandboxClaimCreationTotal.Reset()
 
 		// Create a warm pool sandbox
-		poolNameHash := sandboxcontrollers.NameHash("test-warmpool")
+		poolNameHash := hash.Name("test-warmpool")
 		warmSandbox := &sandboxv1beta1.Sandbox{
 			Name:      "warm-sb",
 			Namespace: "default",
 			Labels: map[string]string{
 				warmPoolSandboxLabel:          poolNameHash,
-				sandboxTemplateRefHash:        sandboxcontrollers.NameHash("test-template"),
+				sandboxTemplateRefHash:        hash.Name("test-template"),
 				sandboxv1beta1.CreatedByLabel: "controller",
 			},
 			Annotations: map[string]string{
@@ -3258,7 +3259,7 @@ func TestSandboxClaimReconcileCleanup(t *testing.T) {
 
 func TestVerifySandboxCandidate_NamespaceIsolation(t *testing.T) {
 	templateName := "test-template"
-	templateHash := sandboxcontrollers.NameHash(templateName)
+	templateHash := hash.Name(templateName)
 
 	claim := &extensionsv1beta1.SandboxClaim{
 		Name:      "test-claim",
@@ -3356,8 +3357,8 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 		UID:       "adopted-sb-uid",
 		Labels: map[string]string{
 			extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
-			sandboxTemplateRefHash:           sandboxcontrollers.NameHash("test-template"),
-			warmPoolSandboxLabel:             sandboxcontrollers.NameHash("test-pool"),
+			sandboxTemplateRefHash:           hash.Name("test-template"),
+			warmPoolSandboxLabel:             hash.Name("test-pool"),
 		},
 		OwnerReferences: []metav1.OwnerReference{{
 			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
@@ -3378,13 +3379,13 @@ func TestSandboxClaimPreventsDuplicateAdoptionDuringCacheLag(t *testing.T) {
 	}
 
 	// Another sandbox in the warm pool that we want to make sure doesn't get adopted
-	poolNameHash := sandboxcontrollers.NameHash("test-pool")
+	poolNameHash := hash.Name("test-pool")
 	extraSandbox := &sandboxv1beta1.Sandbox{
 		Name:      "pool-sb-extra",
 		Namespace: "default",
 		Labels: map[string]string{
 			warmPoolSandboxLabel:   poolNameHash,
-			sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+			sandboxTemplateRefHash: hash.Name("test-template"),
 		},
 		OwnerReferences: []metav1.OwnerReference{{
 			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
@@ -3555,8 +3556,8 @@ func TestSandboxClaimAdoptionCacheLagDoesNotRepatch(t *testing.T) {
 		UID:       "adopted-sb-uid",
 		Labels: map[string]string{
 			extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
-			sandboxTemplateRefHash:           sandboxcontrollers.NameHash("test-template"),
-			warmPoolSandboxLabel:             sandboxcontrollers.NameHash("test-pool"),
+			sandboxTemplateRefHash:           hash.Name("test-template"),
+			warmPoolSandboxLabel:             hash.Name("test-pool"),
 		},
 		OwnerReferences: []metav1.OwnerReference{{
 			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
@@ -3694,8 +3695,8 @@ func TestSandboxClaimAdoptionCacheLagPreservesFinalizedStatus(t *testing.T) {
 		UID:       "adopted-sb-uid",
 		Labels: map[string]string{
 			extensionsv1beta1.SandboxIDLabel: "claim-uid-123",
-			sandboxTemplateRefHash:           sandboxcontrollers.NameHash("test-template"),
-			warmPoolSandboxLabel:             sandboxcontrollers.NameHash("test-pool"),
+			sandboxTemplateRefHash:           hash.Name("test-template"),
+			warmPoolSandboxLabel:             hash.Name("test-pool"),
 		},
 		OwnerReferences: []metav1.OwnerReference{{
 			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
@@ -3810,8 +3811,8 @@ func TestSandboxClaimFreshAdoptionDoesNotRepatchDuringCacheLag(t *testing.T) {
 		Namespace: "default",
 		UID:       "warm-sb-uid",
 		Labels: map[string]string{
-			warmPoolSandboxLabel:   sandboxcontrollers.NameHash("test-pool"),
-			sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+			warmPoolSandboxLabel:   hash.Name("test-pool"),
+			sandboxTemplateRefHash: hash.Name("test-template"),
 		},
 		OwnerReferences: []metav1.OwnerReference{{
 			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
@@ -3945,8 +3946,8 @@ func TestSandboxClaimPreventsAdoptionFromWrongWarmPool(t *testing.T) {
 		Namespace: "default",
 		UID:       "wrong-sb-uid",
 		Labels: map[string]string{
-			warmPoolSandboxLabel:   sandboxcontrollers.NameHash("wrong-pool"),
-			sandboxTemplateRefHash: sandboxcontrollers.NameHash("correct-template"),
+			warmPoolSandboxLabel:   hash.Name("wrong-pool"),
+			sandboxTemplateRefHash: hash.Name("correct-template"),
 		},
 		OwnerReferences: []metav1.OwnerReference{{
 			APIVersion: "extensions.agents.x-k8s.io/v1beta1",
@@ -4152,8 +4153,8 @@ func TestMapWarmPoolToClaims(t *testing.T) {
 
 func TestIsAdoptable_RejectsUnowned(t *testing.T) {
 	// 1. Create a warm pool template hash
-	poolNameHash := sandboxcontrollers.NameHash("test-pool")
-	templateHash := sandboxcontrollers.NameHash("test-template")
+	poolNameHash := hash.Name("test-pool")
+	templateHash := hash.Name("test-template")
 
 	// 2. Mock an unowned Sandbox (no OwnerReferences)
 	unownedSandbox := &sandboxv1beta1.Sandbox{
@@ -4212,14 +4213,14 @@ func TestSandboxClaimAdoptionStrategy(t *testing.T) {
 		if ready {
 			conditionStatus = metav1.ConditionTrue
 		}
-		poolNameHash := sandboxcontrollers.NameHash("test-pool")
+		poolNameHash := hash.Name("test-pool")
 		return &sandboxv1beta1.Sandbox{
 			Name:              name,
 			Namespace:         "default",
 			CreationTimestamp: creationTime,
 			Labels: map[string]string{
 				warmPoolSandboxLabel:   poolNameHash,
-				sandboxTemplateRefHash: sandboxcontrollers.NameHash("test-template"),
+				sandboxTemplateRefHash: hash.Name("test-template"),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
@@ -4495,13 +4496,13 @@ func TestCreateSandboxClaimVolumeClaimTemplatesSuccess(t *testing.T) {
 			var readyWarmSandbox *sandboxv1beta1.Sandbox
 			warmSandboxQueue := queue.NewSimpleSandboxQueue()
 			if tc.setupWarmPoolSandbox {
-				poolNameHash := sandboxcontrollers.NameHash("vct-warmpool")
+				poolNameHash := hash.Name("vct-warmpool")
 				readyWarmSandbox = &sandboxv1beta1.Sandbox{
 					Name:      "warm-sandbox",
 					Namespace: "default",
 					Labels: map[string]string{
 						warmPoolSandboxLabel:   poolNameHash,
-						sandboxTemplateRefHash: sandboxcontrollers.NameHash("vct-template"),
+						sandboxTemplateRefHash: hash.Name("vct-template"),
 					},
 					OwnerReferences: []metav1.OwnerReference{{
 						APIVersion: "extensions.agents.x-k8s.io/v1beta1",

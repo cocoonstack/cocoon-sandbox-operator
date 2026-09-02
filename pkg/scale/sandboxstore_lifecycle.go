@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cocoonstack/sandbox-operator/pkg/scale/sandboxd"
+	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
 // Pause hibernates a delivered sandbox on its owning node.
