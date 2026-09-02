@@ -354,8 +354,8 @@ func (s *Server) writeLookupError(w http.ResponseWriter, err error, id, op strin
 }
 
 // detailFor renders a live Sandbox as the e2b detail shape. Fields e2b requires
-// but cocoon does not track per sandbox (disk size, end-of-life) are reported as
-// zero/derived values rather than omitted, so the SDK's decoder stays happy.
+// but cocoon does not track per sandbox (disk size) are reported as zero values
+// rather than omitted, so the SDK's decoder stays happy.
 func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	started := sb.CreationTimestamp.Time
 	if started.IsZero() {

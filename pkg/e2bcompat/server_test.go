@@ -215,6 +215,24 @@ func TestGetReportsDetail(t *testing.T) {
 	}
 }
 
+func TestGetReportsTheGrantedDeadlineAsEndAt(t *testing.T) {
+	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04", "tok-9")
+	sb.Annotations[scale.DeadlineAnnotation] = "2030-01-02T03:04:05Z"
+	h := newTestServer(t, &fakeStore{items: []sandboxv1beta1.Sandbox{sb}})
+
+	w := do(t, h, http.MethodGet, "/sandboxes/sb_one", "", testKey)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var got SandboxDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.EndAt != "2030-01-02T03:04:05Z" {
+		t.Errorf("endAt = %q, want the granted deadline", got.EndAt)
+	}
+}
+
 // TestListReturnsArray: the SDK decodes a bare JSON array, not an object.
 func TestListReturnsArray(t *testing.T) {
 	store := &fakeStore{items: []sandboxv1beta1.Sandbox{

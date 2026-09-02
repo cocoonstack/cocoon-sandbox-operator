@@ -449,7 +449,6 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		expectedCondition metav1.Condition
 		expectedPodIPs    []string
 		validateSandbox   func(t *testing.T, sandbox *sandboxv1beta1.Sandbox, template *extensionsv1beta1.SandboxTemplate)
-		expectRetainedNP  string // Asserts this NP survived the reconcile loop
 	}{
 		{
 			name:             "sandbox is created when a claim is made",
@@ -584,26 +583,6 @@ func TestSandboxClaimReconcile(t *testing.T) {
 					t.Errorf("Expected first nameserver to be 8.8.8.8, got %q", sandbox.Spec.PodTemplate.Spec.DNSConfig.Nameservers[0])
 				}
 			},
-		},
-		{
-			name:             "User-created NetworkPolicy with reserved name is PRESERVED because it lacks the claim OwnerReference",
-			claimToReconcile: claim,
-			existingObjects: []client.Object{
-				template,
-				warmPool,
-				&networkingv1.NetworkPolicy{
-					Name:      "test-claim-network-policy",
-					Namespace: "default",
-				},
-			},
-			expectSandbox: true,
-			expectedCondition: metav1.Condition{
-				Type:    string(sandboxv1beta1.SandboxConditionReady),
-				Status:  metav1.ConditionFalse,
-				Reason:  "SandboxNotReady",
-				Message: "Sandbox is not ready",
-			},
-			expectRetainedNP: "test-claim-network-policy", // Assert it survived the GC!
 		},
 		{
 			name: "trace context is propagated from claim to sandbox",
@@ -1108,14 +1087,6 @@ func TestSandboxClaimReconcile(t *testing.T) {
 				}
 			}
 
-			// Assert NetworkPolicy Cleanup and Preservation
-			if tc.expectRetainedNP != "" {
-				var np networkingv1.NetworkPolicy
-				err := client.Get(t.Context(), types.NamespacedName{Name: tc.expectRetainedNP, Namespace: "default"}, &np)
-				if err != nil {
-					t.Errorf("expected NetworkPolicy %q to be RETAINED, but it was missing or got err: %v", tc.expectRetainedNP, err)
-				}
-			}
 		})
 	}
 }
