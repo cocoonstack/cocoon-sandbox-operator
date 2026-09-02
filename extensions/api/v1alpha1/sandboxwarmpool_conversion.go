@@ -30,7 +30,8 @@ func (s *SandboxWarmPool) ConvertTo(dstRaw conversion.Hub) error {
 	convertWarmPoolSpecTo(&s.Spec, &dst.Spec)
 	convertWarmPoolStatusTo(&s.Status, &dst.Status)
 
-	return stashV1alpha1State(dst, v1alpha1SandboxWarmPoolStateAnnotation, "SandboxWarmPool", s.DeepCopy())
+	delete(dst.Annotations, v1alpha1SandboxWarmPoolStateAnnotation)
+	return nil
 }
 
 // ConvertFrom converts from the Hub version (v1beta1) to this SandboxWarmPool.

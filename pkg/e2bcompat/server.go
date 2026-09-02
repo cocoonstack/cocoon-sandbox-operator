@@ -365,12 +365,16 @@ func (s *Server) detailFor(sb *sandboxv1beta1.Sandbox) SandboxDetail {
 	if sb.Labels[scale.PhaseLabel] == phaseHibernated {
 		state = StatePaused
 	}
+	endAt := started.Add(DefaultTimeoutSeconds * time.Second)
+	if deadline, err := time.Parse(time.RFC3339, sb.Annotations[scale.DeadlineAnnotation]); err == nil {
+		endAt = deadline
+	}
 	return SandboxDetail{
 		TemplateID:      templateOf(sb),
 		SandboxID:       publicID(sb.Annotations[scale.ClaimIDAnnotation]),
 		ClientID:        sb.Status.NodeName,
 		StartedAt:       started.UTC().Format(time.RFC3339),
-		EndAt:           started.Add(DefaultTimeoutSeconds * time.Second).UTC().Format(time.RFC3339),
+		EndAt:           endAt.UTC().Format(time.RFC3339),
 		State:           state,
 		EnvdVersion:     s.opts.EnvdVersion,
 		EnvdAccessToken: sb.Annotations[tokenAnnotation],

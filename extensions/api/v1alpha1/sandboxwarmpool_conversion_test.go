@@ -15,7 +15,6 @@
 package v1alpha1
 
 import (
-	"encoding/json"
 	"testing"
 
 	v1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
@@ -82,14 +81,8 @@ func TestSandboxWarmPoolConversion(t *testing.T) {
 				t.Errorf("expected 1 label in src, got %d", len(src.Labels))
 			}
 
-			// Verify the marshaled state in dst does not contain the state annotation itself (no nesting)
-			marshaledState := dst.Annotations[v1alpha1SandboxWarmPoolStateAnnotation]
-			var stateObj SandboxWarmPool
-			if err := json.Unmarshal([]byte(marshaledState), &stateObj); err != nil {
-				t.Fatalf("failed to unmarshal state from dst: %v", err)
-			}
-			if _, ok := stateObj.Annotations[v1alpha1SandboxWarmPoolStateAnnotation]; ok {
-				t.Errorf("dst.Annotations state nestedly contains the state annotation! causing exponential growth")
+			if _, ok := dst.Annotations[v1alpha1SandboxWarmPoolStateAnnotation]; ok {
+				t.Errorf("dst.Annotations carries the v1alpha1 state stash; the conversion is lossless and must not persist a second copy")
 			}
 
 			// Verify v1beta1 fields

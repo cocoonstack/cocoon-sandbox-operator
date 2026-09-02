@@ -693,7 +693,7 @@ func slowStartBatch(ctx context.Context, count int, initialBatchSize int, fn fun
 			return successes, ctx.Err()
 		}
 
-		eg, _ := errgroup.WithContext(ctx)
+		var eg errgroup.Group
 		var batchSuccesses atomic.Int64
 
 		for i := range batchSize {

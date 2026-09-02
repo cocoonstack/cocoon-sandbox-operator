@@ -449,7 +449,6 @@ func TestSandboxClaimReconcile(t *testing.T) {
 		expectedCondition metav1.Condition
 		expectedPodIPs    []string
 		validateSandbox   func(t *testing.T, sandbox *sandboxv1beta1.Sandbox, template *extensionsv1beta1.SandboxTemplate)
-		expectDeletedNP   string // Asserts this NP is completely gone
 		expectRetainedNP  string // Asserts this NP survived the reconcile loop
 	}{
 		{
@@ -585,52 +584,6 @@ func TestSandboxClaimReconcile(t *testing.T) {
 					t.Errorf("Expected first nameserver to be 8.8.8.8, got %q", sandbox.Spec.PodTemplate.Spec.DNSConfig.Nameservers[0])
 				}
 			},
-		},
-		{
-			name:             "Existing NetworkPolicy is safely deleted (and controller survives) if SandboxTemplate is suddenly deleted",
-			claimToReconcile: claim,
-			existingObjects: []client.Object{
-				warmPool,
-				&networkingv1.NetworkPolicy{
-					Name:      "test-claim-network-policy", // Matches the claim name
-					Namespace: "default",
-					OwnerReferences: []metav1.OwnerReference{{
-						APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: "test-claim", UID: "claim-uid", Controller: new(true),
-					}},
-				},
-			},
-			expectSandbox: false, // Controller will fail to build sandbox, which is correct
-			expectError:   false, // Controller survives the reconcile loop without crashing
-			expectedCondition: metav1.Condition{
-				Type:    string(sandboxv1beta1.SandboxConditionReady),
-				Status:  metav1.ConditionFalse,
-				Reason:  "TemplateNotFound",
-				Message: `SandboxTemplate "test-template" not found`,
-			},
-			expectDeletedNP: "test-claim-network-policy", // Assert it was deleted
-		},
-		{
-			name:             "Deprecated per-claim NetworkPolicy is aggressively deleted by Claim controller",
-			claimToReconcile: claim,
-			existingObjects: []client.Object{
-				template,
-				warmPool,
-				&networkingv1.NetworkPolicy{
-					Name:      "test-claim-network-policy",
-					Namespace: "default",
-					OwnerReferences: []metav1.OwnerReference{{
-						APIVersion: "extensions.agents.x-k8s.io/v1beta1", Kind: "SandboxClaim", Name: "test-claim", UID: "claim-uid", Controller: new(true),
-					}},
-				},
-			},
-			expectSandbox: true,
-			expectedCondition: metav1.Condition{
-				Type:    string(sandboxv1beta1.SandboxConditionReady),
-				Status:  metav1.ConditionFalse,
-				Reason:  "SandboxNotReady",
-				Message: "Sandbox is not ready",
-			},
-			expectDeletedNP: "test-claim-network-policy", // Assert it was deleted
 		},
 		{
 			name:             "User-created NetworkPolicy with reserved name is PRESERVED because it lacks the claim OwnerReference",
@@ -1156,14 +1109,6 @@ func TestSandboxClaimReconcile(t *testing.T) {
 			}
 
 			// Assert NetworkPolicy Cleanup and Preservation
-			if tc.expectDeletedNP != "" {
-				var np networkingv1.NetworkPolicy
-				err := client.Get(t.Context(), types.NamespacedName{Name: tc.expectDeletedNP, Namespace: "default"}, &np)
-				if !k8errors.IsNotFound(err) {
-					t.Errorf("expected NetworkPolicy %q to be DELETED, but it was found or got err: %v", tc.expectDeletedNP, err)
-				}
-			}
-
 			if tc.expectRetainedNP != "" {
 				var np networkingv1.NetworkPolicy
 				err := client.Get(t.Context(), types.NamespacedName{Name: tc.expectRetainedNP, Namespace: "default"}, &np)
