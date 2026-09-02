@@ -191,19 +191,7 @@ func TestDeleteUnknownSandboxIs404(t *testing.T) {
 
 // TestGetReportsDetail checks the detail shape the SDK decodes on getInfo.
 func TestGetReportsDetail(t *testing.T) {
-	store := &fakeStore{items: []sandboxv1beta1.Sandbox{
-		liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04", "tok-9"),
-	}}
-	h := newTestServer(t, store)
-
-	w := do(t, h, http.MethodGet, "/sandboxes/sb_one", "", testKey)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
-	}
-	var got SandboxDetail
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	got := getDetail(t, liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04", "tok-9"))
 	if got.SandboxID != "sb-one" || got.TemplateID != "registry/rt:24.04" || got.ClientID != "node-a" {
 		t.Errorf("detail = %+v, want the live sandbox's id/template/node", got)
 	}
@@ -219,17 +207,7 @@ func TestGetReportsDetail(t *testing.T) {
 func TestGetReportsTheGrantedDeadlineAsEndAt(t *testing.T) {
 	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04", "tok-9")
 	sb.Annotations[scale.DeadlineAnnotation] = "2030-01-02T03:04:05Z"
-	h := newTestServer(t, &fakeStore{items: []sandboxv1beta1.Sandbox{sb}})
-
-	w := do(t, h, http.MethodGet, "/sandboxes/sb_one", "", testKey)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
-	}
-	var got SandboxDetail
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if got.EndAt != "2030-01-02T03:04:05Z" {
+	if got := getDetail(t, sb); got.EndAt != "2030-01-02T03:04:05Z" {
 		t.Errorf("endAt = %q, want the granted deadline", got.EndAt)
 	}
 }
@@ -237,17 +215,7 @@ func TestGetReportsTheGrantedDeadlineAsEndAt(t *testing.T) {
 func TestGetReportsTheDefaultEndAtWithoutADeadline(t *testing.T) {
 	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04", "tok-9")
 	sb.CreationTimestamp = metav1.NewTime(time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC))
-	h := newTestServer(t, &fakeStore{items: []sandboxv1beta1.Sandbox{sb}})
-
-	w := do(t, h, http.MethodGet, "/sandboxes/sb_one", "", testKey)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
-	}
-	var got SandboxDetail
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if got.EndAt != "2030-01-02T03:04:20Z" {
+	if got := getDetail(t, sb); got.EndAt != "2030-01-02T03:04:20Z" {
 		t.Errorf("endAt = %q, want startedAt + %ds", got.EndAt, DefaultTimeoutSeconds)
 	}
 }
@@ -452,6 +420,20 @@ func (f *fakeStore) Promote(context.Context, string, string, string) (scale.Pool
 
 func (f *fakeStore) Stats(context.Context, string, string) (scale.SandboxStats, error) {
 	return scale.SandboxStats{}, nil
+}
+
+func getDetail(t *testing.T, sb sandboxv1beta1.Sandbox) SandboxDetail {
+	t.Helper()
+	h := newTestServer(t, &fakeStore{items: []sandboxv1beta1.Sandbox{sb}})
+	w := do(t, h, http.MethodGet, "/sandboxes/sb_one", "", testKey)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var got SandboxDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return got
 }
 
 func newTestServer(t *testing.T, store scale.SandboxStore, opts ...func(*Options)) http.Handler {

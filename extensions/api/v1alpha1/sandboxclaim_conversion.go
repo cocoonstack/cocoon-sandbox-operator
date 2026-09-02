@@ -58,7 +58,7 @@ func (s *SandboxClaim) ConvertTo(dstRaw conversion.Hub) error {
 		}
 	}
 
-	return stashV1alpha1State(dst, v1alpha1SandboxClaimStateAnnotation, "SandboxClaim", s.DeepCopy())
+	return stashClaimState(dst, s.DeepCopy())
 }
 
 // ConvertFrom converts from the Hub version (v1beta1) to this SandboxClaim.
@@ -244,4 +244,17 @@ func convertClaimStatusFrom(src *v1beta1.SandboxClaimStatus, dst *SandboxClaimSt
 		Name:   src.SandboxStatus.Name,
 		PodIPs: src.SandboxStatus.PodIPs,
 	}
+}
+
+func stashClaimState(dst *v1beta1.SandboxClaim, sCopy *SandboxClaim) error {
+	delete(sCopy.Annotations, v1alpha1SandboxClaimStateAnnotation)
+	stateJSON, err := json.Marshal(sCopy)
+	if err != nil {
+		return fmt.Errorf("marshal v1alpha1 SandboxClaim state: %w", err)
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[v1alpha1SandboxClaimStateAnnotation] = string(stateJSON)
+	return nil
 }
