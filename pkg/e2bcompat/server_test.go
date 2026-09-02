@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -230,6 +231,24 @@ func TestGetReportsTheGrantedDeadlineAsEndAt(t *testing.T) {
 	}
 	if got.EndAt != "2030-01-02T03:04:05Z" {
 		t.Errorf("endAt = %q, want the granted deadline", got.EndAt)
+	}
+}
+
+func TestGetReportsTheDefaultEndAtWithoutADeadline(t *testing.T) {
+	sb := liveSandbox("e2b-aaa", "sb_one", "node-a", "registry/rt:24.04", "tok-9")
+	sb.CreationTimestamp = metav1.NewTime(time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC))
+	h := newTestServer(t, &fakeStore{items: []sandboxv1beta1.Sandbox{sb}})
+
+	w := do(t, h, http.MethodGet, "/sandboxes/sb_one", "", testKey)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var got SandboxDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.EndAt != "2030-01-02T03:04:20Z" {
+		t.Errorf("endAt = %q, want startedAt + %ds", got.EndAt, DefaultTimeoutSeconds)
 	}
 }
 
