@@ -112,8 +112,6 @@ type triggeredAdoptionEntry struct {
 	sandbox string
 }
 
-// nodeSpread is one node's queued warm-sandbox count and the arrival position
-// of its first key, the pair the NodeSpread pick needs in a single pass.
 type nodeSpread struct {
 	count int
 	first int
@@ -1764,9 +1762,6 @@ func stagedAnnotationsSurvived(claim *extensionsv1beta1.SandboxClaim, staged map
 	return true
 }
 
-// pickNodeSpread picks the queued sandbox on the node with the most remaining
-// warm capacity, which has been drawn from the least, breaking ties by arrival
-// order. One pass and one map: it runs under the pool's lock on every warm claim.
 func pickNodeSpread(keys []queue.SandboxKey) (queue.SandboxKey, bool) {
 	if len(keys) == 0 {
 		return queue.SandboxKey{}, false
@@ -1881,19 +1876,13 @@ func claimSandboxChangePredicate() predicate.Funcs {
 	}
 }
 
-// sandboxConditionChanged reports whether a condition the claim mirrors
-// verbatim differs between two revisions. Reason and message count: the claim
-// forwards the whole condition, so a reason flip under an unchanged status is a
-// status change the claim must observe.
 func sandboxConditionChanged(oldSb, newSb *v1beta1.Sandbox, conditionType string) bool {
 	oldCond := meta.FindStatusCondition(oldSb.Status.Conditions, conditionType)
 	newCond := meta.FindStatusCondition(newSb.Status.Conditions, conditionType)
 	if oldCond == nil || newCond == nil {
 		return oldCond != newCond
 	}
-	return oldCond.Status != newCond.Status ||
-		oldCond.Reason != newCond.Reason ||
-		oldCond.Message != newCond.Message
+	return *oldCond != *newCond
 }
 
 // isSandboxReady checks if a sandbox has Ready=True condition.

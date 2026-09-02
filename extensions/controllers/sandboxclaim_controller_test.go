@@ -4924,6 +4924,12 @@ func TestClaimSandboxPredicatePassesAReasonOnlyReadyChange(t *testing.T) {
 			new:  ready(metav1.ConditionFalse, sandboxv1beta1.SandboxReasonDependenciesNotReady, "Pod does not exist"),
 			want: false,
 		},
+		{
+			name: "observed generation only",
+			old:  ready(metav1.ConditionFalse, sandboxv1beta1.SandboxReasonDependenciesNotReady, "Pod does not exist"),
+			new:  withObservedGeneration(ready(metav1.ConditionFalse, sandboxv1beta1.SandboxReasonDependenciesNotReady, "Pod does not exist"), 2),
+			want: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -5045,3 +5051,8 @@ func (m *mockTracer) IsRecording(_ context.Context) bool {
 }
 
 func (m *mockTracer) AddEvent(_ context.Context, _ string, _ map[string]string) {}
+
+func withObservedGeneration(sb *sandboxv1beta1.Sandbox, gen int64) *sandboxv1beta1.Sandbox {
+	sb.Status.Conditions[0].ObservedGeneration = gen
+	return sb
+}
