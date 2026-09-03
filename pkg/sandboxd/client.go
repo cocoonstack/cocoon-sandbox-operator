@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -207,8 +208,12 @@ func (c *Client) Release(ctx context.Context, id, token string) error {
 	if id == "" {
 		return fmt.Errorf("sandboxd: release requires a sandbox id")
 	}
-	u := c.baseURL + "/v1/sandboxes/" + url.PathEscape(id) + "/release"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	return c.sendNoBody(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/release", token, "release", http.StatusNoContent, http.StatusNotFound)
+}
+
+// sendNoBody performs a body-less request authenticated with token, accepting the statuses in ok.
+func (c *Client) sendNoBody(ctx context.Context, method, path, token, op string, ok ...int) error {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
@@ -216,16 +221,14 @@ func (c *Client) Release(ctx context.Context, id, token string) error {
 
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("sandboxd: release: %w", err)
+		return fmt.Errorf("sandboxd: %s: %w", op, err)
 	}
 	defer drainAndClose(resp)
 
-	switch resp.StatusCode {
-	case http.StatusNoContent, http.StatusNotFound:
-		return nil
-	default:
+	if !slices.Contains(ok, resp.StatusCode) {
 		return statusError(resp)
 	}
+	return nil
 }
 
 func (c *Client) authenticate(req *http.Request, token string) {

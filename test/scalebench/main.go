@@ -68,13 +68,11 @@ var (
 	maxPasses = flag.Int("max-passes", 8, "max reconcile passes per claim before giving up")
 )
 
-func must(err error) { benchutil.Must(err) }
-
 func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
-	must(sandboxv1beta1.AddToScheme(s))
-	must(extv1beta1.AddToScheme(s))
-	must(corev1.AddToScheme(s))
+	benchutil.Must(sandboxv1beta1.AddToScheme(s))
+	benchutil.Must(extv1beta1.AddToScheme(s))
+	benchutil.Must(corev1.AddToScheme(s))
 	return s
 }
 
@@ -273,12 +271,12 @@ func main() {
 	var sizes []int
 	for _, s := range strings.Split(*sizesFlag, ",") {
 		v, err := strconv.Atoi(strings.TrimSpace(s))
-		must(err)
+		benchutil.Must(err)
 		sizes = append(sizes, v)
 	}
 	sort.Ints(sizes)
 	if len(sizes) < 2 {
-		must(fmt.Errorf("need at least two sizes to measure a ratio, got %v", sizes))
+		benchutil.Must(fmt.Errorf("need at least two sizes to measure a ratio, got %v", sizes))
 	}
 
 	results := make([]sizeResult, 0, len(sizes))
@@ -327,7 +325,7 @@ func main() {
 		"results":          results,
 	}
 	b, _ := json.MarshalIndent(out, "", "  ")
-	must(os.WriteFile(*outFlag, b, 0o644))
+	benchutil.Must(os.WriteFile(*outFlag, b, 0o644))
 	fmt.Printf("fast p50 ratio (N=%d/N=%d) = %.3f (threshold %.1f); naive ratio = %.3f; pass=%v\n",
 		hi.N, lo.N, fastRatio, *threshold, naiveRatio, pass)
 	fmt.Printf("wrote %s\n", *outFlag)

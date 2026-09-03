@@ -16,10 +16,6 @@ import (
 // design projects.
 const maxReplyBytes = 16 << 20
 
-// The lifecycle verbs take sandboxd's operator path under the fleet root token:
-// a per-sandbox secret would turn the control plane's O(nodes) storage into
-// O(sandboxes).
-
 // ForkSpec is the POST /v1/sandboxes/{id}/fork body. Token stays empty on the
 // operator path; Count must be within the node's max_fork_count.
 type ForkSpec struct {
@@ -55,23 +51,6 @@ type PoolKey struct {
 	Net      string `json:"net,omitempty"`
 	Size     string `json:"size,omitempty"`
 	Engine   string `json:"engine,omitempty"`
-}
-
-// CheckpointClaimSpec is the POST /v1/checkpoints/{id}/claim body.
-type CheckpointClaimSpec struct {
-	TTLSeconds int `json:"ttl_seconds,omitempty"`
-}
-
-// PromoteSpec is the POST /v1/sandboxes/{id}/promote body: it publishes the
-// sandbox's state as a node-local template future claims clone from.
-type PromoteSpec struct {
-	Token    string `json:"token,omitempty"`
-	Template string `json:"template"`
-}
-
-// PromoteResult returns the promoted template's full key.
-type PromoteResult struct {
-	Key PoolKey `json:"key"`
 }
 
 // SandboxSummary is one live claim as the owning node reports it.
@@ -138,17 +117,6 @@ func (c *Client) Checkpoint(ctx context.Context, id string, spec CheckpointSpec)
 	return out.Checkpoint, err
 }
 
-// ClaimCheckpoint performs POST /v1/checkpoints/{id}/claim, delivering a fresh
-// sandbox branched from the checkpoint's exact state.
-func (c *Client) ClaimCheckpoint(ctx context.Context, checkpointID string, spec CheckpointClaimSpec) (ClaimResult, error) {
-	var out ClaimResult
-	if checkpointID == "" {
-		return out, fmt.Errorf("sandboxd: claim checkpoint requires a checkpoint id")
-	}
-	err := c.postJSON(ctx, "/v1/checkpoints/"+url.PathEscape(checkpointID)+"/claim", spec, &out)
-	return out, err
-}
-
 // Checkpoints performs GET /v1/checkpoints, newest first.
 func (c *Client) Checkpoints(ctx context.Context) ([]Checkpoint, error) {
 	var out struct {
@@ -163,36 +131,7 @@ func (c *Client) DeleteCheckpoint(ctx context.Context, checkpointID string) erro
 	if checkpointID == "" {
 		return fmt.Errorf("sandboxd: delete checkpoint requires a checkpoint id")
 	}
-	u := c.baseURL + "/v1/checkpoints/" + url.PathEscape(checkpointID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
-	if err != nil {
-		return err
-	}
-	c.authenticate(req, c.token)
-
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return fmt.Errorf("sandboxd: delete checkpoint: %w", err)
-	}
-	defer drainAndClose(resp)
-
-	switch resp.StatusCode {
-	case http.StatusNoContent, http.StatusNotFound:
-		return nil
-	default:
-		return statusError(resp)
-	}
-}
-
-// Promote performs POST /v1/sandboxes/{id}/promote, publishing the sandbox as
-// a node-local template that later claims for that key clone from.
-func (c *Client) Promote(ctx context.Context, id string, spec PromoteSpec) (PoolKey, error) {
-	if id == "" {
-		return PoolKey{}, fmt.Errorf("sandboxd: promote requires a sandbox id")
-	}
-	var out PromoteResult
-	err := c.postJSON(ctx, "/v1/sandboxes/"+url.PathEscape(id)+"/promote", spec, &out)
-	return out.Key, err
+	return c.sendNoBody(ctx, http.MethodDelete, "/v1/checkpoints/"+url.PathEscape(checkpointID), c.token, "delete checkpoint", http.StatusNoContent, http.StatusNotFound)
 }
 
 // Stats performs GET /v1/sandboxes/{id}/stats.
@@ -219,23 +158,7 @@ func (c *Client) sandboxVerb(ctx context.Context, id, verb string) error {
 	if id == "" {
 		return fmt.Errorf("sandboxd: %s requires a sandbox id", verb)
 	}
-	u := c.baseURL + "/v1/sandboxes/" + url.PathEscape(id) + "/" + verb
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
-	if err != nil {
-		return err
-	}
-	c.authenticate(req, c.token)
-
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return fmt.Errorf("sandboxd: %s: %w", verb, err)
-	}
-	defer drainAndClose(resp)
-
-	if resp.StatusCode != http.StatusNoContent {
-		return statusError(resp)
-	}
-	return nil
+	return c.sendNoBody(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/"+verb, c.token, verb, http.StatusNoContent)
 }
 
 // postJSON sends body as JSON via POST and decodes a 2xx reply into out.

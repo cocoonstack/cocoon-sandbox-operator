@@ -57,8 +57,6 @@ var (
 	orphansFlag = flag.Int("orphans", 200, "orphan bindings to inject and reconcile")
 )
 
-func must(err error) { benchutil.Must(err) }
-
 // fakeSandboxd is an httptest-backed sandboxd: /v1/claim hands over a fresh
 // sandbox fast; /v1/sandboxes/{id}/release counts VM destroys (must stay 0).
 type fakeSandboxd struct {
@@ -119,8 +117,8 @@ func (s sliceInventory) LiveDeliveries(context.Context) ([]scale.Delivery, error
 
 func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
-	must(sandboxv1beta1.AddToScheme(s))
-	must(extv1beta1.AddToScheme(s))
+	benchutil.Must(sandboxv1beta1.AddToScheme(s))
+	benchutil.Must(extv1beta1.AddToScheme(s))
 	return s
 }
 
@@ -149,9 +147,9 @@ func measureClaimLatency(ctx context.Context, gw claimWaiter, iters int) []float
 		start := time.Now()
 		a, err := gw.Claim(ctx, req)
 		d := time.Since(start)
-		must(err)
+		benchutil.Must(err)
 		if a.SandboxName == "" {
-			must(fmt.Errorf("empty assignment at iter %d", i))
+			benchutil.Must(fmt.Errorf("empty assignment at iter %d", i))
 		}
 		lat = append(lat, float64(d.Nanoseconds())/1e6)
 	}
@@ -182,7 +180,7 @@ func injectAndReconcileOrphans(ctx context.Context, fs *fakeSandboxd, orphans in
 	for i := range orphans {
 		name := fmt.Sprintf("orphan-%d", i)
 		a, err := badGW.Claim(ctx, scale.ClaimRequest{Namespace: ns, ClaimName: name, WarmPool: "base:24.04"})
-		must(err)
+		benchutil.Must(err)
 		inv = append(inv, scale.Delivery{
 			SandboxName: a.SandboxName, Node: a.Node, Address: a.Address, ClaimNS: ns, ClaimName: name,
 		})
@@ -191,12 +189,12 @@ func injectAndReconcileOrphans(ctx context.Context, fs *fakeSandboxd, orphans in
 
 	orc := scale.NewOrphanReconciler(node, inv, fc, scale.NewClaimRecorder(fc), logr.Discard())
 	reconciled, err := orc.Reconcile(ctx)
-	must(err)
+	benchutil.Must(err)
 
 	remaining := 0
 	for i := range orphans {
 		cur := &extv1beta1.SandboxClaim{}
-		must(fc.Get(ctx, types.NamespacedName{Namespace: ns, Name: fmt.Sprintf("orphan-%d", i)}, cur))
+		benchutil.Must(fc.Get(ctx, types.NamespacedName{Namespace: ns, Name: fmt.Sprintf("orphan-%d", i)}, cur))
 		if cur.Status.SandboxStatus.Name == "" {
 			remaining++
 		}
@@ -241,9 +239,9 @@ func main() {
 		"claim_iters":        *itersFlag,
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
-	must(err)
-	must(os.MkdirAll(filepath.Dir(*outFlag), 0o755))
-	must(os.WriteFile(*outFlag, b, 0o644))
+	benchutil.Must(err)
+	benchutil.Must(os.MkdirAll(filepath.Dir(*outFlag), 0o755))
+	benchutil.Must(os.WriteFile(*outFlag, b, 0o644))
 
 	fmt.Printf("claim p50=%.4fms p95=%.4fms (iters=%d) | orphans injected=%d reconciled=%d remaining=%d | vm_destroy_calls=%d | pass=%v\n",
 		p50, p95, *itersFlag, *orphansFlag, reconciled, remaining, destroys, pass)

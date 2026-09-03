@@ -27,8 +27,7 @@ const maxNodeConcurrency = 16
 // returns false rather than raising — so that state is reported, not retried.
 func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 	var req SandboxPauseRequest
-	if err := decodeOptional(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
 	id := r.PathValue("sandboxID")
@@ -65,8 +64,7 @@ func (s *Server) pauseSandbox(w http.ResponseWriter, r *http.Request) {
 // preceded it.
 func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 	var req ConnectSandbox
-	if err := decodeOptional(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
 	id := r.PathValue("sandboxID")
@@ -103,8 +101,7 @@ func (s *Server) connectSandbox(w http.ResponseWriter, r *http.Request) {
 // it rejects the request outright.
 func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 	var req SandboxForkRequest
-	if err := decodeOptional(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
 	count := int32(1)
@@ -155,8 +152,7 @@ func (s *Server) forkSandbox(w http.ResponseWriter, r *http.Request) {
 // can branch from. The source keeps running.
 func (s *Server) createSnapshot(w http.ResponseWriter, r *http.Request) {
 	var req SandboxSnapshotRequest
-	if err := decodeOptional(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	if !decodeOptionalBody(w, r, &req) {
 		return
 	}
 	id := r.PathValue("sandboxID")
@@ -363,15 +359,24 @@ func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) bool 
 	return sb.Labels[scale.PhaseLabel] == phaseHibernated
 }
 
-// decodeOptional decodes a JSON body that the schema allows to be absent. An
-// empty body leaves the target at its zero value rather than failing, which is
-// what pause and fork require.
-func decodeOptional(w http.ResponseWriter, r *http.Request, out any) error {
+func decodeBody(w http.ResponseWriter, r *http.Request, out any) bool {
+	return reportBadBody(w, json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(out))
+}
+
+func decodeOptionalBody(w http.ResponseWriter, r *http.Request, out any) bool {
 	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(out)
 	if errors.Is(err, io.EOF) {
-		return nil
+		return true
 	}
-	return err
+	return reportBadBody(w, err)
+}
+
+func reportBadBody(w http.ResponseWriter, err error) bool {
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return false
+	}
+	return true
 }
 
 // claimIDOf reports the node-local claim id the store's verbs address.

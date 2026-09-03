@@ -21,7 +21,6 @@ package e2bcompat
 
 import (
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -190,8 +189,7 @@ func (s *Server) validKey(presented string) bool {
 // same node-local claim the aggregated apiserver's Create performs.
 func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request) {
 	var req NewSandbox
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	if !decodeBody(w, r, &req) {
 		return
 	}
 	if strings.TrimSpace(req.TemplateID) == "" {
@@ -289,8 +287,7 @@ func (s *Server) deleteSandbox(w http.ResponseWriter, r *http.Request) {
 // it does not silently claim to have extended a deadline it cannot move.
 func (s *Server) setTimeout(w http.ResponseWriter, r *http.Request) {
 	var req SandboxTimeoutRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+	if !decodeBody(w, r, &req) {
 		return
 	}
 	if req.Timeout < 0 {

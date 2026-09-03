@@ -74,18 +74,16 @@ const (
 	runVal   = "g0131-phase-d"
 )
 
-func must(err error) { benchutil.Must(err) }
-
 func main() {
 	flag.Parse()
-	must(clientgoscheme.AddToScheme(scheme))
-	must(sandboxv1beta1.AddToScheme(scheme))
-	must(extv1beta1.AddToScheme(scheme))
+	benchutil.Must(clientgoscheme.AddToScheme(scheme))
+	benchutil.Must(sandboxv1beta1.AddToScheme(scheme))
+	benchutil.Must(extv1beta1.AddToScheme(scheme))
 	cfg, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
-	must(err)
+	benchutil.Must(err)
 	cfg.QPS, cfg.Burst = 200, 400
 	cl, err = ctrlclient.New(cfg, ctrlclient.Options{Scheme: scheme})
-	must(err)
+	benchutil.Must(err)
 
 	ctx := context.Background()
 	res := map[string]any{
@@ -140,7 +138,7 @@ func main() {
 	res["pass"] = pass
 
 	b, _ := json.MarshalIndent(res, "", "  ")
-	must(os.WriteFile(*out, b, 0o644))
+	benchutil.Must(os.WriteFile(*out, b, 0o644))
 	fmt.Printf("pass=%v; wrote %s\n", pass, *out)
 	if !pass {
 		os.Exit(1)
@@ -182,7 +180,7 @@ func ensureTemplate(ctx context.Context) {
 		},
 	}
 	if err := cl.Create(ctx, t); err != nil && !apierrors.IsAlreadyExists(err) {
-		must(err)
+		benchutil.Must(err)
 	}
 }
 

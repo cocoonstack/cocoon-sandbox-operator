@@ -29,7 +29,6 @@ const (
 	// opts into a virtual-node contract.
 	DefaultMode = ModeStandard
 
-	// vk-cocoon (cocoon MicroVM) virtual-node contract.
 	vkProviderTaintKey = "virtual-kubelet.io/provider"
 	vkNodeLabelKey     = "node.kubernetes.io/instance-type"
 	vkNodeLabelValue   = "virtual-node"

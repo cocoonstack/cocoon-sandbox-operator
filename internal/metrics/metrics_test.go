@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// nolint:revive
 package metrics
 
 import (
@@ -21,6 +20,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/propagation"
@@ -114,6 +114,27 @@ func TestBuildInfo(t *testing.T) {
 
 	if err := testutil.CollectAndCompare(BuildInfo, strings.NewReader(expected)); err != nil {
 		t.Errorf("BuildInfo metric mismatch: %v", err)
+	}
+}
+
+func TestRegisterIsExplicitAndIdempotentlyRefused(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	count, err := testutil.GatherAndCount(registry, "agent_sandbox_build_info")
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("collectors registered before Register was called, count = %d", count)
+	}
+
+	if err := Register(registry); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if count, err = testutil.GatherAndCount(registry, "agent_sandbox_build_info"); err != nil || count != 1 {
+		t.Errorf("after Register: count = %d, err = %v", count, err)
+	}
+	if err := Register(registry); err == nil {
+		t.Error("a second Register must report the duplicate registration")
 	}
 }
 

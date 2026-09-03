@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// nolint:revive
 package version
 
 import (
@@ -78,6 +77,15 @@ func TestInfoString(t *testing.T) {
 				t.Errorf("Expected %s in String output, got: %s", tc.expect, s)
 			}
 		})
+	}
+}
+
+func TestPrintRendersProgramAndVersion(t *testing.T) {
+	out := Print("sandbox-operator")
+	for _, want := range []string{"sandbox-operator, version", "build date:", "platform:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Print output missing %q, got: %s", want, out)
+		}
 	}
 }
 

@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// nolint:revive
 package metrics
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/cocoonstack/sandbox-operator/internal/version"
 )
 
 const (
-	LaunchTypeWarm    = "warm"    // Pod from a SandboxWarmPool
-	LaunchTypeCold    = "cold"    // Pod not from a SandboxWarmPool
-	LaunchTypeUnknown = "unknown" // Used when Sandbox is nil during failure
+	LaunchTypeWarm    = "warm"
+	LaunchTypeCold    = "cold"
+	LaunchTypeUnknown = "unknown" // Sandbox is nil during failure
 
 	// ObservabilityAnnotation is the annotation key for the time the controller first observed the claim.
 	ObservabilityAnnotation = "agents.x-k8s.io/controller-first-observed-at"
@@ -120,20 +119,24 @@ var (
 		},
 		func() float64 { return 1 },
 	)
-
-	// Registration rides on package variable initialization so no caller can observe an unregistered collector.
-	_ = func() bool {
-		metrics.Registry.MustRegister(
-			ClaimStartupLatency,
-			ClaimControllerStartupLatency,
-			SandboxCreationLatency,
-			SandboxClaimCreationTotal,
-			WarmPoolSandboxCreatedTotal,
-			BuildInfo,
-		)
-		return true
-	}()
 )
+
+// Register adds the operator's collectors to r. A binary calls it once.
+func Register(r prometheus.Registerer) error {
+	for _, c := range []prometheus.Collector{
+		ClaimStartupLatency,
+		ClaimControllerStartupLatency,
+		SandboxCreationLatency,
+		SandboxClaimCreationTotal,
+		WarmPoolSandboxCreatedTotal,
+		BuildInfo,
+	} {
+		if err := r.Register(c); err != nil {
+			return fmt.Errorf("register operator metrics: %w", err)
+		}
+	}
+	return nil
+}
 
 // IncWarmPoolSandboxCreated counts one Sandbox created by the warm-pool controller.
 func IncWarmPoolSandboxCreated(namespace, warmPoolName string) {

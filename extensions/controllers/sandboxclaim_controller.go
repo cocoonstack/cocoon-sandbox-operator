@@ -146,8 +146,6 @@ type SandboxClaimReconciler struct {
 //+kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
 //+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
 func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("Start of Reconcile loop for SandboxClaim", "request", req.NamespacedName)
@@ -296,8 +294,6 @@ func (r *SandboxClaimReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWo
 			handler.EnqueueRequestsFromMapFunc(r.mapWarmPoolToClaims),
 			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}),
 		).
-		// TODO: Keep a lightweight SandboxTemplate -> claims map watch to promptly reconcile
-		// claims when a missing template is created, instead of relying on the 1-minute fallback.
 		WithOptions(controller.Options{MaxConcurrentReconciles: concurrentWorkers}).
 		Complete(r)
 }
@@ -329,12 +325,6 @@ func (r *SandboxClaimReconciler) resultFor(ctx context.Context, claim *extension
 		return ctrl.Result{RequeueAfter: soonerRequeue(result.RequeueAfter, time.Minute)}, true
 	}
 
-	// Adoption patched the sandbox to us but the informer cache may still show the
-	// warm-pool owner. Requeue without an error: an error routes through the
-	// exponential failure rate limiter, and because this same retry recurs each pass
-	// until the cache catches up the backoff compounds (#1107). A nil error lets the
-	// workqueue Forget the key. Status is intentionally not finalized on this pass,
-	// preserving the duplicate-adoption protection during cache lag.
 	if errors.Is(reconcileErr, errAdoptionTriggeredRetry) {
 		logger.V(4).Info("Adoption triggered; requeueing to let cache converge", "claim", claim.Name, "error", reconcileErr)
 		return ctrl.Result{RequeueAfter: soonerRequeue(result.RequeueAfter, adoptionCacheLagRequeueDelay)}, true
@@ -475,7 +465,7 @@ func (r *SandboxClaimReconciler) reconcileActive(ctx context.Context, claim *ext
 	}
 
 	// Fast path: try to find existing or adopt from warm pool before template lookup.
-	sandbox, err := r.getOrCreateSandbox(ctx, claim, nil)
+	sandbox, err := r.getOrCreateSandbox(ctx, claim)
 	logger.V(1).Info("getOrCreateSandbox result", "sandboxFound", sandbox != nil, "err", err, "claim", claim.Name)
 	if err != nil {
 		return nil, err
@@ -509,17 +499,15 @@ func (r *SandboxClaimReconciler) reconcileExpired(ctx context.Context, claim *ex
 	sandbox := &v1beta1.Sandbox{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: claim.Namespace, Name: statusName}, sandbox); err != nil {
 		if k8errors.IsNotFound(err) {
-			return nil, nil // Sandbox is gone, life is good.
+			return nil, nil
 		}
 		return nil, err
 	}
 
-	// Verify ownership before delete action
 	if !metav1.IsControlledBy(sandbox, claim) {
 		logger.Info("Skipping deletion: Sandbox is not controlled by this claim", "sandbox", sandbox.Name, "claim", claim.Name)
 		return nil, fmt.Errorf("%w: sandbox %q is not owned by claim %q", ErrSandboxNotOwned, sandbox.Name, claim.Name)
 	}
-	// Sandbox exists, delete it.
 	if sandbox.DeletionTimestamp.IsZero() {
 		logger.Info("Deleting Sandbox because Claim expired (Policy=Retain)", "sandbox", sandbox.Name, "claim", claim.Name)
 		if err := r.Delete(ctx, sandbox); err != nil {
@@ -756,8 +744,6 @@ func (r *SandboxClaimReconciler) tryAdopt(ctx context.Context, claim *extensions
 	}
 
 	logger.Info("Successfully adopted sandbox from warm pool", "sandbox", adopted.Name, "claim", claim.Name)
-	// Recorded so a later pass still seeing the stale warm-pool-owned view waits
-	// out the bounded requeue instead of re-sending the adoption patch.
 	r.triggeredAdoptions.Store(
 		types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace},
 		triggeredAdoptionEntry{uid: claim.UID, sandbox: adopted.Name},
@@ -810,11 +796,9 @@ func (r *SandboxClaimReconciler) completeAdoption(ctx context.Context, claim *ex
 		adopted.Annotations[asmetrics.TraceContextAnnotation] = traceContext
 	}
 
-	// Propagate claim identity labels for discovery and NetworkPolicy targeting.
 	adopted.Labels = ensureClaimIdentityLabels(adopted.Labels, claim)
 	adopted.Spec.PodTemplate.ObjectMeta.Labels = ensureClaimIdentityLabels(adopted.Spec.PodTemplate.ObjectMeta.Labels, claim)
 
-	// Resolve the template hash and metadata used by reconcileActive.
 	template, templateErr := r.getTemplate(ctx, claim)
 	if templateHash == "" && template != nil {
 		templateHash = SandboxTemplateRefHash(template.Name)
@@ -838,8 +822,6 @@ func (r *SandboxClaimReconciler) completeAdoption(ctx context.Context, claim *ex
 			mergedMeta.Labels = make(map[string]string)
 		}
 		mergedMeta.Labels[extensionsv1beta1.SandboxIDLabel] = string(claim.UID)
-		// A claim without created-by must clear it, so the label is never inherited
-		// from whoever held this pre-warmed sandbox before.
 		setOrDeleteLabel(mergedMeta.Labels, v1beta1.CreatedByLabel, claim.Labels[v1beta1.CreatedByLabel])
 		adopted.Spec.PodTemplate.ObjectMeta = mergedMeta
 	}
@@ -942,7 +924,6 @@ func (r *SandboxClaimReconciler) mergePodMetadata(templateMeta *v1beta1.PodMetad
 		}
 	}
 
-	// Merge labels
 	if len(claimMeta.Labels) > 0 {
 		if templateMeta.Labels == nil {
 			templateMeta.Labels = make(map[string]string)
@@ -950,7 +931,6 @@ func (r *SandboxClaimReconciler) mergePodMetadata(templateMeta *v1beta1.PodMetad
 		maps.Copy(templateMeta.Labels, claimMeta.Labels)
 	}
 
-	// Merge annotations
 	if len(claimMeta.Annotations) > 0 {
 		if templateMeta.Annotations == nil {
 			templateMeta.Annotations = make(map[string]string)
@@ -1005,7 +985,6 @@ func (r *SandboxClaimReconciler) createSandbox(ctx context.Context, claim *exten
 		Name:      claim.Name,
 	}
 
-	// Propagate the trace context annotation to the Sandbox resource
 	if sandbox.Annotations == nil {
 		sandbox.Annotations = make(map[string]string)
 	}
@@ -1039,10 +1018,6 @@ func (r *SandboxClaimReconciler) createSandbox(ctx context.Context, claim *exten
 		}
 	}
 
-	// Propagate claim identity labels for discovery and NetworkPolicy targeting.
-	// Fork extension: also write SandboxIDLabel onto the top-level Sandbox metadata
-	// (KEP-0174 only propagates to pod template labels; platform's informer reads
-	// Sandbox.metadata.labels).
 	templateHash := SandboxTemplateRefHash(template.Name)
 	sandbox.Labels = ensureClaimIdentityLabels(sandbox.Labels, claim)
 	sandbox.Labels[v1beta1.SandboxLaunchTypeLabel] = v1beta1.SandboxLaunchTypeCold
@@ -1146,7 +1121,7 @@ func (r *SandboxClaimReconciler) injectClaimEnv(logger logr.Logger, claim *exten
 	return nil
 }
 
-func (r *SandboxClaimReconciler) getOrCreateSandbox(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, _ *extensionsv1beta1.SandboxTemplate) (*v1beta1.Sandbox, error) {
+func (r *SandboxClaimReconciler) getOrCreateSandbox(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*v1beta1.Sandbox, error) {
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("Executing getOrCreateSandbox", "claim", claim.Name)
 
@@ -1259,8 +1234,6 @@ func (r *SandboxClaimReconciler) completePendingAdoption(ctx context.Context, cl
 		return nil
 	}
 
-	// The adoption patch is idempotent, but re-sending it while the cache lags adds
-	// nothing; wait out the bounded requeue instead.
 	adoptionKey := types.NamespacedName{Name: claim.Name, Namespace: claim.Namespace}
 	if prev, ok := r.triggeredAdoptions.Load(adoptionKey); ok && prev.uid == claim.UID && prev.sandbox == sbName {
 		logger.V(4).Info("Adoption already triggered, waiting for cache to converge", "sandbox", sbName, "claim", claim.Name)
@@ -1276,9 +1249,6 @@ func (r *SandboxClaimReconciler) completePendingAdoption(ctx context.Context, cl
 	}
 
 	r.triggeredAdoptions.Store(adoptionKey, triggeredAdoptionEntry{uid: claim.UID, sandbox: sbName})
-	// completeAdoption patched our controllerRef and the Warm label. Requeue via the
-	// sentinel so this does not route through the exponential failure rate limiter,
-	// whose compounding backoff ballooned adoption tail latency (#1107).
 	logger.Info("Triggered adoption completion for sandbox, requeueing", "sandbox", sbName, "claim", claim.Name)
 	return fmt.Errorf("%w: sandbox %s", errAdoptionTriggeredRetry, sbName)
 }
@@ -1489,12 +1459,7 @@ func (r *SandboxClaimReconciler) recordSandboxCreationLatency(sandbox *v1beta1.S
 }
 
 // recordCreationLatencyMetric detects and records transitions to Ready state.
-func (r *SandboxClaimReconciler) recordCreationLatencyMetric(
-	ctx context.Context,
-	claim *extensionsv1beta1.SandboxClaim,
-	oldStatus *extensionsv1beta1.SandboxClaimStatus,
-	sandbox *v1beta1.Sandbox,
-) {
+func (r *SandboxClaimReconciler) recordCreationLatencyMetric(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, oldStatus *extensionsv1beta1.SandboxClaimStatus, sandbox *v1beta1.Sandbox) {
 	logger := log.FromContext(ctx)
 
 	newStatus := &claim.Status
@@ -1817,8 +1782,6 @@ func readyFailure(claim *extensionsv1beta1.SandboxClaim, err error) failure {
 	case errors.Is(err, ErrWarmPoolNotFound):
 		return failure{"WarmPoolNotFound", fmt.Sprintf("SandboxWarmPool %q not found", claim.Spec.WarmPoolRef.Name)}
 	case errors.Is(err, errAdoptionTriggeredRetry):
-		// Benign: adoption was patched and we are only waiting for the informer
-		// cache to converge before finalizing.
 		return failure{"AdoptionPending", "Warm-pool sandbox adoption triggered; waiting for cache to converge"}
 	case errors.Is(err, ErrInvalidMetadata):
 		return failure{reasonInvalidMetadata, err.Error()}
@@ -1844,13 +1807,7 @@ func ensureClaimIdentityLabels(labels map[string]string, claim *extensionsv1beta
 		labels = make(map[string]string)
 	}
 	labels[extensionsv1beta1.SandboxIDLabel] = string(claim.UID)
-	// Propagate created-by label from the claim if present. If absent, explicitly
-	// delete it to synchronize removal or prevent stale propagation from warm sandboxes.
-	if val, ok := claim.Labels[v1beta1.CreatedByLabel]; ok && val != "" {
-		labels[v1beta1.CreatedByLabel] = val
-	} else {
-		delete(labels, v1beta1.CreatedByLabel)
-	}
+	setOrDeleteLabel(labels, v1beta1.CreatedByLabel, claim.Labels[v1beta1.CreatedByLabel])
 	return labels
 }
 
@@ -1905,11 +1862,7 @@ func domainInList(domain string, list []string) bool {
 	})
 }
 
-func mergeVolumeClaimTemplates(
-	templateVCTs []v1beta1.PersistentVolumeClaimTemplate,
-	claimVCTs []v1beta1.PersistentVolumeClaimTemplate,
-	policy extensionsv1beta1.VolumeClaimTemplatesPolicy,
-) ([]v1beta1.PersistentVolumeClaimTemplate, error) {
+func mergeVolumeClaimTemplates(templateVCTs, claimVCTs []v1beta1.PersistentVolumeClaimTemplate, policy extensionsv1beta1.VolumeClaimTemplatesPolicy) ([]v1beta1.PersistentVolumeClaimTemplate, error) {
 	if err := validateVolumeClaimTemplates(templateVCTs); err != nil {
 		return nil, fmt.Errorf("template: %w", err)
 	}

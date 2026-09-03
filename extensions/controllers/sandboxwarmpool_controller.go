@@ -58,6 +58,14 @@ const (
 	sandboxWarmPoolLabelIndex = ".metadata.labels[" + warmPoolSandboxLabel + "]"
 )
 
+// staleCheck is the resolved template a pool member is vetted against, with the memo of hashes already compared.
+type staleCheck struct {
+	template      *extensionsv1beta1.SandboxTemplate
+	refHash       string
+	blueprintHash string
+	vetted        map[string]bool
+}
+
 // SandboxWarmPoolReconciler reconciles a SandboxWarmPool object.
 type SandboxWarmPoolReconciler struct {
 	client.Client
@@ -83,7 +91,6 @@ type SandboxWarmPoolReconciler struct {
 //+kubebuilder:rbac:groups=extensions.agents.x-k8s.io,resources=sandboxwarmpools/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=agents.x-k8s.io,resources=sandboxes,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile implements the reconciliation loop for SandboxWarmPool.
 func (r *SandboxWarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -148,9 +155,6 @@ func (r *SandboxWarmPoolReconciler) SetupWithManager(mgr ctrl.Manager, concurren
 func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) (time.Duration, error) {
 	logger := log.FromContext(ctx)
 
-	// In the L3 writable-aggregation design warm capacity lives per-node in
-	// sandboxd, not as Sandbox CRs, and creating CRs would fight the aggregated
-	// node-local claim path. When disabled, report status without any create/delete.
 	if r.DisableSandboxCRManagement {
 		return 0, r.reconcilePoolStatusOnly(ctx, warmPool)
 	}
@@ -232,12 +236,11 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 		sandboxesToCreate := min(desiredReplicas-currentReplicas, maxBatchSize)
 		logger.Info("Creating new pool sandboxes", "count", sandboxesToCreate)
 
-		sandboxCR, err := r.buildSandboxCR(ctx, warmPool, poolNameHash, template, currentSandboxBlueprintHash)
+		sandboxCR, err := r.buildSandboxCR(ctx, warmPool, template, currentSandboxBlueprintHash)
 		if err != nil {
 			logger.Error(err, "Failed to build sandbox CR blueprint")
 			allErrors = errors.Join(allErrors, err)
 		} else {
-			// Parallel sandbox creation with adaptive slow-start batching (starts with 1 and doubles on success)
 			_, createErr := slowStartBatch(ctx, int(sandboxesToCreate), 1, func(_ int) error {
 				return r.createPoolSandbox(ctx, warmPool, sandboxCR)
 			})
@@ -259,15 +262,14 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 			bReady := isSandboxReady(b)
 			if aReady != bReady {
 				if aReady {
-					return 1 // a ready, b not ready -> b first (delete unready first)
+					return 1
 				}
-				return -1 // b ready, a not ready -> a first
+				return -1
 			}
-			return b.CreationTimestamp.Compare(a.CreationTimestamp.Time) // newest first
+			return b.CreationTimestamp.Compare(a.CreationTimestamp.Time)
 		})
 
 		toDeleteCount := min(sandboxesToDelete, int32(len(activeSandboxes)))
-		// Parallel sandbox deletion with adaptive slow-start batching (starts with 1 and doubles on success)
 		_, deleteErr := slowStartBatch(ctx, int(toDeleteCount), 1, func(idx int) error {
 			return r.deletePoolSandbox(ctx, activeSandboxes[idx])
 		})
@@ -284,11 +286,6 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 	return stuckRecheck, allErrors
 }
 
-// reconcilePoolStatusOnly reports pool status without creating or deleting any
-// Sandbox CRs. It is the reconcile used when DisableSandboxCRManagement is set:
-// warm capacity is driven per-node by sandboxd, so the controller only surfaces
-// the current CR-backed member count (typically zero in that mode) and never
-// mutates the aggregated node-local claim path.
 func (r *SandboxWarmPoolReconciler) reconcilePoolStatusOnly(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) error {
 	poolNameHash := hash.Name(warmPool.Name)
 	labelSelector := labels.SelectorFromSet(labels.Set{warmPoolSandboxLabel: poolNameHash})
@@ -331,10 +328,9 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 	var activeSandboxes []*sandboxv1beta1.Sandbox
 	var allErrors error
 
-	vettedHashes := make(map[string]bool)
-	var currentTemplateRefHash string
+	check := staleCheck{template: template, blueprintHash: currentSandboxBlueprintHash, vetted: make(map[string]bool)}
 	if template != nil {
-		currentTemplateRefHash = SandboxTemplateRefHash(template.Name)
+		check.refHash = SandboxTemplateRefHash(template.Name)
 	}
 
 	var updateStrategyType extensionsv1beta1.SandboxWarmPoolUpdateStrategyType
@@ -369,7 +365,7 @@ func (r *SandboxWarmPoolReconciler) filterActiveSandboxes(ctx context.Context, w
 		}
 
 		if tmplErr == nil && (updateStrategy == extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType || isOrphan) {
-			if r.isSandboxStale(ctx, sb, template, currentTemplateRefHash, currentSandboxBlueprintHash, vettedHashes) {
+			if r.isSandboxStale(ctx, sb, check) {
 				logger.Info("Deleting stale sandbox", "sandbox", sb.Name, "isOrphan", isOrphan)
 				if err := r.Delete(ctx, sb); err != nil {
 					logger.Error(err, "Failed to delete stale sandbox", "sandbox", sb.Name)
@@ -423,13 +419,8 @@ func (r *SandboxWarmPoolReconciler) fetchTemplateAndHash(ctx context.Context, wa
 }
 
 // buildSandboxCR constructs the base Sandbox CR (with pod template and volume claim templates) for the warm pool.
-func (r *SandboxWarmPoolReconciler) buildSandboxCR(
-	ctx context.Context,
-	warmPool *extensionsv1beta1.SandboxWarmPool,
-	poolNameHash string,
-	template *extensionsv1beta1.SandboxTemplate,
-	currentSandboxBlueprintHash string,
-) (*sandboxv1beta1.Sandbox, error) {
+func (r *SandboxWarmPoolReconciler) buildSandboxCR(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool, template *extensionsv1beta1.SandboxTemplate, currentSandboxBlueprintHash string) (*sandboxv1beta1.Sandbox, error) {
+	poolNameHash := hash.Name(warmPool.Name)
 	sandboxLabels := map[string]string{
 		warmPoolSandboxLabel:                    poolNameHash,
 		sandboxTemplateRefHash:                  SandboxTemplateRefHash(warmPool.Spec.TemplateRef.Name),
@@ -546,47 +537,40 @@ func (r *SandboxWarmPoolReconciler) getTemplate(ctx context.Context, warmPool *e
 // isSandboxStale checks if the sandbox version matches the current template.
 // It uses a cache (vettedHashes) to avoid repeated expensive DeepEqual calls
 // for sandboxes with the same hash.
-func (r *SandboxWarmPoolReconciler) isSandboxStale(
-	ctx context.Context,
-	sandbox *sandboxv1beta1.Sandbox,
-	template *extensionsv1beta1.SandboxTemplate,
-	currentTemplateRefHash string,
-	currentSandboxBlueprintHash string,
-	vettedHashes map[string]bool,
-) bool {
+func (r *SandboxWarmPoolReconciler) isSandboxStale(ctx context.Context, sandbox *sandboxv1beta1.Sandbox, check staleCheck) bool {
 	sandboxHash := sandbox.Labels[sandboxv1beta1.SandboxTemplateHashLabel]
 
-	if sandbox.Labels[sandboxTemplateRefHash] != currentTemplateRefHash {
+	if sandbox.Labels[sandboxTemplateRefHash] != check.refHash {
 		return true
 	}
 
 	controllerRef := metav1.GetControllerOf(sandbox)
 	isOrphan := controllerRef == nil
 	if isOrphan {
-		return !r.compareSandboxBlueprint(template, &sandbox.Spec.SandboxBlueprint)
+		return !r.compareSandboxBlueprint(check.template, &sandbox.Spec.SandboxBlueprint)
 	}
 
-	if sandboxHash != "" && sandboxHash == currentSandboxBlueprintHash {
+	if sandboxHash != "" && sandboxHash == check.blueprintHash {
 		return false
 	}
 
 	// A marshal failure leaves the hash empty; treating that as stale would
 	// mass-delete the pool.
-	if currentSandboxBlueprintHash == "" {
-		log.FromContext(ctx).Error(nil, "currentSandboxBlueprintHash is empty, skipping staleness check", "sandbox", sandbox.Name)
+	if check.blueprintHash == "" {
+		log.FromContext(ctx).Error(nil, "blueprint hash is empty, skipping staleness check", "sandbox", sandbox.Name)
 		return false
 	}
 
 	if sandboxHash != "" {
-		if isStale, found := vettedHashes[sandboxHash]; found {
+		if isStale, found := check.vetted[sandboxHash]; found {
 			return isStale
 		}
 	}
 
-	isStale := !r.compareSandboxBlueprint(template, &sandbox.Spec.SandboxBlueprint)
+	isStale := !r.compareSandboxBlueprint(check.template, &sandbox.Spec.SandboxBlueprint)
 
 	if sandboxHash != "" {
-		vettedHashes[sandboxHash] = isStale
+		check.vetted[sandboxHash] = isStale
 	}
 
 	return isStale
