@@ -116,13 +116,6 @@ func New(kube client.Client, inv scale.InventorySource, token string, factory Cl
 	return &Driver{kube: kube, inv: inv, token: token, factory: factory, interval: opts.Interval, log: opts.Log}
 }
 
-// Reconcile runs a full pool reconcile on ANY SandboxWarmPool or NodeInventory
-// event — so a `kubectl apply/patch/delete` reacts in milliseconds, not after a
-// poll tick. It ignores the request key (the loop is global, O(pools+nodes)) and
-// requeues after d.interval, which doubles as the sampling period of the warm
-// count written back to status. Target changes therefore land in milliseconds
-// (event-driven), while the fill they kick off — the node side provisions at
-// O(100)/s per node — becomes visible one interval at a time.
 func (d *Driver) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	if err := d.reconcileOnce(ctx); err != nil {
 		return ctrl.Result{}, err

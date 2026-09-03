@@ -195,16 +195,8 @@ func (g *nodeClaimGateway) Claim(ctx context.Context, req ClaimRequest) (Assignm
 }
 
 // Release destroys the node-local microVM backing the Assignment.
-//
-// DELETE-AUTHORIZATION CONTRACT (G-0131 hard constraint). Release is invoked ONLY
-// on owner-authorized teardown — when the SandboxClaim CR itself is being released
-// or deleted by its owner. It is NEVER wired to Pod deletion or any pod-level
-// state: a Pod disappearing must not destroy the VM. There is deliberately no code
-// path in this package from Pod state to Release. As a structural guard the
-// gateway only releases sandboxes it actually delivered (it holds the sandbox's
-// own token, the Release credential); an Assignment the gateway never handed out
-// — e.g. one synthesized from stale pod state — is refused without any sandboxd
-// call, so no such state can drive a destroy.
+// It runs only on owner-authorized teardown, never off pod state — the same
+// delete-authorization contract the aggregated apiserver's Delete honors.
 func (g *nodeClaimGateway) Release(ctx context.Context, a Assignment) error {
 	g.mu.Lock()
 	d, ok := g.holdings[a.SandboxName]
@@ -382,7 +374,6 @@ type ReviewAuthorizer struct {
 	Verb     string
 }
 
-// Authorize denies missing identities and runs SubjectAccessReview.
 func (a *ReviewAuthorizer) Authorize(ctx context.Context, req ClaimRequest) error {
 	user := req.Selector[RequestUserSelectorKey]
 	if user == "" {

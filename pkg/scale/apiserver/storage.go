@@ -100,11 +100,6 @@ func (r *sandboxREST) Watch(ctx context.Context, options *metainternalversion.Li
 	return r.store.Watch(ctx, toScaleListOptions(ctx, options))
 }
 
-// Create is the L3 write path: it derives the warm pool from the submitted
-// Sandbox and asks the store to hand over an already-running microVM from a node
-// with warm capacity for that pool (a synchronous node-local claim). It writes NO
-// per-sandbox object to etcd; it synthesizes and returns a Ready Sandbox carrying
-// the claim id + connection address. With no warm node it returns a retryable 503.
 func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createValidation rest.ValidateObjectFunc, _ *metav1.CreateOptions) (runtime.Object, error) {
 	sb, ok := obj.(*sandboxv1beta1.Sandbox)
 	if !ok {
@@ -149,12 +144,8 @@ func (r *sandboxREST) Create(ctx context.Context, obj runtime.Object, createVali
 	return synthesizeClaimedSandbox(namespace, name, sb, assignment), nil
 }
 
-// Delete is the L3 release path. It resolves the sandbox from live node inventory
-// (so it knows the owning node), reads the sandboxd claim id the node published
-// on that entry, and releases the node-local claim via the store. Per the delete-
-// authorization contract this is owner-authorized teardown of the Sandbox resource
-// itself; it never destroys a VM on pod state alone. Returns (object, true).
 func (r *sandboxREST) Delete(ctx context.Context, name string, deleteValidation rest.ValidateObjectFunc, _ *metav1.DeleteOptions) (runtime.Object, bool, error) {
+	// owner-authorized teardown of the Sandbox resource only; pod state never reaches here
 	namespace := genericapirequest.NamespaceValue(ctx)
 	sb, err := r.store.Get(ctx, namespace, name)
 	if err != nil {

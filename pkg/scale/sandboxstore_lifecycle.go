@@ -7,7 +7,6 @@ import (
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 )
 
-// Pause hibernates a delivered sandbox on its owning node.
 func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	cl, err := s.nodeClient(ctx, node, "pause", id)
 	if err != nil {
@@ -19,7 +18,6 @@ func (s *scatterGatherStore) Pause(ctx context.Context, node, id string) error {
 	return nil
 }
 
-// Resume restores a paused sandbox through cocoon's mmap fast path.
 func (s *scatterGatherStore) Resume(ctx context.Context, node, id string) error {
 	cl, err := s.nodeClient(ctx, node, "resume", id)
 	if err != nil {
@@ -31,8 +29,6 @@ func (s *scatterGatherStore) Resume(ctx context.Context, node, id string) error 
 	return nil
 }
 
-// Fork branches a sandbox into count children on its owning node. Children are
-// fresh claims with their own ids; the parent keeps running.
 func (s *scatterGatherStore) Fork(ctx context.Context, node, id string, count, ttlSeconds int) ([]Assignment, error) {
 	if count < 1 {
 		return nil, fmt.Errorf("scale: fork count must be >= 1, got %d", count)
@@ -58,7 +54,6 @@ func (s *scatterGatherStore) Fork(ctx context.Context, node, id string, count, t
 	return out, nil
 }
 
-// Snapshot captures a sandbox's state as a checkpoint on its owning node.
 func (s *scatterGatherStore) Snapshot(ctx context.Context, node, id, name string) (Snapshot, error) {
 	cl, err := s.nodeClient(ctx, node, "snapshot", id)
 	if err != nil {
@@ -71,7 +66,6 @@ func (s *scatterGatherStore) Snapshot(ctx context.Context, node, id, name string
 	return snapshotFrom(ck, node), nil
 }
 
-// Snapshots lists a node's checkpoints.
 func (s *scatterGatherStore) Snapshots(ctx context.Context, node string) ([]Snapshot, error) {
 	cl, err := s.nodeClient(ctx, node, "list snapshots", "")
 	if err != nil {
@@ -88,7 +82,6 @@ func (s *scatterGatherStore) Snapshots(ctx context.Context, node string) ([]Snap
 	return out, nil
 }
 
-// DeleteSnapshot removes a checkpoint from its node.
 func (s *scatterGatherStore) DeleteSnapshot(ctx context.Context, node, snapshotID string) error {
 	cl, err := s.nodeClient(ctx, node, "delete snapshot", snapshotID)
 	if err != nil {
@@ -100,7 +93,6 @@ func (s *scatterGatherStore) DeleteSnapshot(ctx context.Context, node, snapshotI
 	return nil
 }
 
-// Stats reports a sandbox's resource usage from its owning node.
 func (s *scatterGatherStore) Stats(ctx context.Context, node, id string) (SandboxStats, error) {
 	cl, err := s.nodeClient(ctx, node, "stats", id)
 	if err != nil {

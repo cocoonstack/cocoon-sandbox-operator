@@ -42,7 +42,6 @@ func (r *lifecycleREST) Destroy() {}
 
 func (r *lifecycleREST) NamespaceScoped() bool { return true }
 
-// GroupVersionKind pins the kind the request pipeline decodes the body as.
 func (r *lifecycleREST) GroupVersionKind(schema.GroupVersion) schema.GroupVersionKind {
 	gvks, _, err := Scheme.ObjectKinds(r.newOptions())
 	if err != nil || len(gvks) == 0 {
@@ -51,8 +50,6 @@ func (r *lifecycleREST) GroupVersionKind(schema.GroupVersion) schema.GroupVersio
 	return gvks[0]
 }
 
-// Create runs the verb. The subresource's parent name arrives separately from
-// the body, which is why this is a NamedCreater.
 func (r *lifecycleREST) Create(
 	ctx context.Context,
 	name string,

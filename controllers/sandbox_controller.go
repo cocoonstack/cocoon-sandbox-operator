@@ -1002,11 +1002,7 @@ func (r *SandboxReconciler) deleteExpiredChild(ctx context.Context, sandbox *san
 	return nil
 }
 
-// CacheByObject scopes a manager cache to the child objects this controller
-// labels, so the Pod/Service/PVC informers never watch the whole cluster. Every
-// cached read this controller makes targets a labeled child, and the PVC entry
-// also stops the first volumeClaimTemplates Sandbox from spinning up a
-// cluster-wide informer mid-reconcile.
+// CacheByObject scopes the manager cache to this controller's labeled children, so no child informer watches the whole cluster.
 func CacheByObject() (map[client.Object]cache.ByObject, error) {
 	sel, err := labels.Parse(sandboxLabel)
 	if err != nil {
@@ -1039,10 +1035,7 @@ func MergeVolumeClaimVolumes(existing, pvcVolumes []corev1.Volume) []corev1.Volu
 	return append(filtered, pvcVolumes...)
 }
 
-// checkOwnership determines whether a Kubernetes resource is owned by the given Sandbox,
-// has no controller, or is owned by a different controller.
-// It returns both the ownership classification and the controller reference (if any),
-// so callers can log owner details without redundant GetControllerOf calls.
+// checkOwnership classifies obj's ownership relative to sandbox and returns the controller reference it read.
 func checkOwnership(obj client.Object, sandbox *sandboxv1beta1.Sandbox) (resourceOwnership, *metav1.OwnerReference) {
 	controllerRef := metav1.GetControllerOf(obj)
 	if controllerRef == nil {
