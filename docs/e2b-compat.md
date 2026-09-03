@@ -38,7 +38,7 @@ set, so a misconfiguration cannot silently expose an open claim endpoint.
 ## Use it
 
 ```bash
-export E2B_API_URL=https://your-apiserver:8080
+export E2B_API_URL=http://your-apiserver:8080
 export E2B_API_KEY=e2b_yourkey
 ```
 

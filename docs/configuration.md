@@ -14,9 +14,10 @@ standard kubelet scheduling.
 - `--cluster-domain` (`cluster.local`): suffix used to construct Sandbox
   Service FQDNs.
 
-An explicit Pod-template `runtimeClassName` always selects standard kubelet.
-An explicit `sandbox.cocoonstack.io/runtime` annotation takes precedence over
-the default.
+An explicit Pod-template `runtimeClassName` selects standard kubelet, unless an
+explicit `sandbox.cocoonstack.io/runtime=vk-cocoon` or `sandboxd` annotation is
+also set — the two conflict, and the Pod is rejected. Otherwise an explicit
+`sandbox.cocoonstack.io/runtime` annotation takes precedence over the default.
 
 ## Cache scoping
 

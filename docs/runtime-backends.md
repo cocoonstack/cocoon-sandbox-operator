@@ -22,13 +22,16 @@ vk-cocoon as the Cocoon hot-MicroVM implementation.
 
 Runtime selection is deterministic, in this order:
 
-1. `sandbox.cocoonstack.io/runtime: vk-cocoon|standard` on the Pod template.
+1. `sandbox.cocoonstack.io/runtime: vk-cocoon|standard|sandboxd` on the Pod
+   template.
 2. Any explicit `spec.runtimeClassName` selects the standard kubelet path.
 3. The operator's `--default-runtime` value, which defaults to `standard`.
 
-An explicit `vk-cocoon` annotation conflicts with `runtimeClassName` and is
-rejected. A conflicting virtual-node selector is also rejected. User-provided
-annotations and tolerations are otherwise preserved.
+An explicit `vk-cocoon` or `sandboxd` annotation conflicts with
+`runtimeClassName` and is rejected, as is a pinned `spec.nodeName` — it would
+bypass the node selector and misroute the Pod. A conflicting virtual-node
+selector is also rejected. User-provided annotations and tolerations are
+otherwise preserved.
 
 ## vk-cocoon contract
 
@@ -46,6 +49,23 @@ For a vk-cocoon Pod, the operator supplies these defaults:
 | `vm.cocoonstack.io/name` | stable namespace/name-derived DNS label |
 
 The image must exist in the Cocoon image library on eligible vk-cocoon nodes.
+
+## sandboxd contract
+
+For a sandboxd Pod, the operator supplies these defaults:
+
+| Key | Value or source |
+|---|---|
+| node selector `sandbox.cocoonstack.io/runtime` | `sandboxd` |
+| toleration `virtual-kubelet.io/provider` | `Exists`, `NoSchedule` (shared with vk-cocoon) |
+| `sandbox.cocoonstack.io/runtime` annotation | `sandboxd` |
+| `sandbox.cocoonstack.io/template` | first container image, if unset |
+
+This routes the Pod to the vk-sandbox virtual node, which serves the claim
+from a node-local sandboxd (`github.com/cocoonstack/sandbox`) in
+sub-millisecond time. It is the successor to vk-cocoon for agent-sandbox
+workloads: vk-cocoon no longer answers sandbox Pods when this mode is
+selected.
 
 ## Standard kubelet contract
 

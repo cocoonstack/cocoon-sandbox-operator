@@ -156,7 +156,7 @@ sandbox-apiserver --enable-e2b-api --e2b-api-key-file=/etc/e2b/keys
 ```
 
 ```js
-export E2B_API_URL=https://your-apiserver:8080
+export E2B_API_URL=http://your-apiserver:8080
 const sandbox = await Sandbox.create('registry.example.com/rt:24.04')
 ```
 
