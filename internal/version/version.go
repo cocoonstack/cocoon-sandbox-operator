@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// nolint:revive
 package version
 
 import (
@@ -67,19 +68,15 @@ func Get() Info {
 	}
 }
 
-// Print returns version information for program.
-func Print(program string) (string, error) {
-	t, err := template.New("version").Parse(versionInfoTmpl)
-	if err != nil {
-		return "", fmt.Errorf("parse version template: %w", err)
-	}
-
+// Print returns version information.
+func Print(program string) string {
 	m := Get()
 	m.Program = program
+	t := template.Must(template.New("version").Parse(versionInfoTmpl))
 
 	var buf strings.Builder
 	if err := t.ExecuteTemplate(&buf, "version", m); err != nil {
-		return "", fmt.Errorf("render version: %w", err)
+		panic(err)
 	}
-	return strings.TrimSpace(buf.String()), nil
+	return strings.TrimSpace(buf.String())
 }

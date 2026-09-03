@@ -81,10 +81,7 @@ func TestInfoString(t *testing.T) {
 }
 
 func TestPrintRendersProgramAndVersion(t *testing.T) {
-	out, err := Print("sandbox-operator")
-	if err != nil {
-		t.Fatalf("Print: %v", err)
-	}
+	out := Print("sandbox-operator")
 	for _, want := range []string{"sandbox-operator, version", "build date:", "platform:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("Print output missing %q, got: %s", want, out)

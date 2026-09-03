@@ -61,12 +61,7 @@ func main() {
 	flag.Parse()
 
 	if o.printVersion {
-		v, err := version.Print("sandbox-operator")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println(v)
+		fmt.Println(version.Print("sandbox-operator"))
 		return
 	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&o.zap)))
