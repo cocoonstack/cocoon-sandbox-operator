@@ -359,12 +359,10 @@ func (s *Server) isPaused(ctx context.Context, sb *sandboxv1beta1.Sandbox) bool 
 	return sb.Labels[scale.PhaseLabel] == phaseHibernated
 }
 
-// decodeBody decodes a mandatory JSON body into out and answers 400 itself, reporting whether the handler may continue.
 func decodeBody(w http.ResponseWriter, r *http.Request, out any) bool {
 	return reportBadBody(w, json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(out))
 }
 
-// decodeOptionalBody is decodeBody for the verbs whose schema allows an absent body, which leaves out at its zero value.
 func decodeOptionalBody(w http.ResponseWriter, r *http.Request, out any) bool {
 	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(out)
 	if errors.Is(err, io.EOF) {
@@ -373,7 +371,6 @@ func decodeOptionalBody(w http.ResponseWriter, r *http.Request, out any) bool {
 	return reportBadBody(w, err)
 }
 
-// reportBadBody answers 400 when err is non-nil and reports whether the body decoded.
 func reportBadBody(w http.ResponseWriter, err error) bool {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
