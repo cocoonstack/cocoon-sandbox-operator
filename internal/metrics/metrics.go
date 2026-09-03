@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/cocoonstack/sandbox-operator/internal/version"
 )
@@ -122,8 +121,8 @@ var (
 	)
 )
 
-// Register adds the operator's collectors to the controller-runtime registry. A binary calls it once.
-func Register() error {
+// Register adds the operator's collectors to r. A binary calls it once.
+func Register(r prometheus.Registerer) error {
 	for _, c := range []prometheus.Collector{
 		ClaimStartupLatency,
 		ClaimControllerStartupLatency,
@@ -132,7 +131,7 @@ func Register() error {
 		WarmPoolSandboxCreatedTotal,
 		BuildInfo,
 	} {
-		if err := metrics.Registry.Register(c); err != nil {
+		if err := r.Register(c); err != nil {
 			return fmt.Errorf("register operator metrics: %w", err)
 		}
 	}

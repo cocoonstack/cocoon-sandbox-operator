@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
@@ -228,7 +229,7 @@ func (o *options) run() error {
 		return fmt.Errorf("start manager: %w", err)
 	}
 
-	if err := asmetrics.Register(); err != nil {
+	if err := asmetrics.Register(metrics.Registry); err != nil {
 		return err
 	}
 	asmetrics.RegisterSandboxCollector(ctx, mgr.GetClient(), mgr.GetLogger().WithName("sandbox-collector"))
