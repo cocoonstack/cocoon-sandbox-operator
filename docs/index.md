@@ -34,9 +34,9 @@ warm pool: N pre-booted microVMs
 A cold `Sandbox` creates a Pod on demand; with the microVM backend that Pod
 boots a VM, which costs tens of seconds. The warm path keeps that off the
 request path: a `SandboxWarmPool` pre-provisions N Ready microVMs, and a
-`SandboxClaim` **adopts** one — the VM is already booted, so the claim is a
-single optimistic `PATCH` guarded by `resourceVersion`, with no scheduler, no
-kubelet bind, no image pull and no etcd write on the claim path. The pool
+`SandboxClaim` **adopts** one — the VM is already booted, so the claim is an
+`Update` on the claim plus a merge `Patch` on the Sandbox, with no scheduler,
+no kubelet bind and no image pull on the claim path. The pool
 replenishes in the background.
 
 That is the same ownership-transfer shape Kubernetes already ships for
@@ -74,7 +74,7 @@ node, behind CRDs, RBAC and watch. Four layers:
 | layer | what it does | status |
 |---|---|---|
 | **L0** — API hygiene | cache-fed reads, diff-before-write, no control-loop `LIST` against etcd; the qualifier that stops APF seat exhaustion at scale | shipped |
-| **L1** — ownership transfer | claim = one select + one `PATCH`; `O(nodes)` pool status; per-pool sharded operator with a `coordination.k8s.io` Lease | implemented here |
+| **L1** — ownership transfer | claim = queue pop + `Update` + `Patch`; pool status from the informer cache; one leader-elected operator, no per-pool sharding | implemented here |
 | **L2** — node-local claim gateway | the concrete gateway fronts `sandboxd`, delivers a running microVM in 0.2–0.7 ms, records `Bound` asynchronously; authorization stays central | core implemented and benchmarked; supported DaemonSet packaging/hardening remains roadmap work |
 | **L3** — aggregated apiserver | `sandboxes` served by scatter-gathering per-node `NodeInventory`; etcd stores intent only, so object count drops from `O(sandboxes)` to `O(pools + nodes)` | implemented by `sandbox-apiserver`, its deployment/APIService manifests, and the cache-fed store |
 

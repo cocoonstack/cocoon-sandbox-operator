@@ -66,21 +66,21 @@ the claim path needs the scheduler, kubelet bind, or image pull.
 
 **Mechanisms**
 
-1. **Claim fast-path — one select, one PATCH.** Pick one `warm ∧ unclaimed`
-   Sandbox via a label index and adopt it with a single optimistic PATCH guarded
-   by its `resourceVersion`. On conflict (two claims raced the same Sandbox), the
-   loser simply tries the next candidate — no requeue, no exponential backoff, no
-   adoption-cache-lag requeue. This collapses the claim to Modal's "two network
-   hops and one cheap CPU op," expressed entirely in Kubernetes objects.
-2. **Pool status is `O(nodes)`, not `O(sandboxes)`.** `readyReplicas` is
-   maintained incrementally from informer add/update/delete events and
-   metadata-only reads, so replenishment reconciliation never re-lists the full
-   pool's Sandbox specs. A 2500-sandbox pool costs a counter update per event,
-   not a 2500-object list per reconcile.
-3. **Per-pool sharded operator.** Each `SandboxWarmPool` is an independent
-   workqueue shard; operator replicas take a per-shard `coordination.k8s.io`
-   Lease and scale horizontally. This is the Kubernetes-native spelling of
-   Modal's "fleet of scheduling servers" — no shared scheduler serialization.
+1. **Claim fast-path — pop, adopt, record.** `getCandidate` pops one
+   `warm ∧ unclaimed` Sandbox from the in-memory queue (node-spread pick); the
+   claim records the adoption with an `Update` on the SandboxClaim and binds
+   the Sandbox with a merge `Patch`. A loser that raced the same Sandbox moves
+   to the next candidate rather than requeueing. The CRD path is two apiserver
+   writes per claim; the sub-millisecond figures below come from the node-local
+   gateway (L2), not from this path.
+2. **Pool status from the informer cache, not etcd.** `readyReplicas` is
+   recomputed each reconcile from the pool's Sandboxes read through the indexed
+   cache without deep copies — an in-memory scan, never a `LIST` against the
+   apiserver.
+3. **One leader-elected operator.** The reconcilers share one manager under a
+   single `coordination.k8s.io` leader lease. Pools are independent workqueue
+   keys, not shards spread across replicas; per-pool sharding is not
+   implemented.
 
 **Kubernetes-semantics mapping**
 
@@ -302,7 +302,7 @@ real microVMs** is measured on a single `vk-cocoon` node (384 vCPU / 1.5 TB bare
 | **L2** | sub-millisecond node-local claim | gateway overhead p50 **0.039 ms**, p95 0.053 ms (sandboxd delivery itself is 0.2–0.7 ms by contract); 200/200 orphan bindings reconciled, **0** VM destroys | httptest sandboxd + fake recorder — `test/l2bench` |
 | **L3** | etcd stores intent only, `kubectl` unchanged | **3000** sandboxes served through client-go List/Get/Watch from **8** etcd objects (3 nodes + 5 pools) — **0** per-sandbox objects, 3 server-side-apply writes | in-process aggregated apiserver — `test/l3bench` |
 | **e2e** | admission→claim→release→cleanup, zero leak | 100 real microVMs: four-way cross-check 100/100/100/100, 100/100 claims bound, **0 leaked**, production workloads on the same node unaffected | the microVM node, full stack — `test/e2ebench` |
-| **sandboxd tier (deployed)** | hot-pool warm claim via k8s, apiserver flat under load | 100 `Sandbox` (`runtime: sandboxd`) create→Ready **p50 < 1 s** (warm), 98/100, submitted in 2.9 s; **100 %** routed to the sandboxd plane; apiserver LIST 37 ms/7 ms, **0 APF rejections, in-queue 0**; cocoon microVMs untouched | 26-node fleet, `vk-sandbox` + sandboxd — `test/run100` |
+| **sandboxd tier (deployed)** | hot-pool warm claim via k8s, apiserver flat under load | 100 `Sandbox` (`runtime: sandboxd`) create→Ready **p50 < 1 s** (warm), 98/100, submitted in 2.9 s; **100 %** routed to the sandboxd plane; apiserver LIST 37 ms/7 ms, **0 APF rejections, in-queue 0**; cocoon microVMs untouched | 26-node fleet, `vk-sandbox` + sandboxd — the scale benches under `test/` |
 
 Two honest caveats. The sub-millisecond L1/L2 figures measure algorithmic cost and
 gateway overhead on fake substrates; real end-to-end latency additionally pays the
