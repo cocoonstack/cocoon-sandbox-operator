@@ -159,25 +159,7 @@ func (c *Client) DeleteCheckpoint(ctx context.Context, checkpointID string) erro
 	if checkpointID == "" {
 		return fmt.Errorf("sandboxd: delete checkpoint requires a checkpoint id")
 	}
-	u := c.baseURL + "/v1/checkpoints/" + url.PathEscape(checkpointID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
-	if err != nil {
-		return err
-	}
-	c.authenticate(req, c.token)
-
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return fmt.Errorf("sandboxd: delete checkpoint: %w", err)
-	}
-	defer drainAndClose(resp)
-
-	switch resp.StatusCode {
-	case http.StatusNoContent, http.StatusNotFound:
-		return nil
-	default:
-		return statusError(resp)
-	}
+	return c.sendNoBody(ctx, http.MethodDelete, "/v1/checkpoints/"+url.PathEscape(checkpointID), c.token, "delete checkpoint", http.StatusNoContent, http.StatusNotFound)
 }
 
 // Promote performs POST /v1/sandboxes/{id}/promote, publishing the sandbox as
@@ -215,23 +197,7 @@ func (c *Client) sandboxVerb(ctx context.Context, id, verb string) error {
 	if id == "" {
 		return fmt.Errorf("sandboxd: %s requires a sandbox id", verb)
 	}
-	u := c.baseURL + "/v1/sandboxes/" + url.PathEscape(id) + "/" + verb
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
-	if err != nil {
-		return err
-	}
-	c.authenticate(req, c.token)
-
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return fmt.Errorf("sandboxd: %s: %w", verb, err)
-	}
-	defer drainAndClose(resp)
-
-	if resp.StatusCode != http.StatusNoContent {
-		return statusError(resp)
-	}
-	return nil
+	return c.sendNoBody(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/"+verb, c.token, verb, http.StatusNoContent)
 }
 
 // postJSON sends body as JSON via POST and decodes a 2xx reply into out.

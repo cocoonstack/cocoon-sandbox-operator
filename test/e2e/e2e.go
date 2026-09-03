@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -35,6 +36,7 @@ import (
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1alpha1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1alpha1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/test/benchutil"
 )
 
 const image = "m.daocloud.io/docker.io/library/alpine:3.20"
@@ -62,19 +64,19 @@ type result struct {
 func main() {
 	flag.Parse()
 	rootCtx := context.Background()
-	must(clientgoscheme.AddToScheme(scheme))
-	must(sandboxv1beta1.AddToScheme(scheme))
-	must(sandboxv1alpha1.AddToScheme(scheme))
-	must(extv1beta1.AddToScheme(scheme))
-	must(extv1alpha1.AddToScheme(scheme))
+	benchutil.Must(clientgoscheme.AddToScheme(scheme))
+	benchutil.Must(sandboxv1beta1.AddToScheme(scheme))
+	benchutil.Must(sandboxv1alpha1.AddToScheme(scheme))
+	benchutil.Must(extv1beta1.AddToScheme(scheme))
+	benchutil.Must(extv1alpha1.AddToScheme(scheme))
 
 	var err error
 	cfg, err = clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
-	must(err)
+	benchutil.Must(err)
 	cl, err = ctrlclient.New(cfg, ctrlclient.Options{Scheme: scheme})
-	must(err)
+	benchutil.Must(err)
 	cs, err = kubernetes.NewForConfig(cfg)
-	must(err)
+	benchutil.Must(err)
 
 	ensureNS(rootCtx, *ns)
 
@@ -130,13 +132,6 @@ func main() {
 	fmt.Printf("\nwrote %s (all_passed=%v)\n", *out, allPassed)
 	if !allPassed {
 		os.Exit(1)
-	}
-}
-
-func must(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
-		os.Exit(2)
 	}
 }
 
@@ -374,6 +369,22 @@ func scSuspendResume(ctx context.Context) (string, error) {
 	return "suspend removed pod; resume recreated + Ready", nil
 }
 
+// pollDetail retries probe on a 3s tick until it yields evidence or d elapses; an empty string means keep polling.
+func pollDetail(d time.Duration, timeoutMsg string, probe func() (string, error)) (string, error) {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		detail, err := probe()
+		if err != nil {
+			return "", err
+		}
+		if detail != "" {
+			return detail, nil
+		}
+		time.Sleep(3 * time.Second)
+	}
+	return "", errors.New(timeoutMsg)
+}
+
 func waitPodGone(ctx context.Context, name string, d time.Duration) error {
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
@@ -400,8 +411,7 @@ func scShutdownRetain(ctx context.Context) (string, error) {
 	}
 	defer deleteSandbox(ctx, name)
 	// With Retain + past shutdownTime, the sandbox should end up Expired (not deleted).
-	deadline := time.Now().Add(90 * time.Second)
-	for time.Now().Before(deadline) {
+	return pollDetail(90*time.Second, "no Expired condition within deadline", func() (string, error) {
 		s := &sandboxv1beta1.Sandbox{}
 		if err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, s); err != nil {
 			return "", err
@@ -414,9 +424,8 @@ func scShutdownRetain(ctx context.Context) (string, error) {
 				return "expiry reason observed: " + c.Reason, nil
 			}
 		}
-		time.Sleep(3 * time.Second)
-	}
-	return "", fmt.Errorf("no Expired condition within deadline")
+		return "", nil
+	})
 }
 
 func scPVC(ctx context.Context) (string, error) {
@@ -437,8 +446,7 @@ func scPVC(ctx context.Context) (string, error) {
 		return "", err
 	}
 	defer deleteSandbox(ctx, name)
-	deadline := time.Now().Add(120 * time.Second)
-	for time.Now().Before(deadline) {
+	return pollDetail(120*time.Second, "no PVC created for sandbox", func() (string, error) {
 		pvcs := &corev1.PersistentVolumeClaimList{}
 		if err := cl.List(ctx, pvcs, ctrlclient.InNamespace(*ns)); err == nil {
 			for _, p := range pvcs.Items {
@@ -447,16 +455,14 @@ func scPVC(ctx context.Context) (string, error) {
 				}
 			}
 		}
-		time.Sleep(3 * time.Second)
-	}
-	return "", fmt.Errorf("no PVC created for sandbox")
+		return "", nil
+	})
 }
 
 func scDeleteCleanup(ctx context.Context) (string, error) {
 	name := "e2e-core"
 	deleteSandbox(ctx, name)
-	deadline := time.Now().Add(90 * time.Second)
-	for time.Now().Before(deadline) {
+	return pollDetail(90*time.Second, "resources not fully cleaned up", func() (string, error) {
 		s := &sandboxv1beta1.Sandbox{}
 		errS := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, s)
 		p := &corev1.Pod{}
@@ -466,9 +472,8 @@ func scDeleteCleanup(ctx context.Context) (string, error) {
 		if apierrors.IsNotFound(errS) && apierrors.IsNotFound(errP) && apierrors.IsNotFound(errSvc) {
 			return "sandbox+pod+service fully garbage-collected", nil
 		}
-		time.Sleep(3 * time.Second)
-	}
-	return "", fmt.Errorf("resources not fully cleaned up")
+		return "", nil
+	})
 }
 
 func newTemplate(name string) *extv1beta1.SandboxTemplate {
@@ -522,8 +527,7 @@ func scWarmPoolScale(ctx context.Context) (string, error) {
 	if err := cl.Create(ctx, wp); err != nil {
 		return "", err
 	}
-	deadline := time.Now().Add(150 * time.Second)
-	for time.Now().Before(deadline) {
+	return pollDetail(150*time.Second, "warm pool did not reach desired replicas", func() (string, error) {
 		sl := &sandboxv1beta1.SandboxList{}
 		if err := cl.List(ctx, sl, ctrlclient.InNamespace(*ns)); err == nil {
 			warm := 0
@@ -538,9 +542,8 @@ func scWarmPoolScale(ctx context.Context) (string, error) {
 				return fmt.Sprintf("warm pool provisioned %d sandboxes", warm), nil
 			}
 		}
-		time.Sleep(3 * time.Second)
-	}
-	return "", fmt.Errorf("warm pool did not reach desired replicas")
+		return "", nil
+	})
 }
 
 func scClaimWarmHit(ctx context.Context) (string, error) {
@@ -557,8 +560,7 @@ func scClaimWarmHit(ctx context.Context) (string, error) {
 		return "", err
 	}
 	defer deleteClaim(ctx, name)
-	deadline := time.Now().Add(120 * time.Second)
-	for time.Now().Before(deadline) {
+	return pollDetail(120*time.Second, "claim did not bind to a warm sandbox", func() (string, error) {
 		got := &extv1beta1.SandboxClaim{}
 		if err := cl.Get(ctx, types.NamespacedName{Namespace: *ns, Name: name}, got); err == nil {
 			if got.Status.SandboxStatus.Name != "" {
@@ -570,9 +572,8 @@ func scClaimWarmHit(ctx context.Context) (string, error) {
 				}
 			}
 		}
-		time.Sleep(3 * time.Second)
-	}
-	return "", fmt.Errorf("claim did not bind to a warm sandbox")
+		return "", nil
+	})
 }
 
 func scConversion(ctx context.Context) (string, error) {

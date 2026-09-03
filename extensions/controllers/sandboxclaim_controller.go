@@ -1459,12 +1459,7 @@ func (r *SandboxClaimReconciler) recordSandboxCreationLatency(sandbox *v1beta1.S
 }
 
 // recordCreationLatencyMetric detects and records transitions to Ready state.
-func (r *SandboxClaimReconciler) recordCreationLatencyMetric(
-	ctx context.Context,
-	claim *extensionsv1beta1.SandboxClaim,
-	oldStatus *extensionsv1beta1.SandboxClaimStatus,
-	sandbox *v1beta1.Sandbox,
-) {
+func (r *SandboxClaimReconciler) recordCreationLatencyMetric(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, oldStatus *extensionsv1beta1.SandboxClaimStatus, sandbox *v1beta1.Sandbox) {
 	logger := log.FromContext(ctx)
 
 	newStatus := &claim.Status
@@ -1873,11 +1868,7 @@ func domainInList(domain string, list []string) bool {
 	})
 }
 
-func mergeVolumeClaimTemplates(
-	templateVCTs []v1beta1.PersistentVolumeClaimTemplate,
-	claimVCTs []v1beta1.PersistentVolumeClaimTemplate,
-	policy extensionsv1beta1.VolumeClaimTemplatesPolicy,
-) ([]v1beta1.PersistentVolumeClaimTemplate, error) {
+func mergeVolumeClaimTemplates(templateVCTs, claimVCTs []v1beta1.PersistentVolumeClaimTemplate, policy extensionsv1beta1.VolumeClaimTemplatesPolicy) ([]v1beta1.PersistentVolumeClaimTemplate, error) {
 	if err := validateVolumeClaimTemplates(templateVCTs); err != nil {
 		return nil, fmt.Errorf("template: %w", err)
 	}

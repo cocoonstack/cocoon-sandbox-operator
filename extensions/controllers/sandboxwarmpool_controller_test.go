@@ -1287,7 +1287,8 @@ func TestIsSandboxStale_OrphanedSandboxVetting(t *testing.T) {
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: *spoofedSpec}}},
 	}
 
-	isStaleSpoofed := r.isSandboxStale(ctx, spoofedOrphan, template, SandboxTemplateRefHash(template.Name), currentSandboxBlueprintHash, vettedHashes)
+	check := staleCheck{template: template, refHash: SandboxTemplateRefHash(template.Name), blueprintHash: currentSandboxBlueprintHash, vetted: vettedHashes}
+	isStaleSpoofed := r.isSandboxStale(ctx, spoofedOrphan, check)
 	require.True(t, isStaleSpoofed, "Orphaned sandbox with spoofed hash but modified PodSpec should be stale")
 
 	genuineSpec := template.Spec.PodTemplate.Spec.DeepCopy()
@@ -1304,7 +1305,7 @@ func TestIsSandboxStale_OrphanedSandboxVetting(t *testing.T) {
 		Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{Spec: *genuineSpec}}},
 	}
 
-	isStaleGenuine := r.isSandboxStale(ctx, genuineOrphan, template, SandboxTemplateRefHash(template.Name), currentSandboxBlueprintHash, vettedHashes)
+	isStaleGenuine := r.isSandboxStale(ctx, genuineOrphan, check)
 	require.False(t, isStaleGenuine, "Orphaned sandbox with genuine fully vetted PodSpec should be fresh")
 }
 
@@ -2009,7 +2010,7 @@ func TestNewPoolSandboxesCarryOnlyTheRenamedHashLabel(t *testing.T) {
 		Name: "p", Namespace: "default",
 		Spec: extensionsv1beta1.SandboxWarmPoolSpec{TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "test-template"}},
 	}
-	sb, err := r.buildSandboxCR(t.Context(), warmPool, "hash", createTemplate("default"), "bph")
+	sb, err := r.buildSandboxCR(t.Context(), warmPool, createTemplate("default"), "bph")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -69,26 +69,24 @@ const (
 	runVal   = "g0131-stress"
 )
 
-func must(err error) { benchutil.Must(err) }
-
 func main() {
 	flag.Parse()
-	must(clientgoscheme.AddToScheme(scheme))
-	must(sandboxv1beta1.AddToScheme(scheme))
-	must(extv1beta1.AddToScheme(scheme))
+	benchutil.Must(clientgoscheme.AddToScheme(scheme))
+	benchutil.Must(sandboxv1beta1.AddToScheme(scheme))
+	benchutil.Must(extv1beta1.AddToScheme(scheme))
 	cfg, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
-	must(err)
+	benchutil.Must(err)
 	cfg.QPS, cfg.Burst = 200, 400
 	cl, err = ctrlclient.New(cfg, ctrlclient.Options{Scheme: scheme})
-	must(err)
+	benchutil.Must(err)
 	cs, err = kubernetes.NewForConfig(cfg)
-	must(err)
+	benchutil.Must(err)
 
 	hosts := splitCSV(*hostsCSV)
 	steps := parseSteps(*stepsCSV)
 	for _, n := range steps {
 		if n > 200 {
-			must(fmt.Errorf("refusing step %d: this run is capped at 200 sandboxes", n))
+			benchutil.Must(fmt.Errorf("refusing step %d: this run is capped at 200 sandboxes", n))
 		}
 	}
 	ctx := context.Background()
@@ -96,7 +94,7 @@ func main() {
 	prodBase := prodPods(ctx, *prodNS, hosts)
 	fmt.Printf("[prod] baseline on %v = %d pods (hard guard)\n", hosts, prodBase)
 	if prodBase <= 0 {
-		must(fmt.Errorf("refusing to run: prod baseline non-positive (%d)", prodBase))
+		benchutil.Must(fmt.Errorf("refusing to run: prod baseline non-positive (%d)", prodBase))
 	}
 
 	ensureNS(ctx)
@@ -219,7 +217,7 @@ func main() {
 	result["completed_clean"] = abort == "" && len(rounds) == len(steps) && prodOK
 
 	b, _ := json.MarshalIndent(result, "", "  ")
-	must(os.WriteFile(*out, b, 0o644))
+	benchutil.Must(os.WriteFile(*out, b, 0o644))
 	fmt.Printf("\n== new LIST time-out rejections during ramp: %.0f | peak %s seats in use: %.0f/%.0f | client LIST-sb p95 x%.2f | wedge_observed=%v | prod intact=%v ==\n",
 		newRejections, *plName, maxInUse, nominal, ratio, wedgeObserved, prodOK)
 	fmt.Printf("wrote %s\n", *out)
@@ -274,7 +272,7 @@ func ensureTemplate(ctx context.Context, hosts []string) {
 		},
 	}
 	if err := cl.Create(ctx, t); err != nil && !apierrors.IsAlreadyExists(err) {
-		must(err)
+		benchutil.Must(err)
 	}
 }
 
@@ -455,7 +453,7 @@ func parseSteps(s string) []int {
 	var out []int
 	for _, p := range splitCSV(s) {
 		v, err := strconv.Atoi(p)
-		must(err)
+		benchutil.Must(err)
 		out = append(out, v)
 	}
 	return out

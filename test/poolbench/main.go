@@ -62,22 +62,20 @@ const (
 	poolName = "poolbench-pool"
 )
 
-func must(err error) { benchutil.Must(err) }
-
 func main() {
 	flag.Parse()
 	ctx := context.Background()
-	must(clientgoscheme.AddToScheme(scheme))
-	must(sandboxv1beta1.AddToScheme(scheme))
-	must(extv1beta1.AddToScheme(scheme))
+	benchutil.Must(clientgoscheme.AddToScheme(scheme))
+	benchutil.Must(sandboxv1beta1.AddToScheme(scheme))
+	benchutil.Must(extv1beta1.AddToScheme(scheme))
 	var err error
 	cfg, err = clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
-	must(err)
+	benchutil.Must(err)
 	cfg.QPS, cfg.Burst = 400, 800
 	cl, err = ctrlclient.New(cfg, ctrlclient.Options{Scheme: scheme})
-	must(err)
+	benchutil.Must(err)
 	wcl, err = ctrlclient.NewWithWatch(cfg, ctrlclient.Options{Scheme: scheme})
-	must(err)
+	benchutil.Must(err)
 
 	result := map[string]any{"ns": *ns, "poolTarget": *poolSize}
 
@@ -168,7 +166,7 @@ func ensureTemplate(ctx context.Context) {
 	}
 	err := cl.Create(ctx, t)
 	if err != nil && !apierrors.IsAlreadyExists(err) {
-		must(err)
+		benchutil.Must(err)
 	}
 }
 

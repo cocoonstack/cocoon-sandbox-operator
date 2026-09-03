@@ -50,6 +50,7 @@ import (
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
+	"github.com/cocoonstack/sandbox-operator/pkg/scale"
 )
 
 const (
@@ -58,8 +59,7 @@ const (
 	// publish does not fail the walk-through.
 	visibilityTimeout = 90 * time.Second
 
-	// claimIDAnnotation carries the node-local claim id of a delivered sandbox.
-	claimIDAnnotation = "sandbox.cocoonstack.io/claim-id"
+	claimIDAnnotation = scale.ClaimIDAnnotation
 )
 
 type options struct {
@@ -237,25 +237,21 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 // served from NodeInventory, which is republished on a ~30s cadence — so a
 // caller that reads immediately after creating must expect a NotFound.
 func waitVisible(ctx context.Context, c client.Client, ns, name string) (*sandboxv1beta1.Sandbox, error) {
-	deadline := time.Now().Add(visibilityTimeout)
-	for {
-		var sb sandboxv1beta1.Sandbox
+	var sb sandboxv1beta1.Sandbox
+	err := pollVisible(ctx, fmt.Sprintf("sandbox %s/%s", ns, name), func() (bool, error) {
 		err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &sb)
-		if err == nil {
-			return &sb, nil
+		if apierrors.IsNotFound(err) {
+			return false, nil
 		}
-		if !apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("get Sandbox: %w", err)
+		if err != nil {
+			return false, fmt.Errorf("get Sandbox: %w", err)
 		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("sandbox %s/%s not visible within %s", ns, name, visibilityTimeout)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(3 * time.Second):
-		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, err
 	}
+	return &sb, nil
 }
 
 // post invokes an action subresource. These are POST-only verbs (the
@@ -445,24 +441,13 @@ func (e *e2bClient) health(ctx context.Context) error {
 // waitVisible polls until the read view publishes the sandbox — the same
 // eventual consistency the Kubernetes surface has, for the same reason.
 func (e *e2bClient) waitVisible(ctx context.Context, id string) error {
-	deadline := time.Now().Add(visibilityTimeout)
-	for {
+	return pollVisible(ctx, "sandbox "+id, func() (bool, error) {
 		code, err := e.status(ctx, http.MethodGet, "/sandboxes/"+id, nil)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if code == http.StatusOK {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("sandbox %s not visible within %s", id, visibilityTimeout)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(3 * time.Second):
-		}
-	}
+		return code == http.StatusOK, nil
+	})
 }
 
 func (e *e2bClient) request(ctx context.Context, method, path string, body any) (*http.Request, error) {
@@ -526,6 +511,28 @@ func (e *e2bClient) status(ctx context.Context, method, path string, body any) (
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode, nil
+}
+
+// pollVisible retries probe on a 3s tick until the subject is visible or visibilityTimeout elapses.
+func pollVisible(ctx context.Context, subject string, probe func() (bool, error)) error {
+	deadline := time.Now().Add(visibilityTimeout)
+	for {
+		visible, err := probe()
+		if err != nil {
+			return err
+		}
+		if visible {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s not visible within %s", subject, visibilityTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
 }
 
 func section(name string) { fmt.Printf("\n=== %s ===\n", name) }
