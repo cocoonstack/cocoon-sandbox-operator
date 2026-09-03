@@ -53,23 +53,6 @@ type PoolKey struct {
 	Engine   string `json:"engine,omitempty"`
 }
 
-// CheckpointClaimSpec is the POST /v1/checkpoints/{id}/claim body.
-type CheckpointClaimSpec struct {
-	TTLSeconds int `json:"ttl_seconds,omitempty"`
-}
-
-// PromoteSpec is the POST /v1/sandboxes/{id}/promote body: it publishes the
-// sandbox's state as a node-local template future claims clone from.
-type PromoteSpec struct {
-	Token    string `json:"token,omitempty"`
-	Template string `json:"template"`
-}
-
-// PromoteResult returns the promoted template's full key.
-type PromoteResult struct {
-	Key PoolKey `json:"key"`
-}
-
 // SandboxSummary is one live claim as the owning node reports it.
 type SandboxSummary struct {
 	ID             string    `json:"id"`
@@ -134,17 +117,6 @@ func (c *Client) Checkpoint(ctx context.Context, id string, spec CheckpointSpec)
 	return out.Checkpoint, err
 }
 
-// ClaimCheckpoint performs POST /v1/checkpoints/{id}/claim, delivering a fresh
-// sandbox branched from the checkpoint's exact state.
-func (c *Client) ClaimCheckpoint(ctx context.Context, checkpointID string, spec CheckpointClaimSpec) (ClaimResult, error) {
-	var out ClaimResult
-	if checkpointID == "" {
-		return out, fmt.Errorf("sandboxd: claim checkpoint requires a checkpoint id")
-	}
-	err := c.postJSON(ctx, "/v1/checkpoints/"+url.PathEscape(checkpointID)+"/claim", spec, &out)
-	return out, err
-}
-
 // Checkpoints performs GET /v1/checkpoints, newest first.
 func (c *Client) Checkpoints(ctx context.Context) ([]Checkpoint, error) {
 	var out struct {
@@ -160,17 +132,6 @@ func (c *Client) DeleteCheckpoint(ctx context.Context, checkpointID string) erro
 		return fmt.Errorf("sandboxd: delete checkpoint requires a checkpoint id")
 	}
 	return c.sendNoBody(ctx, http.MethodDelete, "/v1/checkpoints/"+url.PathEscape(checkpointID), c.token, "delete checkpoint", http.StatusNoContent, http.StatusNotFound)
-}
-
-// Promote performs POST /v1/sandboxes/{id}/promote, publishing the sandbox as
-// a node-local template that later claims for that key clone from.
-func (c *Client) Promote(ctx context.Context, id string, spec PromoteSpec) (PoolKey, error) {
-	if id == "" {
-		return PoolKey{}, fmt.Errorf("sandboxd: promote requires a sandbox id")
-	}
-	var out PromoteResult
-	err := c.postJSON(ctx, "/v1/sandboxes/"+url.PathEscape(id)+"/promote", spec, &out)
-	return out.Key, err
 }
 
 // Stats performs GET /v1/sandboxes/{id}/stats.

@@ -465,7 +465,7 @@ func (r *SandboxClaimReconciler) reconcileActive(ctx context.Context, claim *ext
 	}
 
 	// Fast path: try to find existing or adopt from warm pool before template lookup.
-	sandbox, err := r.getOrCreateSandbox(ctx, claim, nil)
+	sandbox, err := r.getOrCreateSandbox(ctx, claim)
 	logger.V(1).Info("getOrCreateSandbox result", "sandboxFound", sandbox != nil, "err", err, "claim", claim.Name)
 	if err != nil {
 		return nil, err
@@ -1121,7 +1121,7 @@ func (r *SandboxClaimReconciler) injectClaimEnv(logger logr.Logger, claim *exten
 	return nil
 }
 
-func (r *SandboxClaimReconciler) getOrCreateSandbox(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, _ *extensionsv1beta1.SandboxTemplate) (*v1beta1.Sandbox, error) {
+func (r *SandboxClaimReconciler) getOrCreateSandbox(ctx context.Context, claim *extensionsv1beta1.SandboxClaim) (*v1beta1.Sandbox, error) {
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("Executing getOrCreateSandbox", "claim", claim.Name)
 
@@ -1807,13 +1807,7 @@ func ensureClaimIdentityLabels(labels map[string]string, claim *extensionsv1beta
 		labels = make(map[string]string)
 	}
 	labels[extensionsv1beta1.SandboxIDLabel] = string(claim.UID)
-	// Propagate created-by label from the claim if present. If absent, explicitly
-	// delete it to synchronize removal or prevent stale propagation from warm sandboxes.
-	if val, ok := claim.Labels[v1beta1.CreatedByLabel]; ok && val != "" {
-		labels[v1beta1.CreatedByLabel] = val
-	} else {
-		delete(labels, v1beta1.CreatedByLabel)
-	}
+	setOrDeleteLabel(labels, v1beta1.CreatedByLabel, claim.Labels[v1beta1.CreatedByLabel])
 	return labels
 }
 
