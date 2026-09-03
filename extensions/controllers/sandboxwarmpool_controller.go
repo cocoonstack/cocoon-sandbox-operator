@@ -83,7 +83,6 @@ type SandboxWarmPoolReconciler struct {
 //+kubebuilder:rbac:groups=extensions.agents.x-k8s.io,resources=sandboxwarmpools/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=agents.x-k8s.io,resources=sandboxes,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile implements the reconciliation loop for SandboxWarmPool.
 func (r *SandboxWarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -148,9 +147,6 @@ func (r *SandboxWarmPoolReconciler) SetupWithManager(mgr ctrl.Manager, concurren
 func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) (time.Duration, error) {
 	logger := log.FromContext(ctx)
 
-	// In the L3 writable-aggregation design warm capacity lives per-node in
-	// sandboxd, not as Sandbox CRs, and creating CRs would fight the aggregated
-	// node-local claim path. When disabled, report status without any create/delete.
 	if r.DisableSandboxCRManagement {
 		return 0, r.reconcilePoolStatusOnly(ctx, warmPool)
 	}
@@ -237,7 +233,6 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 			logger.Error(err, "Failed to build sandbox CR blueprint")
 			allErrors = errors.Join(allErrors, err)
 		} else {
-			// Parallel sandbox creation with adaptive slow-start batching (starts with 1 and doubles on success)
 			_, createErr := slowStartBatch(ctx, int(sandboxesToCreate), 1, func(_ int) error {
 				return r.createPoolSandbox(ctx, warmPool, sandboxCR)
 			})
@@ -259,15 +254,14 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 			bReady := isSandboxReady(b)
 			if aReady != bReady {
 				if aReady {
-					return 1 // a ready, b not ready -> b first (delete unready first)
+					return 1
 				}
-				return -1 // b ready, a not ready -> a first
+				return -1
 			}
-			return b.CreationTimestamp.Compare(a.CreationTimestamp.Time) // newest first
+			return b.CreationTimestamp.Compare(a.CreationTimestamp.Time)
 		})
 
 		toDeleteCount := min(sandboxesToDelete, int32(len(activeSandboxes)))
-		// Parallel sandbox deletion with adaptive slow-start batching (starts with 1 and doubles on success)
 		_, deleteErr := slowStartBatch(ctx, int(toDeleteCount), 1, func(idx int) error {
 			return r.deletePoolSandbox(ctx, activeSandboxes[idx])
 		})
@@ -284,11 +278,6 @@ func (r *SandboxWarmPoolReconciler) reconcilePool(ctx context.Context, warmPool 
 	return stuckRecheck, allErrors
 }
 
-// reconcilePoolStatusOnly reports pool status without creating or deleting any
-// Sandbox CRs. It is the reconcile used when DisableSandboxCRManagement is set:
-// warm capacity is driven per-node by sandboxd, so the controller only surfaces
-// the current CR-backed member count (typically zero in that mode) and never
-// mutates the aggregated node-local claim path.
 func (r *SandboxWarmPoolReconciler) reconcilePoolStatusOnly(ctx context.Context, warmPool *extensionsv1beta1.SandboxWarmPool) error {
 	poolNameHash := hash.Name(warmPool.Name)
 	labelSelector := labels.SelectorFromSet(labels.Set{warmPoolSandboxLabel: poolNameHash})

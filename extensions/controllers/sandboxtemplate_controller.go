@@ -237,37 +237,33 @@ func buildDefaultNetworkPolicySpec(templateName, routerNamespace string) network
 			networkingv1.PolicyTypeIngress,
 			networkingv1.PolicyTypeEgress,
 		},
-		// 1. INGRESS: Allow traffic only from the Sandbox Router
 		Ingress: []networkingv1.NetworkPolicyIngressRule{
 			{
 				From: peers,
 			},
 		},
-		// 2. EGRESS: Secure Default Configuration
 		Egress: []networkingv1.NetworkPolicyEgressRule{
-			// Public Internet Access (Strict Isolation)
-			// This rule allows all ports to PUBLIC IPs, but explicitly blocks private LAN ranges.
-			// NOTE: This intentionally blocks internal cluster DNS (CoreDNS) by default to prevent
-			// agents from probing for service discovery and leaking internal service names.
+			// Blocking the private ranges also blocks cluster DNS, so agents cannot
+			// probe service discovery and leak internal service names.
 			{
 				To: []networkingv1.NetworkPolicyPeer{
 					{
 						IPBlock: &networkingv1.IPBlock{
 							CIDR: "0.0.0.0/0",
 							Except: []string{
-								"10.0.0.0/8",     // Block Private Class A (Cluster/VPC Network)
-								"172.16.0.0/12",  // Block Private Class B
-								"192.168.0.0/16", // Block Private Class C
-								"169.254.0.0/16", // Block Link-Local (Metadata Server)
+								"10.0.0.0/8",
+								"172.16.0.0/12",
+								"192.168.0.0/16",
+								"169.254.0.0/16", // metadata server
 							},
 						},
 					},
 					{
 						IPBlock: &networkingv1.IPBlock{
-							CIDR: "::/0", // IPv6 Catch-all
+							CIDR: "::/0",
 							Except: []string{
-								"fc00::/7",  // Block IPv6 Unique Local Addresses (Internal)
-								"fe80::/10", // Block IPv6 Link-Local
+								"fc00::/7",
+								"fe80::/10",
 							},
 						},
 					},

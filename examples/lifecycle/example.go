@@ -176,13 +176,11 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 	}
 	sb.Spec.PodTemplate.Spec.Containers = []corev1.Container{{Name: "agent", Image: o.template}}
 
-	// 1. Create — a claim against a warm pool, not a scheduling decision.
 	if err := c.Create(ctx, sb); err != nil {
 		return fmt.Errorf("create Sandbox: %w", err)
 	}
 	stepf("create", "Sandbox %s/%s", o.namespace, name)
 
-	// 2. Wait until the read view publishes it, then Get and List.
 	live, err := waitVisible(ctx, c, o.namespace, name)
 	if err != nil {
 		return err
@@ -195,7 +193,6 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 	}
 	stepf("list", "%d sandbox(es) in %s", len(list.Items), o.namespace)
 
-	// 3. snapshot — an immutable checkpoint; the source keeps running.
 	snap := &sandboxv1beta1.SandboxSnapshotResult{}
 	if err := post(ctx, rc, o.namespace, name, "snapshot",
 		&sandboxv1beta1.SandboxSnapshotOptions{Name: "example-checkpoint"}, snap); err != nil {
@@ -203,8 +200,6 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 	}
 	stepf("snapshot", "snapshotID=%s on node=%s", snap.SnapshotID, snap.NodeName)
 
-	// 4. fork — the source is checkpointed in place and keeps running; each
-	// child is a brand-new sandbox with its own id and lease.
 	forked := &sandboxv1beta1.SandboxForkResult{}
 	if err := post(ctx, rc, o.namespace, name, "fork",
 		&sandboxv1beta1.SandboxForkOptions{Count: 2, TTLSeconds: 600}, forked); err != nil {
@@ -214,23 +209,18 @@ func runKubernetes(ctx context.Context, c client.Client, rc rest.Interface, o op
 		stepf("fork", "child[%d] sandboxID=%s node=%s", i, child.SandboxID, child.NodeName)
 	}
 
-	// 5. pause — writes the guest's memory out and stops the VM, so this is
-	// the slow verb: its cost is proportional to guest RAM.
 	start := time.Now()
 	if err := post(ctx, rc, o.namespace, name, "pause", &sandboxv1beta1.SandboxPauseOptions{}, nil); err != nil {
 		return fmt.Errorf("pause: %w", err)
 	}
 	stepf("pause", "took %s (proportional to guest memory)", time.Since(start).Round(time.Millisecond))
 
-	// 6. resume — cocoon's mmap restore fast path, and idempotent on a
-	// sandbox that is already running.
 	start = time.Now()
 	if err := post(ctx, rc, o.namespace, name, "resume", &sandboxv1beta1.SandboxResumeOptions{}, nil); err != nil {
 		return fmt.Errorf("resume: %w", err)
 	}
 	stepf("resume", "took %s (mmap restore fast path)", time.Since(start).Round(time.Millisecond))
 
-	// 7. Delete — releases the claim back to the node's pool.
 	if o.keep {
 		stepf("delete", "skipped (-keep)")
 		return nil
@@ -313,15 +303,12 @@ func runE2B(ctx context.Context, o options) error {
 	}
 	stepf("health", "reachable")
 
-	// 1. Templates — the pools this fleet can serve claims from; a templateID
-	// from here is what create accepts.
 	var templates []map[string]any
 	if err := e.do(ctx, http.MethodGet, "/templates", nil, &templates); err != nil {
 		return fmt.Errorf("list templates: %w", err)
 	}
 	stepf("templates", "%d available", len(templates))
 
-	// 2. Create.
 	var created map[string]any
 	if err := e.do(ctx, http.MethodPost, "/sandboxes",
 		map[string]any{"templateID": o.template, "timeout": 600}, &created); err != nil {
@@ -337,7 +324,6 @@ func runE2B(ctx context.Context, o options) error {
 		return fmt.Errorf("sandboxID %q is not DNS-label safe", id)
 	}
 
-	// 3. List and Get.
 	var listed []map[string]any
 	if err := e.do(ctx, http.MethodGet, "/sandboxes", nil, &listed); err != nil {
 		return fmt.Errorf("list: %w", err)
@@ -349,7 +335,6 @@ func runE2B(ctx context.Context, o options) error {
 	}
 	stepf("get", "%s is in the read view", id)
 
-	// 4. Metrics.
 	var metrics []map[string]any
 	if err := e.do(ctx, http.MethodGet, "/sandboxes/"+id+"/metrics", nil, &metrics); err != nil {
 		return fmt.Errorf("metrics: %w", err)
@@ -358,7 +343,6 @@ func runE2B(ctx context.Context, o options) error {
 		stepf("metrics", "cpuCount=%v memTotal=%v", metrics[0]["cpuCount"], metrics[0]["memTotal"])
 	}
 
-	// 5. Snapshot, then list snapshots.
 	var snap map[string]any
 	if err := e.do(ctx, http.MethodPost, "/sandboxes/"+id+"/snapshots",
 		map[string]any{"name": "example-e2b-snap"}, &snap); err != nil {
@@ -372,7 +356,6 @@ func runE2B(ctx context.Context, o options) error {
 	}
 	stepf("snapshots", "%d checkpoint(s) fleet-wide", len(snaps))
 
-	// 6. Fork — one result per child, each a new sandbox.
 	var forks []map[string]any
 	if err := e.do(ctx, http.MethodPost, "/sandboxes/"+id+"/fork",
 		map[string]any{"count": 2, "timeout": 600}, &forks); err != nil {
@@ -380,8 +363,6 @@ func runE2B(ctx context.Context, o options) error {
 	}
 	stepf("fork", "%d child sandbox(es)", len(forks))
 
-	// 7. Pause, and prove the already-paused contract: the SDK reads 409 as
-	// "was already paused" and returns false rather than raising.
 	if code, err := e.status(ctx, http.MethodPost, "/sandboxes/"+id+"/pause", nil); err != nil {
 		return err
 	} else if code != http.StatusNoContent {
@@ -396,8 +377,6 @@ func runE2B(ctx context.Context, o options) error {
 	}
 	stepf("pause", "409 on repeat — the already-paused contract holds")
 
-	// 8. Connect is the SDK's resume: 201 when it actually restored a paused
-	// sandbox, 200 when it was already running.
 	if code, err := e.status(ctx, http.MethodPost, "/sandboxes/"+id+"/connect",
 		map[string]any{"timeout": 600}); err != nil {
 		return err
@@ -414,7 +393,6 @@ func runE2B(ctx context.Context, o options) error {
 	}
 	stepf("connect", "200 — already running, no restore")
 
-	// 9. setTimeout and the keepalive.
 	if code, err := e.status(ctx, http.MethodPost, "/sandboxes/"+id+"/timeout",
 		map[string]any{"timeout": 900}); err != nil {
 		return err
@@ -431,7 +409,6 @@ func runE2B(ctx context.Context, o options) error {
 	}
 	stepf("refreshes", "keepalive accepted")
 
-	// 10. Delete.
 	if o.keep {
 		stepf("delete", "skipped (-keep)")
 		return nil

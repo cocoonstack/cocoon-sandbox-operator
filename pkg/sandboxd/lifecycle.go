@@ -16,10 +16,6 @@ import (
 // design projects.
 const maxReplyBytes = 16 << 20
 
-// The lifecycle verbs take sandboxd's operator path under the fleet root token:
-// a per-sandbox secret would turn the control plane's O(nodes) storage into
-// O(sandboxes).
-
 // ForkSpec is the POST /v1/sandboxes/{id}/fork body. Token stays empty on the
 // operator path; Count must be within the node's max_fork_count.
 type ForkSpec struct {
