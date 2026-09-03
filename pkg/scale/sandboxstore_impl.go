@@ -187,6 +187,8 @@ func NewSandboxdClientFactory() SandboxdClientFactory {
 	}
 }
 
+type inventoryMatch func(inv *NodeInventory, i int) bool
+
 var _ SandboxStore = (*scatterGatherStore)(nil)
 
 // scatterGatherStore is the concrete SandboxStore: List/Get/Watch synthesize
@@ -381,7 +383,7 @@ func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch
 // It reads the node the index last saw holding key and only sweeps the whole
 // fleet on a miss, canceling the rest of the sweep on the hit. Nil with a nil
 // error means no entry matched.
-func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, match func(inv *NodeInventory, i int) bool) (*sandboxv1beta1.Sandbox, error) {
+func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, match inventoryMatch) (*sandboxv1beta1.Sandbox, error) {
 	if node, ok := s.index.lookup(key); ok {
 		if sb := s.matchOnNode(ctx, node, match); sb != nil {
 			return sb, nil
@@ -439,7 +441,7 @@ func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, matc
 
 // matchOnNode resolves match against one node's inventory, returning nil when
 // that node is unreadable or no longer holds the entry.
-func (s *scatterGatherStore) matchOnNode(ctx context.Context, node string, match func(inv *NodeInventory, i int) bool) *sandboxv1beta1.Sandbox {
+func (s *scatterGatherStore) matchOnNode(ctx context.Context, node string, match inventoryMatch) *sandboxv1beta1.Sandbox {
 	inv, err := s.src.NodeInventory(ctx, node)
 	if err != nil {
 		return nil

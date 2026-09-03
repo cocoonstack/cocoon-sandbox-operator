@@ -1134,6 +1134,11 @@ func podIPsFromStatus(podIPs []corev1.PodIP) []string {
 	return ips
 }
 
+type (
+	keyPredicate func(string) bool
+	keyCallback  func(string)
+)
+
 // hasSystemReservedPrefix reports whether a key uses a label/annotation prefix
 // reserved for the sandbox system or its extensions.
 func hasSystemReservedPrefix(key string) bool {
@@ -1171,7 +1176,7 @@ func isControllerManagedPodAnnotation(key string) bool {
 
 // filterSystemKeys copies src minus system-reserved keys, returning the copy and
 // the sorted-by-caller list of keys it carries.
-func filterSystemKeys(src map[string]string, isSystem func(string) bool, onSkip func(string)) (map[string]string, []string) {
+func filterSystemKeys(src map[string]string, isSystem keyPredicate, onSkip keyCallback) (map[string]string, []string) {
 	out := make(map[string]string, len(src))
 	var kept []string
 	for k, v := range src {
@@ -1229,7 +1234,7 @@ func setEntry(m map[string]string, key, want string) bool {
 
 // propagateKeys copies template into live, skipping system-reserved keys, and
 // returns the keys it now manages plus whether live changed.
-func propagateKeys(live, template map[string]string, isSystem func(string) bool, onSkip func(string)) ([]string, bool) {
+func propagateKeys(live, template map[string]string, isSystem keyPredicate, onSkip keyCallback) ([]string, bool) {
 	var managed []string
 	updated := false
 	for k, v := range template {
@@ -1248,7 +1253,7 @@ func propagateKeys(live, template map[string]string, isSystem func(string) bool,
 
 // prunePropagated drops previously propagated keys the template no longer carries.
 // A system key recorded by an older controller is scrubbed unless keep claims it.
-func prunePropagated(live map[string]string, recorded string, template map[string]string, isSystem, keep func(string) bool, onScrub func(string)) bool {
+func prunePropagated(live map[string]string, recorded string, template map[string]string, isSystem, keep keyPredicate, onScrub keyCallback) bool {
 	updated := false
 	for k := range strings.SplitSeq(recorded, ",") {
 		if k == "" {
