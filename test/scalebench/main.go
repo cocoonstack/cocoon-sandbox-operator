@@ -164,12 +164,11 @@ func fixture(n int) (ctrlclient.Client, *queue.SimpleSandboxQueue, []*extv1beta1
 func measureFast(ctx context.Context, n int) ([]float64, int) {
 	fc, q, claims, scheme := fixture(n)
 	r := &ctrls.SandboxClaimReconciler{
-		Client:                  fc,
-		Scheme:                  scheme,
-		WarmSandboxQueue:        q,
-		Recorder:                events.NewFakeRecorder(1 << 12),
-		Tracer:                  asmetrics.NewNoOp(),
-		MaxConcurrentReconciles: 1,
+		Client:           fc,
+		Scheme:           scheme,
+		WarmSandboxQueue: q,
+		Recorder:         events.NewFakeRecorder(1 << 12),
+		Tracer:           asmetrics.NewNoOp(),
 	}
 	lat := make([]float64, 0, n)
 	bound := 0

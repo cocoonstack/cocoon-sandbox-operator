@@ -126,14 +126,13 @@ type failure struct {
 // SandboxClaimReconciler reconciles a SandboxClaim object.
 type SandboxClaimReconciler struct {
 	client.Client
-	Scheme                  *runtime.Scheme
-	WarmSandboxQueue        *queue.SimpleSandboxQueue
-	Recorder                events.EventRecorder
-	Tracer                  asmetrics.Instrumenter
-	MaxConcurrentReconciles int
-	observedTimes           observedTimeMap
-	triggeredAdoptions      triggeredAdoptionMap
-	AllowedLabelDomains     []string
+	Scheme              *runtime.Scheme
+	WarmSandboxQueue    *queue.SimpleSandboxQueue
+	Recorder            events.EventRecorder
+	Tracer              asmetrics.Instrumenter
+	observedTimes       syncMap[types.NamespacedName, observedTimeEntry]
+	triggeredAdoptions  syncMap[types.NamespacedName, triggeredAdoptionEntry]
+	AllowedLabelDomains []string
 }
 
 //+kubebuilder:rbac:groups=extensions.agents.x-k8s.io,resources=sandboxclaims,verbs=get;list;watch;create;update;patch;delete
@@ -161,7 +160,6 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, fmt.Errorf("failed to get sandbox claim %q: %w", req.NamespacedName, err)
 	}
 
-	// Start Tracing Span
 	var initialAttrs map[string]string
 	if claim.Labels != nil {
 		if val, ok := claim.Labels[v1beta1.CreatedByLabel]; ok && val != "" {
@@ -184,7 +182,7 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	originalClaimStatus := claim.Status.DeepCopy()
 
 	claimExpired, timeLeft := r.checkExpiration(claim)
-	if claimExpired && !hasClaimExpiredCondition(claim.Status.Conditions) {
+	if claimExpired && !readyReasonIs(claim.Status.Conditions, extensionsv1beta1.ClaimExpiredReason) {
 		// Status writes cannot carry metadata, so the staged annotations must be
 		// flushed before this path returns or they are lost for good.
 		if err := flushAnnotations(); err != nil {
@@ -247,7 +245,7 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	r.computeAndSetStatus(claim, sandbox, reconcileErr, claimExpired)
 	postExpiration, _ := r.checkExpiration(claim)
-	if postExpiration && !hasClaimExpiredCondition(claim.Status.Conditions) {
+	if postExpiration && !readyReasonIs(claim.Status.Conditions, extensionsv1beta1.ClaimExpiredReason) {
 		meta.SetStatusCondition(&claim.Status.Conditions, r.computeReadyCondition(claim, sandbox, reconcileErr, true))
 		if updateErr := r.updateStatus(ctx, originalClaimStatus, claim); updateErr != nil {
 			errs := errors.Join(reconcileErr, updateErr)
@@ -278,8 +276,6 @@ func (r *SandboxClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *SandboxClaimReconciler) SetupWithManager(mgr ctrl.Manager, concurrentWorkers int) error {
-	r.MaxConcurrentReconciles = concurrentWorkers
-
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &extensionsv1beta1.SandboxClaim{}, extensionsv1beta1.WarmPoolRefField, warmPoolRefIndexer); err != nil {
 		return err
 	}
@@ -464,7 +460,6 @@ func (r *SandboxClaimReconciler) reconcileActive(ctx context.Context, claim *ext
 		return nil, fmt.Errorf("%w: %w", ErrInvalidMetadata, err)
 	}
 
-	// Fast path: try to find existing or adopt from warm pool before template lookup.
 	sandbox, err := r.getOrCreateSandbox(ctx, claim)
 	logger.V(1).Info("getOrCreateSandbox result", "sandboxFound", sandbox != nil, "err", err, "claim", claim.Name)
 	if err != nil {
@@ -474,7 +469,6 @@ func (r *SandboxClaimReconciler) reconcileActive(ctx context.Context, claim *ext
 		return sandbox, r.syncAdoptedSandboxMetadata(ctx, claim, sandbox)
 	}
 
-	// Cold path: no existing sandbox or warm pool candidate.
 	// Need template to create from scratch.
 	logger.V(1).Info("Cold path: no sandbox found, creating from template", "claim", claim.Name)
 	template, templateErr := r.getTemplate(ctx, claim)
@@ -558,7 +552,7 @@ func (r *SandboxClaimReconciler) computeReadyCondition(claim *extensionsv1beta1.
 		return notReady(claim, failure{reason: "SandboxMissing", message: "Sandbox does not exist"})
 	}
 
-	if hasSandboxExpiredCondition(sandbox.Status.Conditions) {
+	if readyReasonIs(sandbox.Status.Conditions, v1beta1.SandboxReasonExpired) {
 		return notReady(claim, failure{reason: v1beta1.SandboxReasonExpired, message: "Underlying Sandbox resource has expired independently of the Claim."})
 	}
 
@@ -1443,7 +1437,6 @@ func (r *SandboxClaimReconciler) recordControllerStartupLatency(ctx context.Cont
 	}
 }
 
-// recordSandboxCreationLatency records the sandbox creation latency.
 func (r *SandboxClaimReconciler) recordSandboxCreationLatency(sandbox *v1beta1.Sandbox, launchType string, templateName string) {
 	if sandbox == nil || sandbox.CreationTimestamp.IsZero() {
 		return
@@ -1468,7 +1461,6 @@ func (r *SandboxClaimReconciler) recordCreationLatencyMetric(ctx context.Context
 		return
 	}
 
-	// Do not record creation metric if we have already seen the ready state.
 	oldReady := meta.FindStatusCondition(oldStatus.Conditions, string(v1beta1.SandboxConditionReady))
 	if oldReady != nil && oldReady.Status == metav1.ConditionTrue {
 		// Already Ready before this reconcile; drain any entry re-added by a post-Ready UpdateFunc.
@@ -1540,7 +1532,6 @@ func (h *sandboxEventHandler) Update(ctx context.Context, e event.UpdateEvent, _
 }
 
 func (h *sandboxEventHandler) Generic(_ context.Context, _ event.GenericEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-	// Generic events are not typically used for pod lifecycle changes we care about.
 }
 
 func (h *sandboxEventHandler) Delete(ctx context.Context, e event.DeleteEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
@@ -1591,62 +1582,36 @@ func (h *warmPoolEventHandler) Delete(ctx context.Context, e event.DeleteEvent, 
 	h.sandboxQueue.RemoveQueue(namespacedWarmPoolName)
 }
 
-// observedTimeMap is a type-safe wrapper around sync.Map that only stores observedTimeEntry values.
-type observedTimeMap struct {
+// syncMap is a typed sync.Map.
+type syncMap[K comparable, V any] struct {
 	inner sync.Map
 }
 
-func (m *observedTimeMap) Load(key types.NamespacedName) (observedTimeEntry, bool) {
+func (m *syncMap[K, V]) Load(key K) (V, bool) {
 	val, ok := m.inner.Load(key)
 	if !ok {
-		return observedTimeEntry{}, false
+		var zero V
+		return zero, false
 	}
-	return val.(observedTimeEntry), true
+	return val.(V), true
 }
 
-func (m *observedTimeMap) Store(key types.NamespacedName, entry observedTimeEntry) {
+func (m *syncMap[K, V]) Store(key K, entry V) {
 	m.inner.Store(key, entry)
 }
 
-func (m *observedTimeMap) Delete(key types.NamespacedName) {
+func (m *syncMap[K, V]) Delete(key K) {
 	m.inner.Delete(key)
 }
 
-func (m *observedTimeMap) LoadOrStore(key types.NamespacedName, entry observedTimeEntry) (observedTimeEntry, bool) {
+func (m *syncMap[K, V]) LoadOrStore(key K, entry V) (V, bool) {
 	actual, loaded := m.inner.LoadOrStore(key, entry)
-	return actual.(observedTimeEntry), loaded
+	return actual.(V), loaded
 }
 
-// triggeredAdoptionMap is a type-safe wrapper around sync.Map that only
-// stores triggeredAdoptionEntry values.
-type triggeredAdoptionMap struct {
-	inner sync.Map
-}
-
-func (m *triggeredAdoptionMap) Load(key types.NamespacedName) (triggeredAdoptionEntry, bool) {
-	val, ok := m.inner.Load(key)
-	if !ok {
-		return triggeredAdoptionEntry{}, false
-	}
-	return val.(triggeredAdoptionEntry), true
-}
-
-func (m *triggeredAdoptionMap) Store(key types.NamespacedName, entry triggeredAdoptionEntry) {
-	m.inner.Store(key, entry)
-}
-
-func (m *triggeredAdoptionMap) Delete(key types.NamespacedName) {
-	m.inner.Delete(key)
-}
-
-func hasSandboxExpiredCondition(conditions []metav1.Condition) bool {
+func readyReasonIs(conditions []metav1.Condition, reason string) bool {
 	readyCondition := meta.FindStatusCondition(conditions, string(v1beta1.SandboxConditionReady))
-	return readyCondition != nil && readyCondition.Reason == v1beta1.SandboxReasonExpired
-}
-
-func hasClaimExpiredCondition(conditions []metav1.Condition) bool {
-	readyCondition := meta.FindStatusCondition(conditions, string(v1beta1.SandboxConditionReady))
-	return readyCondition != nil && readyCondition.Reason == extensionsv1beta1.ClaimExpiredReason
+	return readyCondition != nil && readyCondition.Reason == reason
 }
 
 func verifySandboxCandidate(candidate *v1beta1.Sandbox, claim *extensionsv1beta1.SandboxClaim) error {

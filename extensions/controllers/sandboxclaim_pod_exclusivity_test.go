@@ -127,7 +127,7 @@ func TestWarmPoolPodExclusivity(t *testing.T) {
 		Client: fc, Scheme: scheme,
 		WarmSandboxQueue: testQueue,
 		Recorder:         events.NewFakeRecorder(10),
-		Tracer:           asmetrics.NewNoOp(), MaxConcurrentReconciles: 1,
+		Tracer:           asmetrics.NewNoOp(),
 	}
 
 	for _, cl := range claims {

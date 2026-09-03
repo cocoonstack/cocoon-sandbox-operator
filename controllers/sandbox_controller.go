@@ -509,7 +509,6 @@ func (r *SandboxReconciler) reconcileService(ctx context.Context, sandbox *sandb
 	return service, nil
 }
 
-// clearPodNameAnnotation removes the pod name annotation from the sandbox if it exists.
 func (r *SandboxReconciler) clearPodNameAnnotation(ctx context.Context, sandbox *sandboxv1beta1.Sandbox) error {
 	if _, exists := sandbox.Annotations[sandboxv1beta1.SandboxPodNameAnnotation]; !exists {
 		return nil
@@ -905,7 +904,6 @@ func (r *SandboxReconciler) reconcilePVCs(ctx context.Context, sandbox *sandboxv
 				}
 
 			case resourceOwnedBySandbox:
-				// Already owned by this sandbox — no action needed.
 			}
 			continue
 		}

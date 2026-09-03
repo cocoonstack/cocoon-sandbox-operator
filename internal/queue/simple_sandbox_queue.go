@@ -124,7 +124,6 @@ func (q *synchronizedQueue) PopWithStrategy(pick Strategy) (SandboxKey, bool) {
 	return key, true
 }
 
-// Remove deletes the item to prevent Ghost Pods.
 func (q *synchronizedQueue) Remove(key SandboxKey) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

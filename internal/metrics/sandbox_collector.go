@@ -58,7 +58,6 @@ type SandboxCollector struct {
 	agentSandboxesDesc *prometheus.Desc
 }
 
-// NewSandboxCollector initializes a SandboxCollector.
 func NewSandboxCollector(ctx context.Context, c client.Client, logger logr.Logger) *SandboxCollector {
 	return &SandboxCollector{
 		baseCtx:            ctx,

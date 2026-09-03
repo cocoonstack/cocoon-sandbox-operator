@@ -101,12 +101,11 @@ func TestWarmPoolConcurrentClaimExclusivity(t *testing.T) {
 	fc := builder.Build()
 
 	reconciler := &SandboxClaimReconciler{
-		Client:                  fc,
-		Scheme:                  scheme,
-		WarmSandboxQueue:        testQueue,
-		Recorder:                events.NewFakeRecorder(1 << 12),
-		Tracer:                  asmetrics.NewNoOp(),
-		MaxConcurrentReconciles: claimCount,
+		Client:           fc,
+		Scheme:           scheme,
+		WarmSandboxQueue: testQueue,
+		Recorder:         events.NewFakeRecorder(1 << 12),
+		Tracer:           asmetrics.NewNoOp(),
 	}
 
 	var wg sync.WaitGroup
