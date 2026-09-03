@@ -25,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/cocoonstack/sandbox-operator/internal/version"
 )
@@ -113,6 +114,26 @@ func TestBuildInfo(t *testing.T) {
 
 	if err := testutil.CollectAndCompare(BuildInfo, strings.NewReader(expected)); err != nil {
 		t.Errorf("BuildInfo metric mismatch: %v", err)
+	}
+}
+
+func TestRegisterIsExplicitAndIdempotentlyRefused(t *testing.T) {
+	count, err := testutil.GatherAndCount(metrics.Registry, "agent_sandbox_build_info")
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("collectors registered before Register was called, count = %d", count)
+	}
+
+	if err := Register(); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if count, err = testutil.GatherAndCount(metrics.Registry, "agent_sandbox_build_info"); err != nil || count != 1 {
+		t.Errorf("after Register: count = %d, err = %v", count, err)
+	}
+	if err := Register(); err == nil {
+		t.Error("a second Register must report the duplicate registration")
 	}
 }
 

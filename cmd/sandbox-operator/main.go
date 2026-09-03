@@ -61,7 +61,12 @@ func main() {
 	flag.Parse()
 
 	if o.printVersion {
-		fmt.Println(version.Print("sandbox-operator"))
+		v, err := version.Print("sandbox-operator")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(v)
 		return
 	}
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&o.zap)))
@@ -228,6 +233,9 @@ func (o *options) run() error {
 		return fmt.Errorf("start manager: %w", err)
 	}
 
+	if err := asmetrics.Register(); err != nil {
+		return err
+	}
 	asmetrics.RegisterSandboxCollector(ctx, mgr.GetClient(), mgr.GetLogger().WithName("sandbox-collector"))
 
 	if err := o.setupControllers(mgr, instrumenter, podMutator); err != nil {

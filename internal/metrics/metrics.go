@@ -15,6 +15,7 @@
 package metrics
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -119,20 +120,24 @@ var (
 		},
 		func() float64 { return 1 },
 	)
-
-	// Registration rides on package variable initialization so no caller can observe an unregistered collector.
-	_ = func() bool {
-		metrics.Registry.MustRegister(
-			ClaimStartupLatency,
-			ClaimControllerStartupLatency,
-			SandboxCreationLatency,
-			SandboxClaimCreationTotal,
-			WarmPoolSandboxCreatedTotal,
-			BuildInfo,
-		)
-		return true
-	}()
 )
+
+// Register adds the operator's collectors to the controller-runtime registry. A binary calls it once.
+func Register() error {
+	for _, c := range []prometheus.Collector{
+		ClaimStartupLatency,
+		ClaimControllerStartupLatency,
+		SandboxCreationLatency,
+		SandboxClaimCreationTotal,
+		WarmPoolSandboxCreatedTotal,
+		BuildInfo,
+	} {
+		if err := metrics.Registry.Register(c); err != nil {
+			return fmt.Errorf("register operator metrics: %w", err)
+		}
+	}
+	return nil
+}
 
 // IncWarmPoolSandboxCreated counts one Sandbox created by the warm-pool controller.
 func IncWarmPoolSandboxCreated(namespace, warmPoolName string) {

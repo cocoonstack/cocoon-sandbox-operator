@@ -67,15 +67,19 @@ func Get() Info {
 	}
 }
 
-// Print returns version information.
-func Print(program string) string {
+// Print returns version information for program.
+func Print(program string) (string, error) {
+	t, err := template.New("version").Parse(versionInfoTmpl)
+	if err != nil {
+		return "", fmt.Errorf("parse version template: %w", err)
+	}
+
 	m := Get()
 	m.Program = program
-	t := template.Must(template.New("version").Parse(versionInfoTmpl))
 
 	var buf strings.Builder
 	if err := t.ExecuteTemplate(&buf, "version", m); err != nil {
-		panic(err)
+		return "", fmt.Errorf("render version: %w", err)
 	}
-	return strings.TrimSpace(buf.String())
+	return strings.TrimSpace(buf.String()), nil
 }
