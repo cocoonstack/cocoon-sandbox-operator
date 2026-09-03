@@ -187,6 +187,8 @@ func NewSandboxdClientFactory() SandboxdClientFactory {
 	}
 }
 
+type inventoryMatch func(inv *NodeInventory, i int) bool
+
 var _ SandboxStore = (*scatterGatherStore)(nil)
 
 // scatterGatherStore is the concrete SandboxStore: List/Get/Watch synthesize
@@ -381,7 +383,7 @@ func (s *scatterGatherStore) Watch(ctx context.Context, opts ListOptions) (watch
 // It reads the node the index last saw holding key and only sweeps the whole
 // fleet on a miss, canceling the rest of the sweep on the hit. Nil with a nil
 // error means no entry matched.
-func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, match func(inv *NodeInventory, i int) bool) (*sandboxv1beta1.Sandbox, error) {
+func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, match inventoryMatch) (*sandboxv1beta1.Sandbox, error) {
 	if node, ok := s.index.lookup(key); ok {
 		if sb := s.matchOnNode(ctx, node, match); sb != nil {
 			return sb, nil
@@ -439,7 +441,7 @@ func (s *scatterGatherStore) findEntry(ctx context.Context, op, key string, matc
 
 // matchOnNode resolves match against one node's inventory, returning nil when
 // that node is unreadable or no longer holds the entry.
-func (s *scatterGatherStore) matchOnNode(ctx context.Context, node string, match func(inv *NodeInventory, i int) bool) *sandboxv1beta1.Sandbox {
+func (s *scatterGatherStore) matchOnNode(ctx context.Context, node string, match inventoryMatch) *sandboxv1beta1.Sandbox {
 	inv, err := s.src.NodeInventory(ctx, node)
 	if err != nil {
 		return nil
@@ -706,8 +708,6 @@ func (s *StaticInventorySource) Put(inv *NodeInventory) {
 	s.inv[inv.Node] = inv.DeepCopy()
 }
 
-// Apply implements InventoryApplier: it stores the inventory and counts the
-// apply, modeling the single O(nodes) server-side-apply write per node.
 func (s *StaticInventorySource) Apply(_ context.Context, inv *NodeInventory) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -732,15 +732,12 @@ func (s *StaticInventorySource) Remove(node string) {
 	delete(s.partition, node)
 }
 
-// ListNodes returns the known node names in stable order.
 func (s *StaticInventorySource) ListNodes(_ context.Context) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return slices.Sorted(maps.Keys(s.inv)), nil
 }
 
-// NodeInventory returns a copy of one node's inventory, or an error if the node
-// is partitioned or unknown.
 func (s *StaticInventorySource) NodeInventory(_ context.Context, node string) (*NodeInventory, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -754,7 +751,6 @@ func (s *StaticInventorySource) NodeInventory(_ context.Context, node string) (*
 	return inv.DeepCopy(), nil
 }
 
-// NodeCapacity returns one node's address and pools without copying its entries.
 func (s *StaticInventorySource) NodeCapacity(_ context.Context, node string) (string, []PoolCapacity, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -800,7 +796,6 @@ func NewClientInventorySource(reader client.Reader) *ClientInventorySource {
 	return &ClientInventorySource{reader: reader}
 }
 
-// ListNodes lists NodeInventory objects (O(nodes)) and returns their names.
 func (s *ClientInventorySource) ListNodes(ctx context.Context) ([]string, error) {
 	ul := &unstructured.UnstructuredList{}
 	ul.SetGroupVersionKind(NodeInventoryGVK.GroupVersion().WithKind(NodeInventoryGVK.Kind + "List"))
@@ -815,7 +810,6 @@ func (s *ClientInventorySource) ListNodes(ctx context.Context) ([]string, error)
 	return nodes, nil
 }
 
-// NodeInventory fetches and decodes one node's NodeInventory object.
 func (s *ClientInventorySource) NodeInventory(ctx context.Context, node string) (*NodeInventory, error) {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(NodeInventoryGVK)
@@ -829,8 +823,6 @@ func (s *ClientInventorySource) NodeInventory(ctx context.Context, node string) 
 	return inv, nil
 }
 
-// NodeCapacity decodes only the address and pools fields, so the claim and
-// routing paths never pay for the node's whole entry list.
 func (s *ClientInventorySource) NodeCapacity(ctx context.Context, node string) (string, []PoolCapacity, error) {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(NodeInventoryGVK)
