@@ -22,10 +22,10 @@ github.com/chromedp/sysutil v1.0.0/go.mod h1:kgWmDdq8fTzXYcKIBqIYvRRTnYb9aNS9moA
 github.com/chzyer/logex v1.2.1/go.mod h1:JLbx6lG2kDbNRFnfkgvh4eRJRPX1QCoOIWomwysCBrQ=
 github.com/chzyer/readline v1.5.1/go.mod h1:Eh+b79XXUwfKfcPLepksvw2tcLE/Ct21YObkaSkeBlk=
 github.com/chzyer/test v1.0.0/go.mod h1:2JlltgoNkt4TW/z9V/IzDdFaMTM2JPIi26O1pF38GC8=
-github.com/cocoonstack/sandbox/protocol/wire v0.1.8 h1:4PdrD+gEFbVTUCNqOXx9LDitK5zVE2/l1gCIB59cJxA=
-github.com/cocoonstack/sandbox/protocol/wire v0.1.8/go.mod h1:jq6aEM2lbUzhoEp7Y8QP8cdSXMaLatLRCVgk0adTAxc=
-github.com/cocoonstack/sandbox/sdk/go v0.1.8 h1:hOMFEACKyfdNyArZVcwN6omWIApGQwktyzIVQDQ6m1c=
-github.com/cocoonstack/sandbox/sdk/go v0.1.8/go.mod h1:5SJjDLPFhg798VgH+6fshYCNz7kibhxFe1uNWdZ+4dg=
+github.com/cocoonstack/sandbox/protocol/wire v0.1.9 h1:dTEuiytkRNpj40/Xnjezz4FnO0pPtxAWjdfjFQlsOas=
+github.com/cocoonstack/sandbox/protocol/wire v0.1.9/go.mod h1:jq6aEM2lbUzhoEp7Y8QP8cdSXMaLatLRCVgk0adTAxc=
+github.com/cocoonstack/sandbox/sdk/go v0.1.9 h1:2jX8Y8W389vuHaULkaEY/XuZh4Wa+kDBNvbl+yMRYHo=
+github.com/cocoonstack/sandbox/sdk/go v0.1.9/go.mod h1:iOQVpP/aZCkI4rrPt99U2eWiHw07P/acyhNbD1b3EZM=
 github.com/coreos/go-semver v0.3.1 h1:yi21YpKnrx1gt5R+la8n5WgS0kCrsPp33dmEyHReZr4=
 github.com/coreos/go-semver v0.3.1/go.mod h1:irMmmIw/7yzSRPWryHsK7EYSg09caPQL03VsM8rvUec=
 github.com/coreos/go-systemd/v22 v22.7.0 h1:LAEzFkke61DFROc7zNLX/WA2i5J8gYqe0rSj9KI28KA=
