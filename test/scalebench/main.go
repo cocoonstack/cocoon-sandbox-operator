@@ -68,14 +68,6 @@ var (
 	maxPasses = flag.Int("max-passes", 8, "max reconcile passes per claim before giving up")
 )
 
-func newScheme() *runtime.Scheme {
-	s := runtime.NewScheme()
-	benchutil.Must(sandboxv1beta1.AddToScheme(s))
-	benchutil.Must(extv1beta1.AddToScheme(s))
-	benchutil.Must(corev1.AddToScheme(s))
-	return s
-}
-
 // warmSandbox builds one Ready, warm-pool-owned, adoptable Sandbox.
 func warmSandbox(idx int, poolHash, tmplHash string, poolUID types.UID) *sandboxv1beta1.Sandbox {
 	return &sandboxv1beta1.Sandbox{
@@ -121,7 +113,7 @@ func claim(idx int) *extv1beta1.SandboxClaim {
 // fixture returns a fake client seeded with N warm sandboxes + N claims, plus the
 // warm-pool queue populated with the N sandbox keys (as the event handler would).
 func fixture(n int) (ctrlclient.Client, *queue.SimpleSandboxQueue, []*extv1beta1.SandboxClaim, *runtime.Scheme) {
-	scheme := newScheme()
+	scheme := benchutil.NewScheme(corev1.AddToScheme)
 	poolHash := hash.Name(poolName)
 	tmplHash := ctrls.SandboxTemplateRefHash(tmplName)
 	poolUID := types.UID("pool-uid")

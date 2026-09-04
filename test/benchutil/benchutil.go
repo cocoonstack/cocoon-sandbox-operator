@@ -9,14 +9,30 @@ import (
 	"slices"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 )
+
+func NewScheme(extra ...func(*runtime.Scheme) error) *runtime.Scheme {
+	s := runtime.NewScheme()
+	Must(sandboxv1beta1.AddToScheme(s))
+	Must(extv1beta1.AddToScheme(s))
+	for _, add := range extra {
+		Must(add(s))
+	}
+	return s
+}
+
+func EnsureNamespace(ctx context.Context, cl client.Client, name string, labels map[string]string) {
+	_ = cl.Create(ctx, &corev1.Namespace{Name: name, Labels: labels})
+}
 
 // Must exits the harness when err is non-nil.
 func Must(err error) {

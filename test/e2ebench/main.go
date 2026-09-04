@@ -95,7 +95,7 @@ func main() {
 	prodBefore := podCount(ctx, *prodNS, *node)
 	fmt.Printf("[prod] baseline: %d desktop pods on %s\n", prodBefore, *node)
 
-	ensureNS(ctx)
+	benchutil.EnsureNamespace(ctx, cl, *ns, map[string]string{runLabel: runVal})
 	ensureTemplate(ctx)
 
 	fmt.Printf("[fill] creating pool %s replicas=%d on %s\n", poolName, *poolSize, *node)
@@ -143,10 +143,6 @@ func main() {
 	if !pass {
 		os.Exit(1)
 	}
-}
-
-func ensureNS(ctx context.Context) {
-	_ = cl.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: *ns, Labels: map[string]string{runLabel: runVal}}})
 }
 
 func ensureTemplate(ctx context.Context) {
