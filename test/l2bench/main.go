@@ -34,12 +34,10 @@ import (
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	sandboxv1beta1 "github.com/cocoonstack/sandbox-operator/api/v1beta1"
 	extv1beta1 "github.com/cocoonstack/sandbox-operator/extensions/api/v1beta1"
 	"github.com/cocoonstack/sandbox-operator/pkg/sandboxd"
 	"github.com/cocoonstack/sandbox-operator/pkg/scale"
@@ -115,13 +113,6 @@ func (s sliceInventory) LiveDeliveries(context.Context) ([]scale.Delivery, error
 	return []scale.Delivery(s), nil
 }
 
-func newScheme() *runtime.Scheme {
-	s := runtime.NewScheme()
-	benchutil.Must(sandboxv1beta1.AddToScheme(s))
-	benchutil.Must(extv1beta1.AddToScheme(s))
-	return s
-}
-
 func newClaim(name string) *extv1beta1.SandboxClaim {
 	return &extv1beta1.SandboxClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
@@ -166,7 +157,7 @@ func injectAndReconcileOrphans(ctx context.Context, fs *fakeSandboxd, orphans in
 		objs = append(objs, newClaim(fmt.Sprintf("orphan-%d", i)))
 	}
 	fc := fake.NewClientBuilder().
-		WithScheme(newScheme()).
+		WithScheme(benchutil.NewScheme()).
 		WithObjects(objs...).
 		WithStatusSubresource(&extv1beta1.SandboxClaim{}).
 		Build()

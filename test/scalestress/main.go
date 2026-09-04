@@ -97,7 +97,7 @@ func main() {
 		benchutil.Must(fmt.Errorf("refusing to run: prod baseline non-positive (%d)", prodBase))
 	}
 
-	ensureNS(ctx)
+	benchutil.EnsureNamespace(ctx, cl, *ns, map[string]string{runLabel: runVal})
 	ensureTemplate(ctx, hosts)
 
 	result := map[string]any{
@@ -228,10 +228,6 @@ func main() {
 	if abort != "" {
 		os.Exit(1)
 	}
-}
-
-func ensureNS(ctx context.Context) {
-	_ = cl.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: *ns, Labels: map[string]string{runLabel: runVal}}})
 }
 
 func ensureTemplate(ctx context.Context, hosts []string) {

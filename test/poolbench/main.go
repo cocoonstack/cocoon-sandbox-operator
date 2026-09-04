@@ -91,7 +91,7 @@ func main() {
 		return
 	}
 
-	ensureNS(ctx)
+	benchutil.EnsureNamespace(ctx, cl, *ns, map[string]string{"cocoon-e2e-run": "g0129-pool"})
 	ensureTemplate(ctx)
 
 	fill := fillPool(ctx, *poolSize)
@@ -117,10 +117,6 @@ func main() {
 	b, _ := json.MarshalIndent(result, "", "  ")
 	_ = os.WriteFile(*out, b, 0o644)
 	fmt.Printf("wrote %s\n", *out)
-}
-
-func ensureNS(ctx context.Context) {
-	_ = cl.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: *ns, Labels: map[string]string{"cocoon-e2e-run": "g0129-pool"}}})
 }
 
 func ensureTemplate(ctx context.Context) {
