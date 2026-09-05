@@ -5,17 +5,21 @@ move any of these forward are welcome.
 
 ## Near term
 
-- **Per-pool hypervisor engine axis (`ch` | `fc`).** sandboxd already keys
-  warm pools by engine; surface the axis through
-  `SandboxTemplate`/`SandboxWarmPool` and the warm-pool driver so a single
-  node can run mixed-engine pools under operator control.
-- **Read-after-write routing for L3 claims.** Single-sandbox lookups already
-  avoid materializing the cluster-wide list, but a new claim is invisible until
-  its node republishes `NodeInventory`, and a miss still scans every inventory
-  entry. Keep a bounded claim-time owner index and fall back to authoritative
-  node lookup so lifecycle calls work immediately and lookup is `O(1)`.
-- **Engine-labeled pool metrics.** `sandboxd_pool_*` series currently collapse
-  pools that share template/net/size but differ in engine.
+- **Per-pool hypervisor engine axis (`ch` | `fc`).** sandboxd keys warm pools
+  by `(template, net, size)` and every sandbox on a node boots with the
+  hypervisor cocoon is configured for; there is no engine axis anywhere yet.
+  It starts in sandboxd (pool config, `PoolKey`, metrics), then reaches
+  `NodeInventory`, `SandboxTemplate`/`SandboxWarmPool` and the warm-pool
+  driver so a single node can run mixed-engine pools under operator control.
+- **Read-after-write routing for L3 claims.** A bounded owner index already
+  remembers the node at claim time and on every hit, so a lookup reads one
+  node's inventory and sweeps the fleet only on a miss. What remains is the
+  window before that node republishes `NodeInventory`: a claim is invisible
+  to `get` until then. Fall back to an authoritative node lookup in that
+  window so lifecycle calls work immediately after `create`.
+- **Engine-labeled pool metrics.** Once the engine axis exists, `sandboxd_pool_*`
+  and the operator's pool series need it as a label; today both key on
+  template/net/size only.
 
 ## Medium term
 
@@ -26,9 +30,9 @@ move any of these forward are welcome.
 - **Aggregated-apiserver HA.** Multi-replica scatter-gather with consistent
   claim routing (today: multiple replicas serve reads; claims prefer a single
   writer).
-- **Watch as merged per-node streams.** Serve `watch` on
-  `sandboxes.agents.x-k8s.io` from live per-node inventory streams rather than
-  inventory re-list.
+- **Watch as merged per-node streams.** `watch` on `sandboxes.agents.x-k8s.io`
+  is served today by re-listing the inventory and diffing against what the
+  watcher has seen; serve it from live per-node inventory streams instead.
 
 ## Medium term (continued)
 
